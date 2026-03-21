@@ -273,7 +273,7 @@ export function MovementHistoryPage() {
                       <td style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {tx.itemname || (tx as any).item_name || '—'}
                       </td>
-                      <td style={{ color: 'var(--text-muted)' }}>{tx.group_name.split('-')[0]}</td>
+                      <td style={{ color: 'var(--text-muted)' }}>{(tx.group_name ?? '').split('-')[0]}</td>
                       <td className="text-right">
                         {Number(tx.in_qty) > 0 && (
                           <span className="text-green-600">+{formatNumber(Number(tx.in_qty), 2)}</span>

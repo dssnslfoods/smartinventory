@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
-  BarChart2, AlertCircle, RefreshCw, ShoppingCart, Download, Filter,
-  TrendingUp, TrendingDown, Minus, Clock, Package,
+  BarChart2, RefreshCw, ShoppingCart, Download, Filter, Clock,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -318,11 +317,6 @@ function SlowMovingTab() {
     })), 'Slow_Moving_Items');
   };
 
-  const statusLabel = (s: string) => ({
-    dead_stock:   'Dead Stock (≥180 days / never)',
-    slow_moving:  'Slow Moving (90–179 days)',
-    normal:       'Normal (<90 days)',
-  }[s] ?? s);
 
   return (
     <div className="space-y-6">
@@ -547,7 +541,7 @@ function TurnoverTab() {
                 label={{ value: 'Turnover Ratio (×)', position: 'insideBottomRight', offset: -10, fontSize: 11 }} />
               <YAxis type="category" dataKey="item_code" width={90} stroke="var(--text-muted)" fontSize={10} />
               <Tooltip {...tooltipStyle}
-                formatter={(val: any, name: string) =>
+                formatter={(val: any, name?: string) =>
                   name === 'turnover_ratio' ? [`${Number(val).toFixed(1)}×`, 'Turnover'] : [`${Number(val).toFixed(0)} days`, 'Days on Hand']
                 }
               />
