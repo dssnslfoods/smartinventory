@@ -13,6 +13,9 @@ import { ValuationPage } from '@/pages/ValuationPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { ImportPage } from '@/pages/admin/ImportPage';
 import { SettingsPage } from '@/pages/admin/SettingsPage';
+import SuppliersPage from '@/pages/procurement/SuppliersPage';
+import PurchaseOrdersPage from '@/pages/procurement/PurchaseOrdersPage';
+import GoodsInTransitPage from '@/pages/procurement/GoodsInTransitPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,6 +76,9 @@ function App() {
                     <Route path="/alerts" element={<AlertsPage />} />
                     <Route path="/valuation" element={<ValuationPage />} />
                     <Route path="/reports"   element={<ReportsPage />} />
+                    <Route path="/procurement/suppliers" element={<SuppliersPage />} />
+                    <Route path="/procurement/orders"   element={<PurchaseOrdersPage />} />
+                    <Route path="/procurement/transit"  element={<GoodsInTransitPage />} />
                     <Route path="/admin/import" element={<ImportPage />} />
                     <Route path="/admin/settings" element={<SettingsPage />} />
                   </Routes>

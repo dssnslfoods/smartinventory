@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type {
   StockOnHand, InventoryTransaction, MovementMonthly,
@@ -6,6 +6,8 @@ import type {
   StockAlertView, ABCItem, SlowMovingItem,
   InventoryTurnover, ReorderSuggestion,
   Warehouse, ItemGroup,
+  Supplier, PurchaseOrder, PurchaseOrderLine,
+  GoodsInTransit, StockPosition,
 } from '@/types/database';
 
 // Supabase default max rows = 1,000 — always set an explicit limit above data size
@@ -399,6 +401,231 @@ export function useDataDateRange() {
         maxDate:           maxRes.data?.[0]?.doc_date ?? null,
         totalTransactions: countRes.count ?? 0,
       };
+    },
+  });
+}
+
+// ============ Suppliers ============
+export function useSuppliers(filters?: { isActive?: boolean; search?: string }) {
+  return useQuery({
+    queryKey: ['suppliers', filters],
+    queryFn: async () => {
+      let query = supabase.from('suppliers').select('*');
+      if (filters?.isActive !== undefined) query = query.eq('is_active', filters.isActive);
+      if (filters?.search) {
+        query = query.or(`supplier_code.ilike.%${filters.search}%,supplier_name.ilike.%${filters.search}%`);
+      }
+      const { data, error } = await query.order('supplier_name');
+      if (error) throw error;
+      return (data ?? []) as Supplier[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpsertSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (supplier: Partial<Supplier> & { supplier_code: string; supplier_name: string }) => {
+      const { error } = await supabase
+        .from('suppliers')
+        .upsert(supplier, { onConflict: 'supplier_code' });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
+  });
+}
+
+export function useDeleteSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (supplier_code: string) => {
+      const { error } = await supabase
+        .from('suppliers')
+        .update({ is_active: false })
+        .eq('supplier_code', supplier_code);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
+  });
+}
+
+// ============ Purchase Orders ============
+export function usePurchaseOrders(filters?: {
+  status?: string;
+  supplierCode?: string;
+  search?: string;
+}) {
+  return useQuery({
+    queryKey: ['purchaseOrders', filters],
+    queryFn: async () => {
+      let query = supabase
+        .from('purchase_orders')
+        .select('*, suppliers(supplier_name)');
+      if (filters?.status)       query = query.eq('status',        filters.status);
+      if (filters?.supplierCode) query = query.eq('supplier_code', filters.supplierCode);
+      if (filters?.search)       query = query.ilike('po_number',  `%${filters.search}%`);
+      const { data, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(1_000);
+      if (error) throw error;
+      return (data ?? []).map((row: any) => ({
+        ...row,
+        supplier_name: row.suppliers?.supplier_name ?? '',
+      })) as PurchaseOrder[];
+    },
+  });
+}
+
+export function usePurchaseOrderLines(poNumber?: string) {
+  return useQuery({
+    queryKey: ['poLines', poNumber],
+    queryFn: async () => {
+      let query = supabase
+        .from('purchase_order_lines')
+        .select('*, items(itemname, uom), warehouses(whs_name)');
+      if (poNumber) query = query.eq('po_number', poNumber);
+      const { data, error } = await query.order('id');
+      if (error) throw error;
+      return (data ?? []).map((row: any) => ({
+        ...row,
+        itemname: row.items?.itemname ?? '',
+        uom:      row.items?.uom     ?? '',
+        whs_name: row.warehouses?.whs_name ?? '',
+      })) as PurchaseOrderLine[];
+    },
+    enabled: !!poNumber,
+  });
+}
+
+export function useCreatePurchaseOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      po: Omit<PurchaseOrder, 'created_at' | 'updated_at'>;
+      lines: Omit<PurchaseOrderLine, 'id'>[];
+    }) => {
+      const { error: poErr } = await supabase
+        .from('purchase_orders')
+        .insert(payload.po);
+      if (poErr) throw poErr;
+
+      if (payload.lines.length > 0) {
+        const { error: lineErr } = await supabase
+          .from('purchase_order_lines')
+          .insert(payload.lines);
+        if (lineErr) throw lineErr;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      qc.invalidateQueries({ queryKey: ['goodsInTransit'] });
+    },
+  });
+}
+
+export function useUpdatePOStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      po_number: string;
+      status: PurchaseOrder['status'];
+      tracking_number?: string;
+      expected_arrival?: string;
+    }) => {
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({
+          status:           payload.status,
+          tracking_number:  payload.tracking_number,
+          expected_arrival: payload.expected_arrival,
+        })
+        .eq('po_number', payload.po_number);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      qc.invalidateQueries({ queryKey: ['goodsInTransit'] });
+      qc.invalidateQueries({ queryKey: ['stockAlerts'] });
+      qc.invalidateQueries({ queryKey: ['reorderSuggestions'] });
+    },
+  });
+}
+
+// ============ Goods In Transit ============
+export function useGoodsInTransit(filters?: {
+  warehouse?: string;
+  itemCode?: string;
+  arrivalStatus?: string;
+}) {
+  return useQuery({
+    queryKey: ['goodsInTransit', filters],
+    queryFn: async () => {
+      let query = supabase.from('v_goods_in_transit').select('*');
+      if (filters?.warehouse)     query = query.eq('warehouse',      filters.warehouse);
+      if (filters?.itemCode)      query = query.eq('item_code',      filters.itemCode);
+      if (filters?.arrivalStatus) query = query.eq('arrival_status', filters.arrivalStatus);
+      const { data, error } = await query
+        .order('days_until_arrival', { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as GoodsInTransit[];
+    },
+  });
+}
+
+// ============ Stock Position (on-hand + transit combined) ============
+export function useStockPosition(filters?: {
+  warehouse?: string;
+  groupCode?: number;
+  search?: string;
+}) {
+  return useQuery({
+    queryKey: ['stockPosition', filters],
+    queryFn: async () => {
+      let query = supabase.from('v_stock_position').select('*');
+      if (filters?.warehouse) query = query.eq('warehouse',  filters.warehouse);
+      if (filters?.groupCode) query = query.eq('group_code', filters.groupCode);
+      if (filters?.search) {
+        query = query.or(`item_code.ilike.%${filters.search}%,itemname.ilike.%${filters.search}%`);
+      }
+      const { data, error } = await query
+        .eq('is_active', true)
+        .order('projected_value', { ascending: false })
+        .limit(LIMIT_STOCK);
+      if (error) throw error;
+      return (data ?? []) as StockPosition[];
+    },
+  });
+}
+
+// ============ Receive Goods (PO → inventory_transaction) ============
+export function useReceivePOLine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      po_number: string;
+      item_code: string;
+      warehouse: string;
+      qty: number;
+      unit_price?: number;
+    }) => {
+      const { error } = await supabase.rpc('receive_po_line', {
+        p_po_number:  payload.po_number,
+        p_item_code:  payload.item_code,
+        p_warehouse:  payload.warehouse,
+        p_qty:        payload.qty,
+        p_unit_price: payload.unit_price ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      qc.invalidateQueries({ queryKey: ['poLines'] });
+      qc.invalidateQueries({ queryKey: ['goodsInTransit'] });
+      qc.invalidateQueries({ queryKey: ['stockOnHand'] });
+      qc.invalidateQueries({ queryKey: ['stockPosition'] });
+      qc.invalidateQueries({ queryKey: ['stockAlerts'] });
+      qc.invalidateQueries({ queryKey: ['kpi'] });
     },
   });
 }

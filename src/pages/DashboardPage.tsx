@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import {
   DollarSign, Package, AlertTriangle, Clock, ArrowLeftRight,
-  TrendingUp, TrendingDown, CalendarRange, Activity,
+  TrendingUp, TrendingDown, CalendarRange, Activity, Truck,
 } from 'lucide-react';
 import {
   ComposedChart, PieChart, BarChart,
@@ -11,6 +11,7 @@ import {
 import {
   useKPI, useStockOnHand, useMovementMonthly,
   useTransactions, useStockAlerts, useDataDateRange,
+  useGoodsInTransit,
 } from '@/hooks/useSupabaseQuery';
 import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
@@ -50,6 +51,7 @@ export function DashboardPage() {
   const { data: alerts } = useStockAlerts();
   const { data: recentTx } = useTransactions({ page: 0, pageSize: 200 });
   const { data: dataDateRange } = useDataDateRange();
+  const { data: transitItems = [] } = useGoodsInTransit();
 
   // === Derived data ===
   const dateRange = useMemo(() => {
@@ -119,6 +121,13 @@ export function DashboardPage() {
     return { ...counts, total: (alerts ?? []).length };
   }, [alerts]);
 
+  const transitSummary = useMemo(() => {
+    const overdue      = transitItems.filter(t => t.arrival_status === 'overdue').length;
+    const arrivingSoon = transitItems.filter(t => t.arrival_status === 'arriving_soon' || t.arrival_status === 'arriving_today').length;
+    const totalValue   = transitItems.reduce((s, t) => s + Number(t.pending_value), 0);
+    return { total: transitItems.length, overdue, arrivingSoon, totalValue };
+  }, [transitItems]);
+
   const mom = useMemo(() => {
     if (!monthlyData || monthlyData.length < 2) return null;
     const curr = monthlyData[monthlyData.length - 1];
@@ -170,7 +179,7 @@ export function DashboardPage() {
       </div>
 
       {/* ====== Section 2: Executive KPI Row ====== */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <KPICard
           icon={<DollarSign size={20} />}
           label="มูลค่าคงคลังรวม"
@@ -203,6 +212,13 @@ export function DashboardPage() {
           value={formatNumber(kpi?.criticalAlerts ?? 0)}
           sublabel="Critical Alerts"
           color={(kpi?.criticalAlerts ?? 0) > 0 ? '#C62828' : '#2E7D32'}
+        />
+        <KPICard
+          icon={<Truck size={20} />}
+          label="ระหว่างขนส่ง"
+          value={formatNumber(transitSummary.total)}
+          sublabel={transitSummary.overdue > 0 ? `เลยกำหนด ${transitSummary.overdue} รายการ` : 'Goods in Transit'}
+          color={transitSummary.overdue > 0 ? '#E65100' : '#00897B'}
         />
         <KPICard
           icon={<Clock size={20} />}

@@ -10,18 +10,25 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Building2,
+  ShoppingCart,
+  Truck,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { useStockAlerts } from '@/hooks/useSupabaseQuery';
+import { useStockAlerts, useGoodsInTransit } from '@/hooks/useSupabaseQuery';
 import { cn } from '@/utils/format';
 
 const menuItems = [
-  { path: '/',          label: 'Dashboard',        icon: LayoutDashboard },
-  { path: '/stock',     label: 'Stock On-Hand',    icon: Package },
-  { path: '/movement',  label: 'Movement History', icon: ArrowLeftRight },
-  { path: '/alerts',   label: 'Low Stock Alerts', icon: AlertTriangle },
-  { path: '/valuation', label: 'Cost & Valuation', icon: DollarSign },
-  { path: '/reports',  label: 'Management Reports', icon: BarChart2 },
+  { path: '/',          label: 'Dashboard',           icon: LayoutDashboard },
+  { path: '/stock',     label: 'Stock On-Hand',       icon: Package },
+  { path: '/movement',  label: 'Movement History',    icon: ArrowLeftRight },
+  { path: '/alerts',    label: 'Low Stock Alerts',    icon: AlertTriangle },
+  { path: '/valuation', label: 'Cost & Valuation',    icon: DollarSign },
+  { path: '/reports',   label: 'Management Reports',  icon: BarChart2 },
+  { type: 'divider' as const },
+  { path: '/procurement/suppliers',  label: 'Suppliers',          icon: Building2 },
+  { path: '/procurement/orders',     label: 'Purchase Orders',    icon: ShoppingCart },
+  { path: '/procurement/transit',    label: 'Goods in Transit',   icon: Truck },
   { type: 'divider' as const },
   { path: '/admin/import',    label: 'Data Import', icon: Upload },
   { path: '/admin/settings',  label: 'Settings',    icon: Settings },
@@ -30,8 +37,10 @@ const menuItems = [
 export function Sidebar() {
   const location = useLocation();
   const { sidebarOpen, toggleSidebar } = useAppStore();
-  const { data: alerts } = useStockAlerts();
-  const criticalCount = alerts?.filter(a => a.status === 'critical').length ?? 0;
+  const { data: alerts }  = useStockAlerts();
+  const { data: transit } = useGoodsInTransit();
+  const criticalCount  = alerts?.filter(a => a.status === 'critical').length ?? 0;
+  const overdueTransit = transit?.filter(t => t.arrival_status === 'overdue').length ?? 0;
 
   return (
     <aside
@@ -71,7 +80,9 @@ export function Sidebar() {
             : location.pathname.startsWith(item.path);
 
           const Icon = item.icon;
-          const showBadge = item.path === '/alerts' && criticalCount > 0;
+          const showBadge = (item.path === '/alerts' && criticalCount > 0) ||
+                            (item.path === '/procurement/transit' && overdueTransit > 0);
+          const badgeCount = item.path === '/alerts' ? criticalCount : overdueTransit;
 
           return (
             <Link
@@ -90,14 +101,14 @@ export function Sidebar() {
                   <span>{item.label}</span>
                   {showBadge && (
                     <span className="ml-auto bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                      {criticalCount}
+                      {badgeCount}
                     </span>
                   )}
                 </>
               )}
               {!sidebarOpen && showBadge && (
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
-                  {criticalCount}
+                  {badgeCount}
                 </span>
               )}
             </Link>

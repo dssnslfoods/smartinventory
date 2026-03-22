@@ -132,6 +132,8 @@ export interface StockAlertView {
   max_level: number | null;
   daily_avg_out: number;
   days_remaining: number | null;
+  transit_qty: number;
+  nearest_arrival: string | null;
   status: StockStatus;
 }
 
@@ -196,6 +198,7 @@ export interface ReorderSuggestion {
   max_level: number | null;
   daily_avg_out: number;
   days_remaining: number | null;
+  transit_qty: number;
   suggested_order_qty: number;
   stock_value: number;
   moving_avg: number;
@@ -229,6 +232,110 @@ export interface KPIData {
   activeItems: number;
   criticalAlerts: number;
   lastSync: string | null;
+}
+
+// ── Goods in Transit / Purchase Orders ───────────────────────────────────────
+
+export type POStatus = 'draft' | 'confirmed' | 'shipped' | 'in_transit' | 'customs' | 'arrived' | 'cancelled';
+export type POLineStatus = 'pending' | 'partial' | 'complete' | 'cancelled';
+export type ShippingMethod = 'Sea' | 'Air' | 'Land' | 'Courier';
+export type ArrivalStatus = 'overdue' | 'arriving_today' | 'arriving_soon' | 'on_schedule' | 'unknown';
+
+export interface Supplier {
+  supplier_code: string;
+  supplier_name: string;
+  country: string | null;
+  default_lead_days: number;
+  contact_name: string | null;
+  contact_email: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseOrder {
+  po_number: string;
+  supplier_code: string;
+  order_date: string;
+  expected_arrival: string | null;
+  actual_arrival: string | null;
+  status: POStatus;
+  shipping_method: ShippingMethod | null;
+  tracking_number: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  supplier_name?: string;
+}
+
+export interface PurchaseOrderLine {
+  id: number;
+  po_number: string;
+  item_code: string;
+  warehouse: string;
+  ordered_qty: number;
+  received_qty: number;
+  unit_price: number;
+  status: POLineStatus;
+  notes: string | null;
+  // Joined fields
+  itemname?: string;
+  uom?: string;
+  whs_name?: string;
+}
+
+/** v_goods_in_transit — active PO lines currently in transit */
+export interface GoodsInTransit {
+  line_id: number;
+  po_number: string;
+  supplier_code: string;
+  supplier_name: string;
+  origin_country: string | null;
+  order_date: string;
+  expected_arrival: string | null;
+  actual_arrival: string | null;
+  po_status: POStatus;
+  shipping_method: ShippingMethod | null;
+  tracking_number: string | null;
+  item_code: string;
+  itemname: string;
+  foreign_name: string | null;
+  uom: string;
+  warehouse: string;
+  whs_name: string;
+  ordered_qty: number;
+  received_qty: number;
+  pending_qty: number;
+  unit_price: number;
+  pending_value: number;
+  line_status: POLineStatus;
+  days_until_arrival: number | null;
+  arrival_status: ArrivalStatus;
+}
+
+/** v_stock_position — on-hand + in-transit combined */
+export interface StockPosition {
+  item_code: string;
+  itemname: string;
+  foreign_name: string | null;
+  warehouse: string;
+  whs_name: string;
+  whs_type: string;
+  group_code: number;
+  group_name: string;
+  current_stock: number;
+  uom: string;
+  moving_avg: number;
+  std_cost: number;
+  stock_value: number;
+  transit_qty: number;
+  transit_value: number;
+  nearest_arrival: string | null;
+  projected_stock: number;
+  projected_value: number;
+  is_active: boolean;
 }
 
 // ── Static Constants ──────────────────────────────────────────────────────────
