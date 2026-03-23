@@ -103,6 +103,7 @@ export function useTransactions(filters?: {
 export function useMovementMonthly(filters?: {
   warehouse?: string;
   groupName?: string;
+  groupCode?: number;
   months?: number;
 }) {
   const months = filters?.months ?? 12;
@@ -120,8 +121,9 @@ export function useMovementMonthly(filters?: {
         .select('*')
         .gte('month', cutoffStr);
 
-      if (filters?.warehouse) query = query.eq('warehouse',  filters.warehouse);
-      if (filters?.groupName) query = query.eq('group_name', filters.groupName);
+      if (filters?.warehouse)  query = query.eq('warehouse',   filters.warehouse);
+      if (filters?.groupName)  query = query.eq('group_name',  filters.groupName);
+      if (filters?.groupCode)  query = query.eq('group_code',  filters.groupCode);
 
       const { data, error } = await query
         .order('month', { ascending: true })

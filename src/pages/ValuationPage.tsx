@@ -5,7 +5,7 @@ import {
   AreaChart, Area,
 } from 'recharts';
 import { useStockOnHand, useMovementMonthly } from '@/hooks/useSupabaseQuery';
-import { formatCurrency, formatNumber, formatDate } from '@/utils/format';
+import { formatCurrency, formatNumber, formatDate, formatCompact } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 
@@ -64,19 +64,29 @@ export function ValuationPage() {
     return Array.from(map.values()).sort((a, b) => b.maValue - a.maValue);
   }, [stockData]);
 
-  // Price variance (top items)
+  // Price variance (top items) — deduplicate by item_code across warehouses
   const varianceData = useMemo(() => {
     if (!stockData) return [];
-    return [...stockData]
-      .filter(s => Number(s.std_cost) > 0)
-      .map(s => ({
-        item_code: s.item_code,
-        itemname: s.itemname,
-        moving_avg: Number(s.moving_avg),
-        std_cost: Number(s.std_cost),
-        variance: ((Number(s.moving_avg) - Number(s.std_cost)) / Number(s.std_cost)) * 100,
-        stock: Number(s.current_stock),
-      }))
+    const map = new Map<string, { item_code: string; itemname: string; moving_avg: number; std_cost: number; variance: number; stock: number }>();
+    for (const s of stockData) {
+      if (Number(s.std_cost) <= 0) continue;
+      const existing = map.get(s.item_code);
+      if (existing) {
+        existing.stock += Number(s.current_stock);
+      } else {
+        const moving_avg = Number(s.moving_avg);
+        const std_cost = Number(s.std_cost);
+        map.set(s.item_code, {
+          item_code: s.item_code,
+          itemname: s.itemname,
+          moving_avg,
+          std_cost,
+          variance: ((moving_avg - std_cost) / std_cost) * 100,
+          stock: Number(s.current_stock),
+        });
+      }
+    }
+    return Array.from(map.values())
       .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
       .slice(0, 15);
   }, [stockData]);
@@ -167,7 +177,7 @@ export function ValuationPage() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={groupBreakdown} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis type="number" tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} stroke="var(--text-muted)" fontSize={12} />
+                <XAxis type="number" tickFormatter={(v) => formatCompact(Number(v))} stroke="var(--text-muted)" fontSize={12} />
                 <YAxis type="category" dataKey="group" width={60} stroke="var(--text-muted)" fontSize={11} tickFormatter={(v) => v.split('-')[0]} />
                 <Tooltip formatter={(val?: number | string) => formatCurrency(Number(val ?? 0))} />
                 <Legend />
@@ -191,7 +201,7 @@ export function ValuationPage() {
                   stroke="var(--text-muted)"
                   fontSize={12}
                 />
-                <YAxis tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} stroke="var(--text-muted)" fontSize={12} />
+                <YAxis tickFormatter={(v) => formatCompact(Number(v))} stroke="var(--text-muted)" fontSize={12} />
                 <Tooltip formatter={(val?: number | string) => formatCurrency(Number(val ?? 0))} labelFormatter={(v) => formatDate(String(v))} />
                 <Area type="monotone" dataKey="amount" stroke="#00897B" fill="#00897B" fillOpacity={0.15} />
               </AreaChart>

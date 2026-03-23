@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { useTransactions, useMovementMonthly } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
-import { formatNumber, formatCurrency, formatDate } from '@/utils/format';
+import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS, TRANS_TYPES } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 
@@ -34,6 +34,7 @@ export function MovementHistoryPage() {
 
   const { data: monthlyData } = useMovementMonthly({
     warehouse: warehouse || undefined,
+    groupCode: groupCode,
     months: 24,
   });
 
@@ -126,11 +127,7 @@ export function MovementHistoryPage() {
               <YAxis
                 stroke="var(--text-muted)"
                 fontSize={11}
-                tickFormatter={(v) => {
-                  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-                  if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
-                  return String(v);
-                }}
+                tickFormatter={(v) => formatCompact(Number(v))}
               />
               <Tooltip
                 contentStyle={{ backgroundColor: 'var(--bg-card, #fff)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13 }}

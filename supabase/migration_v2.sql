@@ -218,20 +218,21 @@ GROUP BY
   w.whs_name, w.whs_type;
 
 -- v_movement_monthly: monthly in/out summary for trend charts
+-- Aggregates at month+warehouse+direction level (not item level) to keep row count low
+-- (Supabase PostgREST has a default 1000-row limit; item-level grouping can exceed this)
 CREATE OR REPLACE VIEW v_movement_monthly AS
 SELECT
   DATE_TRUNC('month', t.doc_date)::DATE AS month,
-  t.item_code,
   t.warehouse,
   t.direction,
+  t.group_code,
   g.group_name,
   SUM(t.in_qty)   AS total_in,
   SUM(t.out_qty)  AS total_out,
   SUM(t.amount)   AS total_amount,
   COUNT(*)        AS transaction_count
 FROM inventory_transactions t
-JOIN items       i ON i.item_code  = t.item_code
-JOIN item_groups g ON g.group_code = i.group_code
+LEFT JOIN item_groups g ON g.group_code = t.group_code
 GROUP BY 1, 2, 3, 4, 5;
 
 -- v_transactions: full transaction detail with joined names (replaces raw table query)

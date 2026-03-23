@@ -105,9 +105,9 @@ export interface StockOnHand {
 /** v_movement_monthly — monthly movement aggregates for trend charts */
 export interface MovementMonthly {
   month: string;       // YYYY-MM-DD (first day of month)
-  item_code: string;
   warehouse: string;
   direction: string;
+  group_code: number;
   group_name: string;
   total_in: number;
   total_out: number;
