@@ -10,7 +10,7 @@
 **Arnon Arpaket** 
 *(Designer & Full-stack Developer)*
 
-ลิขสิทธิ์ถูกต้องตามกฎหมาย © 2024-2025 Arnon Arpaket. สงวนลิขสิทธิ์ทุกประการ
+ลิขสิทธิ์ถูกต้องตามกฎหมาย © 2026 Arnon Arpaket. สงวนลิขสิทธิ์ทุกประการ
 
 ---
 
