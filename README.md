@@ -1,8 +1,34 @@
 # SmartInventory
 
-SmartInventory is a project aimed at enhancing inventory management through efficient deployment via Firebase Hosting.
+## Tech Stack
+- React + TS + Vite
+- Supabase
+- React Query
+- Zustand
+- Tailwind
 
-## Features
-- Import functionality that allows you to integrate with various data sources.
+## Local Setup
+1. Run `npm install`
+2. Run `npm run dev`
 
-For more information, please refer to the documentation.
+## Environment Variables
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+> Note: Preview mode is disabled when Supabase is not configured.
+
+## Scripts
+- `dev`
+- `build`
+- `preview`
+- `lint`
+
+## Key Routes/Modules
+Refer to `src/App.tsx` for key routes/modules.
+
+## Database Migrations Location
+- All migrations are located in `supabase/*.sql`
+
+## Deployment Steps for Firebase Hosting
+1. Run `npm run build`
+2. Deploy using `firebase deploy` referencing `firebase.json`.
