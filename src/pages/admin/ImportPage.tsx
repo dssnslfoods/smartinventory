@@ -377,222 +377,239 @@ export function ImportPage() {
 
   // ─── Render ──────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
-      {/* ══ Section 1: File Upload ══════════════════════════════════════════ */}
-      <div className="card">
-        <div className="flex items-center gap-3 mb-1">
-          <FileSpreadsheet size={20} style={{ color: 'var(--color-primary-light)' }} />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Import Data from SAP B1 Export</h3>
-        </div>
-        <p className="text-sm mb-5" style={{ color: 'var(--text-muted)' }}>
-          อัปโหลดไฟล์ .xlsx ที่ export จาก SAP B1 — รองรับ sheet <strong>dbo_OITM</strong> (Item Master) และ <strong>dbo_OIMN</strong> (Transactions)
+      {/* ══ Page Header ══════════════════════════════════════════════════════ */}
+      <div>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>Data Import</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          นำเข้าข้อมูลจาก SAP B1 — อัปเดต Master Data (Items) และ Transactions แยกกันได้อิสระ
         </p>
-
-        {/* Drop Zone */}
-        <label
-          className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-10 cursor-pointer transition-colors"
-          style={{
-            borderColor: file ? 'var(--color-primary-light)' : 'var(--border)',
-            backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)',
-          }}
-          onDrop={handleDrop}
-          onDragOver={e => e.preventDefault()}
-        >
-          <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} disabled={importing} className="hidden" />
-          <Upload size={36} style={{ color: file ? 'var(--color-primary-light)' : 'var(--text-muted)' }} />
-          <p className="mt-3 font-medium" style={{ color: 'var(--text)' }}>
-            {file ? file.name : 'คลิกหรือลากไฟล์ Excel มาวาง'}
-          </p>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'รองรับ .xlsx เท่านั้น'}
-          </p>
-        </label>
-
-        {/* Sheet Detection Result */}
-        {parsedData && (
-          <div className="mt-4 flex flex-wrap gap-3">
-            <SheetBadge
-              label="dbo_OITM (Master Data)"
-              found={parsedData.hasItemSheet}
-              count={parsedData.items.length}
-              unit="items"
-            />
-            <SheetBadge
-              label="dbo_OIMN (Transactions)"
-              found={parsedData.hasTxnSheet}
-              count={parsedData.transactions.length}
-              unit="rows"
-            />
-          </div>
-        )}
       </div>
 
-      {/* ══ Section 2: Import Configuration ════════════════════════════════ */}
-      {parsedData && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* ══ Section 1+2: Upload + Config Panels (always visible) ════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* ── Panel A: Master Data (Items) ── */}
-          <ImportPanel
-            icon={<Package size={20} />}
-            title="Master Data — Items"
-            subtitle="อัปเดตชื่อสินค้า, ราคา, กลุ่มสินค้า (Upsert — ไม่มีการลบ)"
-            available={parsedData.hasItemSheet && parsedData.items.length > 0}
-            count={parsedData.items.length}
-            countLabel="items"
-            enabled={includeItems}
-            onToggle={() => setIncludeItems(v => !v)}
-            unavailableReason={!parsedData.hasItemSheet ? 'ไม่พบ sheet dbo_OITM' : 'ไม่มีข้อมูล item'}
-            modeNode={
-              <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-                style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-                <CheckCircle size={14} className="text-green-600" />
-                <span className="text-green-800">Upsert เสมอ — ปลอดภัย ไม่ลบข้อมูลเก่า</span>
-              </div>
-            }
-            previewExpanded={showItemPreview}
-            onTogglePreview={() => setShowItemPreview(v => !v)}
-            previewNode={
-              parsedData.items.length > 0 ? (
-                <PreviewTable
-                  columns={['item_code', 'itemname', 'group_code', 'uom', 'std_cost', 'moving_avg']}
-                  labels={['Code', 'ชื่อสินค้า', 'Group', 'UOM', 'Std Cost', 'Moving Avg']}
-                  rows={parsedData.items.slice(0, 5) as Record<string, unknown>[]}
-                />
-              ) : null
-            }
-          />
-
-          {/* ── Panel B: Transactions ── */}
-          <ImportPanel
-            icon={<ArrowLeftRight size={20} />}
-            title="Transactions — Movement"
-            subtitle="ข้อมูลการเคลื่อนไหวสินค้า (In/Out/Transfer)"
-            available={parsedData.hasTxnSheet && parsedData.transactions.length > 0}
-            count={parsedData.transactions.length}
-            countLabel="rows"
-            enabled={includeTxns}
-            onToggle={() => setIncludeTxns(v => !v)}
-            unavailableReason={!parsedData.hasTxnSheet ? 'ไม่พบ sheet dbo_OIMN' : 'ไม่มีข้อมูล transaction'}
-            infoNode={
-              parsedData.txDateMin && parsedData.txDateMax ? (
-                <div className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-2"
-                  style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-                  <span>📅 ช่วงข้อมูล: <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMin}</strong> ถึง <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMax}</strong></span>
-                </div>
-              ) : null
-            }
-            modeNode={
-              <div className="space-y-2">
-                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Import Mode:</p>
-                <div className="flex gap-2">
-                  <ModeButton
-                    icon={<RefreshCw size={14} />}
-                    label="Replace All"
-                    desc="ลบเดิมทั้งหมด → import ใหม่"
-                    active={txnMode === 'replace'}
-                    onClick={() => setTxnMode('replace')}
-                  />
-                  <ModeButton
-                    icon={<PlusCircle size={14} />}
-                    label="Append"
-                    desc="เพิ่มเฉพาะรายการใหม่ ข้ามซ้ำ"
-                    active={txnMode === 'append'}
-                    onClick={() => setTxnMode('append')}
-                  />
-                </div>
-                {txnMode === 'replace' && includeTxns && (
-                  <div className="flex items-start gap-2 p-2.5 rounded-lg text-xs"
-                    style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                    <AlertTriangle size={13} className="text-orange-500 mt-0.5 shrink-0" />
-                    <span className="text-orange-800">
-                      <strong>Replace mode:</strong> จะลบ Transactions ทั้งหมดในระบบก่อน แล้ว import ใหม่จากไฟล์
-                    </span>
-                  </div>
-                )}
-              </div>
-            }
-            previewExpanded={showTxnPreview}
-            onTogglePreview={() => setShowTxnPreview(v => !v)}
-            previewNode={
-              parsedData.transactions.length > 0 ? (
-                <PreviewTable
-                  columns={['item_code', 'doc_date', 'direction', 'warehouse', 'in_qty', 'out_qty', 'amount']}
-                  labels={['Item', 'Date', 'Direction', 'WH', 'In', 'Out', 'Amount']}
-                  rows={parsedData.transactions.slice(0, 5) as Record<string, unknown>[]}
-                />
-              ) : null
-            }
-          />
-        </div>
-      )}
-
-      {/* ══ Section 3: Action & Progress ════════════════════════════════════ */}
-      {parsedData && (
-        <div className="card space-y-4">
-
-          {/* Summary of what will be imported */}
-          <div className="flex flex-wrap gap-3 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
-            <h4 className="w-full text-sm font-semibold" style={{ color: 'var(--text)' }}>จะ Import:</h4>
-            {includeItems && parsedData.items.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
-                style={{ backgroundColor: '#DBEAFE', color: '#1E40AF' }}>
-                <Package size={14} />
-                {formatNumber(parsedData.items.length)} Items (Upsert)
-              </span>
-            )}
-            {includeTxns && parsedData.transactions.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
-                style={{ backgroundColor: '#E0E7FF', color: '#3730A3' }}>
-                <ArrowLeftRight size={14} />
-                {formatNumber(parsedData.transactions.length)} Transactions ({txnMode === 'replace' ? 'Replace' : 'Append'})
-              </span>
-            )}
-            {nothingSelected && (
-              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                — กรุณาเปิด Master Data หรือ Transactions อย่างน้อยหนึ่งอย่าง
-              </span>
-            )}
+        {/* ── Left: File Upload ── */}
+        <div className="card flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet size={18} style={{ color: 'var(--color-primary-light)' }} />
+            <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>1. เลือกไฟล์ Excel</h3>
           </div>
 
-          {/* Import Button */}
-          <button
-            onClick={handleImport}
-            disabled={!canImport}
-            className="btn btn-primary w-full py-3 text-base gap-2"
-            style={{ opacity: canImport ? 1 : 0.5 }}
+          {/* Drop Zone */}
+          <label
+            className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors flex-1"
+            style={{
+              borderColor: file ? 'var(--color-primary-light)' : 'var(--border)',
+              backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)',
+            }}
+            onDrop={handleDrop}
+            onDragOver={e => e.preventDefault()}
           >
-            <Upload size={18} />
-            {importing ? 'กำลัง import...' : nothingSelected ? 'เลือกข้อมูลที่ต้องการ import' : 'เริ่ม Import'}
-          </button>
+            <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} disabled={importing} className="hidden" />
+            <Upload size={32} style={{ color: file ? 'var(--color-primary-light)' : 'var(--text-muted)' }} />
+            <p className="mt-2 font-medium text-sm text-center" style={{ color: 'var(--text)' }}>
+              {file ? file.name : 'คลิกหรือลากไฟล์มาวาง'}
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              {file
+                ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
+                : 'รองรับ .xlsx — SAP B1 Export'}
+            </p>
+          </label>
 
-          {/* Progress */}
-          {(importing || progress.step) && (
-            <ProgressBar progress={progress} />
-          )}
-
-          {/* Success Result */}
-          {lastResult && progress.done && !progress.error && (
-            <div className="p-4 rounded-xl space-y-2"
-              style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-              <p className="font-semibold text-green-800 flex items-center gap-2">
-                <CheckCircle size={18} /> Import สำเร็จ
-              </p>
-              <div className="flex flex-wrap gap-4 text-sm text-green-700">
-                {lastResult.itemsUpserted > 0 && (
-                  <span>📦 Items upserted: <strong>{formatNumber(lastResult.itemsUpserted)}</strong></span>
-                )}
-                {lastResult.txnInserted > 0 && (
-                  <span>📊 Transactions inserted: <strong>{formatNumber(lastResult.txnInserted)}</strong></span>
-                )}
-                {lastResult.txnSkipped > 0 && (
-                  <span className="text-orange-600">⚠ Skipped: <strong>{formatNumber(lastResult.txnSkipped)}</strong></span>
-                )}
-              </div>
+          {/* Sheet Detection */}
+          {parsedData ? (
+            <div className="space-y-2">
+              <SheetBadge label="dbo_OITM" sublabel="Master Data" found={parsedData.hasItemSheet} count={parsedData.items.length} unit="items" />
+              <SheetBadge label="dbo_OIMN" sublabel="Transactions" found={parsedData.hasTxnSheet} count={parsedData.transactions.length} unit="rows" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <SheetBadge label="dbo_OITM" sublabel="Master Data" found={false} count={0} unit="items" waiting />
+              <SheetBadge label="dbo_OIMN" sublabel="Transactions" found={false} count={0} unit="rows" waiting />
             </div>
           )}
         </div>
-      )}
+
+        {/* ── Middle: Master Data Panel ── */}
+        <ImportPanel
+          step="2"
+          icon={<Package size={20} />}
+          title="Master Data — Items"
+          subtitle="อัปเดตชื่อสินค้า, ราคา, กลุ่มสินค้า"
+          waiting={!parsedData}
+          available={!!parsedData && parsedData.hasItemSheet && parsedData.items.length > 0}
+          count={parsedData?.items.length ?? 0}
+          countLabel="items"
+          enabled={includeItems}
+          onToggle={() => setIncludeItems(v => !v)}
+          unavailableReason={
+            !parsedData ? undefined
+              : !parsedData.hasItemSheet ? 'ไม่พบ sheet dbo_OITM ในไฟล์'
+              : 'ไม่มีข้อมูล item'
+          }
+          modeNode={
+            <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+              style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+              <CheckCircle size={13} className="text-green-600" />
+              <span className="text-green-800"><strong>Upsert</strong> — อัปเดตถ้ามีอยู่แล้ว สร้างใหม่ถ้ายังไม่มี ปลอดภัย ไม่ลบ</span>
+            </div>
+          }
+          previewExpanded={showItemPreview}
+          onTogglePreview={() => setShowItemPreview(v => !v)}
+          previewNode={
+            parsedData && parsedData.items.length > 0 ? (
+              <PreviewTable
+                columns={['item_code', 'itemname', 'group_code', 'uom', 'std_cost', 'moving_avg']}
+                labels={['Code', 'ชื่อสินค้า', 'Group', 'UOM', 'Std Cost', 'Moving Avg']}
+                rows={parsedData.items.slice(0, 5) as Record<string, unknown>[]}
+              />
+            ) : null
+          }
+        />
+
+        {/* ── Right: Transactions Panel ── */}
+        <ImportPanel
+          step="3"
+          icon={<ArrowLeftRight size={20} />}
+          title="Transactions"
+          subtitle="ข้อมูลการเคลื่อนไหวสินค้า In / Out / Transfer"
+          waiting={!parsedData}
+          available={!!parsedData && parsedData.hasTxnSheet && parsedData.transactions.length > 0}
+          count={parsedData?.transactions.length ?? 0}
+          countLabel="rows"
+          enabled={includeTxns}
+          onToggle={() => setIncludeTxns(v => !v)}
+          unavailableReason={
+            !parsedData ? undefined
+              : !parsedData.hasTxnSheet ? 'ไม่พบ sheet dbo_OIMN ในไฟล์'
+              : 'ไม่มีข้อมูล transaction'
+          }
+          infoNode={
+            parsedData?.txDateMin && parsedData?.txDateMax ? (
+              <div className="text-xs px-3 py-1.5 rounded-lg"
+                style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+                📅 <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMin}</strong> ถึง <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMax}</strong>
+              </div>
+            ) : null
+          }
+          modeNode={
+            <div className="space-y-2">
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Import Mode:</p>
+              <div className="flex gap-2">
+                <ModeButton
+                  icon={<RefreshCw size={13} />}
+                  label="Replace All"
+                  desc="ลบเดิมทั้งหมด → import ใหม่"
+                  active={txnMode === 'replace'}
+                  onClick={() => setTxnMode('replace')}
+                />
+                <ModeButton
+                  icon={<PlusCircle size={13} />}
+                  label="Append"
+                  desc="เพิ่มเฉพาะรายการใหม่ ข้ามซ้ำ"
+                  active={txnMode === 'append'}
+                  onClick={() => setTxnMode('append')}
+                />
+              </div>
+              {txnMode === 'replace' && includeTxns && parsedData && (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg text-xs"
+                  style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
+                  <AlertTriangle size={13} className="text-orange-500 mt-0.5 shrink-0" />
+                  <span className="text-orange-800"><strong>Replace:</strong> จะลบ Transactions ทั้งหมดในระบบก่อน แล้ว import ใหม่</span>
+                </div>
+              )}
+            </div>
+          }
+          previewExpanded={showTxnPreview}
+          onTogglePreview={() => setShowTxnPreview(v => !v)}
+          previewNode={
+            parsedData && parsedData.transactions.length > 0 ? (
+              <PreviewTable
+                columns={['item_code', 'doc_date', 'direction', 'warehouse', 'in_qty', 'out_qty', 'amount']}
+                labels={['Item', 'Date', 'Dir', 'WH', 'In Qty', 'Out Qty', 'Amount']}
+                rows={parsedData.transactions.slice(0, 5) as Record<string, unknown>[]}
+              />
+            ) : null
+          }
+        />
+      </div>
+
+      {/* ══ Section 3: Action & Progress ════════════════════════════════════ */}
+      <div className="card space-y-4">
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>4. ยืนยันและ Import</h3>
+
+        {/* Summary chips */}
+        <div className="flex flex-wrap gap-2 min-h-[32px]">
+          {!parsedData && (
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>รอไฟล์ Excel...</span>
+          )}
+          {parsedData && includeItems && parsedData.items.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
+              style={{ backgroundColor: '#DBEAFE', color: '#1E40AF' }}>
+              <Package size={13} />
+              {formatNumber(parsedData.items.length)} Items — Upsert
+            </span>
+          )}
+          {parsedData && includeTxns && parsedData.transactions.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
+              style={{ backgroundColor: '#E0E7FF', color: '#3730A3' }}>
+              <ArrowLeftRight size={13} />
+              {formatNumber(parsedData.transactions.length)} Transactions — {txnMode === 'replace' ? 'Replace' : 'Append'}
+            </span>
+          )}
+          {parsedData && nothingSelected && (
+            <span className="text-sm flex items-center gap-1" style={{ color: 'var(--color-warning, #D97706)' }}>
+              <Info size={14} /> เปิด Master Data หรือ Transactions อย่างน้อยหนึ่งอย่าง
+            </span>
+          )}
+        </div>
+
+        {/* Import Button */}
+        <button
+          onClick={handleImport}
+          disabled={!canImport}
+          className="btn btn-primary w-full py-3 text-base gap-2"
+          style={{ opacity: canImport ? 1 : 0.45 }}
+        >
+          <Upload size={18} />
+          {importing
+            ? 'กำลัง import...'
+            : !parsedData
+              ? 'กรุณาอัปโหลดไฟล์ก่อน'
+              : nothingSelected
+                ? 'เลือกข้อมูลที่ต้องการ import'
+                : 'เริ่ม Import'}
+        </button>
+
+        {/* Progress */}
+        {(importing || progress.step) && (
+          <ProgressBar progress={progress} />
+        )}
+
+        {/* Success Result */}
+        {lastResult && progress.done && !progress.error && (
+          <div className="p-4 rounded-xl space-y-2"
+            style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+            <p className="font-semibold text-green-800 flex items-center gap-2">
+              <CheckCircle size={17} /> Import สำเร็จ
+            </p>
+            <div className="flex flex-wrap gap-4 text-sm text-green-700">
+              {lastResult.itemsUpserted > 0 && (
+                <span>📦 Items upserted: <strong>{formatNumber(lastResult.itemsUpserted)}</strong></span>
+              )}
+              {lastResult.txnInserted > 0 && (
+                <span>📊 Transactions inserted: <strong>{formatNumber(lastResult.txnInserted)}</strong></span>
+              )}
+              {lastResult.txnSkipped > 0 && (
+                <span style={{ color: '#D97706' }}>⚠ Skipped: <strong>{formatNumber(lastResult.txnSkipped)}</strong></span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ══ Section 4: Dangerous Zone ════════════════════════════════════════ */}
       {!importing && (
@@ -668,26 +685,36 @@ export function ImportPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SheetBadge({ label, found, count, unit }: { label: string; found: boolean; count: number; unit: string }) {
+function SheetBadge({ label, sublabel, found, count, unit, waiting }: {
+  label: string; sublabel: string; found: boolean; count: number; unit: string; waiting?: boolean;
+}) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
       style={{
-        backgroundColor: found ? '#F0FDF4' : 'var(--bg-alt)',
-        border: `1px solid ${found ? '#BBF7D0' : 'var(--border)'}`,
-        color: found ? '#166534' : 'var(--text-muted)',
+        backgroundColor: waiting ? 'var(--bg-alt)' : found ? '#F0FDF4' : '#FEF2F2',
+        border: `1px solid ${waiting ? 'var(--border)' : found ? '#BBF7D0' : '#FECACA'}`,
+        color: waiting ? 'var(--text-muted)' : found ? '#166534' : '#991B1B',
       }}>
-      {found
-        ? <CheckCircle size={14} className="text-green-600 shrink-0" />
-        : <XCircle size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />}
-      <span><strong>{label}</strong>{found ? `: ${formatNumber(count)} ${unit}` : ' — ไม่พบ'}</span>
+      {waiting
+        ? <FileSpreadsheet size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+        : found
+          ? <CheckCircle size={14} className="text-green-600 shrink-0" />
+          : <XCircle size={14} className="text-red-500 shrink-0" />}
+      <span>
+        <strong>{label}</strong>
+        <span className="ml-1 opacity-70">({sublabel})</span>
+        {waiting ? '' : found ? `: ${formatNumber(count)} ${unit}` : ' — ไม่พบใน Excel'}
+      </span>
     </div>
   );
 }
 
 interface ImportPanelProps {
+  step: string;
   icon: React.ReactNode;
   title: string;
   subtitle: string;
+  waiting?: boolean;
   available: boolean;
   count: number;
   countLabel: string;
@@ -702,11 +729,12 @@ interface ImportPanelProps {
 }
 
 function ImportPanel({
-  icon, title, subtitle, available, count, countLabel,
+  step, icon, title, subtitle, waiting, available, count, countLabel,
   enabled, onToggle, unavailableReason, infoNode, modeNode,
   previewExpanded, onTogglePreview, previewNode,
 }: ImportPanelProps) {
   const isEnabled = available && enabled;
+  const isWaiting = waiting || !available;
 
   return (
     <div
@@ -714,68 +742,92 @@ function ImportPanel({
       style={{
         borderWidth: 2,
         borderColor: isEnabled ? 'var(--color-primary-light)' : 'var(--border)',
-        opacity: available ? 1 : 0.55,
       }}
     >
-      {/* Header with toggle */}
+      {/* Step badge + header */}
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span style={{ color: isEnabled ? 'var(--color-primary-light)' : 'var(--text-muted)' }}>{icon}</span>
+        <div className="flex items-start gap-2">
+          <span
+            className="shrink-0 flex items-center justify-center rounded-full text-xs font-bold w-6 h-6 mt-0.5"
+            style={{
+              backgroundColor: isEnabled ? 'var(--color-primary-light)' : 'var(--border)',
+              color: isEnabled ? 'white' : 'var(--text-muted)',
+            }}
+          >{step}</span>
           <div>
-            <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>{title}</p>
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: isEnabled ? 'var(--color-primary-light)' : 'var(--text-muted)' }}>{icon}</span>
+              <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>{title}</p>
+            </div>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>
           </div>
         </div>
+
+        {/* Toggle */}
         <button
           onClick={onToggle}
           disabled={!available}
           className="shrink-0 transition-colors"
           title={isEnabled ? 'ปิด' : 'เปิด'}
+          style={{ opacity: available ? 1 : 0.35 }}
         >
           {isEnabled
-            ? <ToggleRight size={32} style={{ color: 'var(--color-primary-light)' }} />
-            : <ToggleLeft size={32} style={{ color: 'var(--text-muted)' }} />}
+            ? <ToggleRight size={34} style={{ color: 'var(--color-primary-light)' }} />
+            : <ToggleLeft size={34} style={{ color: 'var(--text-muted)' }} />}
         </button>
       </div>
 
-      {/* Unavailable message */}
-      {!available && unavailableReason && (
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>⚠ {unavailableReason}</p>
-      )}
-
-      {/* Count badge */}
-      {available && (
-        <div className="flex items-center gap-2">
-          <span className="text-2xl font-bold" style={{ color: isEnabled ? 'var(--text)' : 'var(--text-muted)' }}>
-            {formatNumber(count)}
-          </span>
-          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{countLabel}</span>
+      {/* Waiting state */}
+      {waiting && (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 rounded-xl"
+          style={{ backgroundColor: 'var(--bg-alt)', border: '1px dashed var(--border)' }}>
+          <Upload size={24} style={{ color: 'var(--text-muted)' }} />
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>อัปโหลดไฟล์ Excel เพื่อดูข้อมูล</p>
         </div>
       )}
 
-      {/* Info node (e.g. date range) */}
-      {available && infoNode}
+      {/* Unavailable (file loaded but sheet not found) */}
+      {!waiting && !available && unavailableReason && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+          style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B' }}>
+          <XCircle size={14} className="shrink-0" />
+          {unavailableReason}
+        </div>
+      )}
 
-      {/* Mode node */}
-      {available && isEnabled && modeNode}
+      {/* Available: show count + controls */}
+      {available && (
+        <>
+          {/* Count */}
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold" style={{ color: isEnabled ? 'var(--text)' : 'var(--text-muted)' }}>
+              {formatNumber(count)}
+            </span>
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{countLabel}</span>
+          </div>
 
-      {/* Preview toggle */}
-      {available && count > 0 && (
-        <div>
-          <button
-            onClick={onTogglePreview}
-            className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            {previewExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            {previewExpanded ? 'ซ่อน Preview' : 'แสดง Preview (5 แถวแรก)'}
-          </button>
-          {previewExpanded && (
-            <div className="mt-3 overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
-              {previewNode}
+          {infoNode}
+          {isEnabled && modeNode}
+
+          {/* Preview */}
+          {count > 0 && (
+            <div>
+              <button
+                onClick={onTogglePreview}
+                className="flex items-center gap-1.5 text-xs font-medium"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {previewExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                {previewExpanded ? 'ซ่อน Preview' : 'ดู Preview (5 แถวแรก)'}
+              </button>
+              {previewExpanded && (
+                <div className="mt-2 overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+                  {previewNode}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );
