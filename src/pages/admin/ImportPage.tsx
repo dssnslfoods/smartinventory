@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import {
   Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
-  RefreshCw, PlusCircle, Info,
+  RefreshCw, PlusCircle, Info, Package, ArrowLeftRight,
+  ChevronDown, ChevronUp, Trash2, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
@@ -9,64 +10,94 @@ import { useImportLogs } from '@/hooks/useSupabaseQuery';
 import { formatDateTime, formatNumber } from '@/utils/format';
 import { useQueryClient } from '@tanstack/react-query';
 
-interface ParsedData {
-  items: Record<string, unknown>[];
-  transactions: Record<string, unknown>[];
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface ParsedItem {
+  item_code: string;
+  itemname: string;
+  foreign_name: string | null;
+  uom: string;
+  std_cost: number;
+  moving_avg: number;
+  group_code: number;
+  is_active: boolean;
 }
 
-type ImportMode = 'replace' | 'append';
+interface ParsedTransaction {
+  trans_num: number;
+  doc_date: string;
+  trans_type: number;
+  warehouse: string;
+  group_code: number;
+  doc_line_num: number;
+  item_code: string;
+  in_qty: number;
+  out_qty: number;
+  balance_qty: number;
+  amount: number;
+  direction: string;
+}
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-/** Insert rows in parallel batches of `batchSize` — no conflict resolution */
-async function batchInsert(
-  table: string,
-  rows: Record<string, unknown>[],
+interface ParsedData {
+  items: ParsedItem[];
+  transactions: ParsedTransaction[];
+  hasItemSheet: boolean;
+  hasTxnSheet: boolean;
+  txDateMin: string;
+  txDateMax: string;
+}
+
+type TxnImportMode = 'replace' | 'append';
+
+interface ProgressState {
+  step: string;
+  detail: string;
+  percent: number;
+  error: string;
+  done: boolean;
+}
+
+interface ImportResult {
+  itemsUpserted: number;
+  txnInserted: number;
+  txnSkipped: number;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function batchInsertTxns(
+  rows: ParsedTransaction[],
   batchSize: number,
   onProgress: (done: number, total: number) => void,
-): Promise<{ inserted: number; errors: number }> {
+): Promise<{ inserted: number; skipped: number }> {
   let inserted = 0;
-  let errors = 0;
-
-  // Run batches sequentially to avoid hammering the DB
+  let skipped = 0;
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
-    const { error } = await supabase.from(table).insert(batch);
-
+    const { error } = await supabase.from('inventory_transactions').insert(batch);
     if (error) {
-      // 23505 = unique_violation — just skip duplicates
-      // 23503 = foreign_key_violation — skip rows referencing missing items
-      if (error.code === '23505' || error.code === '23503') {
-        errors += batch.length;
-      } else {
-        throw new Error(`[${table}] ${error.message} (code: ${error.code})`);
-      }
+      if (error.code === '23505' || error.code === '23503') skipped += batch.length;
+      else throw new Error(`[transactions] ${error.message} (code ${error.code})`);
     } else {
       inserted += batch.length;
     }
-
     onProgress(Math.min(i + batchSize, rows.length), rows.length);
   }
-
-  return { inserted, errors };
+  return { inserted, skipped };
 }
 
-/** Upsert items (safe — item_code is a simple PK) */
 async function batchUpsertItems(
-  rows: Record<string, unknown>[],
+  rows: ParsedItem[],
   batchSize: number,
   onProgress: (done: number, total: number) => void,
 ): Promise<void> {
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
-    const { error } = await supabase
-      .from('items')
-      .upsert(batch, { onConflict: 'item_code' });
+    const { error } = await supabase.from('items').upsert(batch, { onConflict: 'item_code' });
     if (error) throw new Error(`[items] ${error.message}`);
     onProgress(Math.min(i + batchSize, rows.length), rows.length);
   }
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 export function ImportPage() {
   const { data: importLogs, refetch: refetchLogs } = useImportLogs();
   const queryClient = useQueryClient();
@@ -74,103 +105,113 @@ export function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importMode, setImportMode] = useState<ImportMode>('replace');
-  const [progress, setProgress] = useState({
-    step: '',
-    detail: '',
-    percent: 0,
-    error: '',
-  });
 
-  // ── Parse Excel ────────────────────────────────────────────────────────────
+  // ── Import config (what user wants to import)
+  const [includeItems, setIncludeItems] = useState(true);
+  const [includeTxns, setIncludeTxns] = useState(true);
+  const [txnMode, setTxnMode] = useState<TxnImportMode>('replace');
+
+  // ── UI state
+  const [showItemPreview, setShowItemPreview] = useState(false);
+  const [showTxnPreview, setShowTxnPreview] = useState(false);
+  const [progress, setProgress] = useState<ProgressState>({
+    step: '', detail: '', percent: 0, error: '', done: false,
+  });
+  const [lastResult, setLastResult] = useState<ImportResult | null>(null);
+
+  // ── Parse Excel ──────────────────────────────────────────────────────────
   const parseExcel = useCallback((f: File) => {
-    setProgress({ step: 'กำลัง parse ไฟล์...', detail: '', percent: 0, error: '' });
+    setProgress({ step: 'กำลัง parse ไฟล์...', detail: '', percent: 5, error: '', done: false });
+    setLastResult(null);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target?.result, { type: 'binary', cellDates: true });
 
-        /* ── OITM ── */
-        const oitmSheet =
-          wb.Sheets['dbo_OITM'] ??
-          wb.Sheets[wb.SheetNames[0]];
-
-        // Auto-detect header row: try default (row 0) first, fall back to row 1
-        let oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet);
-        if (oitmRaw.length > 0 && !('ItemCode' in oitmRaw[0])) {
-          // Header might be on row 1 (row 0 is a label)
-          oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet, { range: 1 });
-        }
-
-        // Helper: lookup key with trimmed whitespace (SAP exports may have ' STD COST ')
         const getVal = (row: Record<string, unknown>, key: string): unknown => {
           if (key in row) return row[key];
-          // Try trimmed match
           for (const k of Object.keys(row)) {
             if (k.trim() === key) return row[k];
           }
           return undefined;
         };
 
-        const items = oitmRaw
-          .map((row) => ({
-            item_code:   String(getVal(row, 'ItemCode')       ?? ''),
-            itemname:    String(getVal(row, 'ItemName')       ?? ''),
-            foreign_name: getVal(row, 'FrgnName') ? String(getVal(row, 'FrgnName')) : null,
-            uom:         String(getVal(row, 'InvntryUom')     ?? 'KG'),
-            std_cost:    Number(getVal(row, 'STD COST')       ?? 0),
-            moving_avg:  Number(getVal(row, 'Moving Average') ?? 0),
-            group_code:  Number(getVal(row, 'ItmsGrpCod')     ?? 0),
-            // group_name removed — normalized into item_groups lookup table
-            is_active:   String(getVal(row, 'frozenFor')      ?? '') !== 'Y',
-          }))
-          .filter((i) => i.item_code);
+        // ── Items (dbo_OITM) ─────────────────────────────────────────────────
+        const oitmSheetName = wb.SheetNames.find(n => n === 'dbo_OITM') ?? wb.SheetNames[0];
+        const oitmSheet = wb.Sheets[oitmSheetName];
+        const hasItemSheet = !!oitmSheet;
 
-        /* ── OIMN ── */
-        const oimnSheet =
-          wb.Sheets['dbo_OIMN'] ??
-          wb.Sheets[wb.SheetNames[1]];
-        const oimnRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oimnSheet);
+        let items: ParsedItem[] = [];
+        if (hasItemSheet) {
+          let oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet);
+          if (oitmRaw.length > 0 && !('ItemCode' in oitmRaw[0])) {
+            oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet, { range: 1 });
+          }
+          items = oitmRaw
+            .map((row) => ({
+              item_code:    String(getVal(row, 'ItemCode')       ?? '').trim(),
+              itemname:     String(getVal(row, 'ItemName')       ?? '').trim(),
+              foreign_name: getVal(row, 'FrgnName') ? String(getVal(row, 'FrgnName')) : null,
+              uom:          String(getVal(row, 'InvntryUom')     ?? 'KG'),
+              std_cost:     Number(getVal(row, 'STD COST')       ?? 0),
+              moving_avg:   Number(getVal(row, 'Moving Average') ?? 0),
+              group_code:   Number(getVal(row, 'ItmsGrpCod')     ?? 0),
+              is_active:    String(getVal(row, 'frozenFor')      ?? '') !== 'Y',
+            }))
+            .filter((i) => i.item_code);
+        }
 
-        const transactions = oimnRaw
-          .map((row) => {
-            let docDate = row['DocDate'];
-            if (docDate instanceof Date) {
-              docDate = docDate.toISOString().split('T')[0];
-            } else {
-              docDate = String(docDate ?? '').split('T')[0].split(' ')[0];
-            }
+        // ── Transactions (dbo_OIMN) ─────────────────────────────────────────
+        const oimnSheetName = wb.SheetNames.find(n => n === 'dbo_OIMN') ?? wb.SheetNames[1];
+        const oimnSheet = wb.Sheets[oimnSheetName];
+        const hasTxnSheet = !!oimnSheet && oitmSheetName !== oimnSheetName;
 
-            return {
-              trans_num:    Number(row['TransNum']         ?? 0),
-              doc_date:     docDate,
-              trans_type:   Number(row['TransType']        ?? 0),
-              // trans_name removed — normalized into transaction_types lookup table
-              warehouse:    String(row['Warehouse']        ?? ''),
-              // whs_name removed — normalized into warehouses lookup table
-              group_code:   Number(row['ItmsGrpCod']       ?? 0),
-              // group_name removed — normalized into item_groups lookup table
-              // *** แปลง NULL → -1 เพื่อให้ unique index ทำงานถูกต้อง ***
-              doc_line_num: row['DocLineNum'] != null ? Number(row['DocLineNum']) : -1,
-              item_code:    String(row['ItemCode']         ?? ''),
-              in_qty:       Number(row['InQuantity']       ?? 0),
-              out_qty:      Number(row['OutQuantity']      ?? 0),
-              balance_qty:  Number(row['BalanceQuantity']  ?? 0),
-              amount:       Number(row['Amount']           ?? 0),
-              direction:    String(row['Transection']      ?? ''),
-            };
-          })
-          .filter((t) => t.item_code && t.trans_num);
+        let transactions: ParsedTransaction[] = [];
+        let txDateMin = '';
+        let txDateMax = '';
 
-        setParsedData({ items, transactions });
-        setProgress({ step: '', detail: '', percent: 0, error: '' });
+        if (hasTxnSheet) {
+          const oimnRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oimnSheet);
+          transactions = oimnRaw
+            .map((row) => {
+              let docDate = row['DocDate'];
+              if (docDate instanceof Date) {
+                docDate = docDate.toISOString().split('T')[0];
+              } else {
+                docDate = String(docDate ?? '').split('T')[0].split(' ')[0];
+              }
+              return {
+                trans_num:    Number(row['TransNum']        ?? 0),
+                doc_date:     String(docDate),
+                trans_type:   Number(row['TransType']       ?? 0),
+                warehouse:    String(row['Warehouse']       ?? '').trim(),
+                group_code:   Number(row['ItmsGrpCod']      ?? 0),
+                doc_line_num: row['DocLineNum'] != null ? Number(row['DocLineNum']) : -1,
+                item_code:    String(row['ItemCode']        ?? '').trim(),
+                in_qty:       Number(row['InQuantity']      ?? 0),
+                out_qty:      Number(row['OutQuantity']     ?? 0),
+                balance_qty:  Number(row['BalanceQuantity'] ?? 0),
+                amount:       Number(row['Amount']          ?? 0),
+                direction:    String(row['Transection']     ?? '').trim(),
+              };
+            })
+            .filter((t) => t.item_code && t.trans_num);
+
+          if (transactions.length > 0) {
+            const dates = transactions.map(t => t.doc_date).filter(Boolean).sort();
+            txDateMin = dates[0] ?? '';
+            txDateMax = dates[dates.length - 1] ?? '';
+          }
+        }
+
+        setParsedData({ items, transactions, hasItemSheet, hasTxnSheet, txDateMin, txDateMax });
+        // Auto-toggle based on what's found
+        setIncludeItems(hasItemSheet && items.length > 0);
+        setIncludeTxns(hasTxnSheet && transactions.length > 0);
+        setProgress({ step: '', detail: '', percent: 0, error: '', done: false });
+
       } catch (err) {
-        setProgress({
-          step: 'Parse Error',
-          detail: '',
-          percent: 0,
-          error: String(err),
-        });
+        setProgress({ step: 'Parse Error', detail: '', percent: 0, error: String(err), done: false });
       }
     };
     reader.readAsBinaryString(f);
@@ -181,116 +222,111 @@ export function ImportPage() {
     if (!f) return;
     setFile(f);
     setParsedData(null);
+    setShowItemPreview(false);
+    setShowTxnPreview(false);
     parseExcel(f);
   };
 
-  // ── Main Import ────────────────────────────────────────────────────────────
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setParsedData(null);
+    parseExcel(f);
+  };
+
+  // ── Main Import ──────────────────────────────────────────────────────────
   const handleImport = async () => {
     if (!parsedData || !file) return;
+    if (!includeItems && !includeTxns) return;
+
     setImporting(true);
+    setLastResult(null);
+    let itemsUpserted = 0;
+    let txnInserted = 0;
+    let txnSkipped = 0;
 
     const tick = (step: string, detail: string, percent: number) =>
-      setProgress({ step, detail, percent, error: '' });
+      setProgress({ step, detail, percent, error: '', done: false });
 
     try {
-      // ── 1. Clear existing transactions (Replace mode) ─────────────────────
-      if (importMode === 'replace') {
-        tick('กำลังลบข้อมูลเก่า...', 'Clearing inventory_transactions', 3);
-        // Delete in chunks to avoid timeout on large datasets
-        let hasMore = true;
-        while (hasMore) {
-          const { data, error } = await supabase
-            .from('inventory_transactions')
-            .delete()
-            .gt('id', 0) // delete all rows (id is serial > 0)
-            .select('id')
-            .limit(5000);
-          if (error) throw new Error(`Clear error: ${error.message}`);
-          hasMore = (data?.length ?? 0) === 5000;
-        }
-        tick('ลบข้อมูลเก่าเสร็จแล้ว', '', 6);
+      let pct = 5;
+
+      // ── A. Upsert Items ─────────────────────────────────────────────────
+      if (includeItems && parsedData.items.length > 0) {
+        tick('กำลัง import Master Data...', `0 / ${formatNumber(parsedData.items.length)} items`, pct);
+        await batchUpsertItems(parsedData.items, 300, (done, total) => {
+          tick('กำลัง import Master Data...', `${formatNumber(done)} / ${formatNumber(total)} items`, pct + (done / total) * 30);
+        });
+        itemsUpserted = parsedData.items.length;
+        pct += 33;
+        tick('Master Data ✓', `${formatNumber(itemsUpserted)} items upserted`, pct);
       }
 
-      // ── 2. Upsert Items ───────────────────────────────────────────────────
-      tick('กำลัง import Items...', `0 / ${formatNumber(parsedData.items.length)}`, 8);
-      await batchUpsertItems(parsedData.items, 300, (done, total) => {
-        tick(
-          'กำลัง import Items...',
-          `${formatNumber(done)} / ${formatNumber(total)}`,
-          8 + (done / total) * 17,
+      // ── B. Transactions ─────────────────────────────────────────────────
+      if (includeTxns && parsedData.transactions.length > 0) {
+
+        // B1. Clear if replace mode
+        if (txnMode === 'replace') {
+          tick('กำลังลบ Transactions เดิม...', 'Clearing inventory_transactions', pct + 2);
+          let hasMore = true;
+          while (hasMore) {
+            const { data, error } = await supabase
+              .from('inventory_transactions')
+              .delete()
+              .gt('id', 0)
+              .select('id')
+              .limit(5000);
+            if (error) throw new Error(`Clear error: ${error.message}`);
+            hasMore = (data?.length ?? 0) === 5000;
+          }
+          pct += 8;
+        }
+
+        // B2. Filter FK-safe transactions
+        const validItemCodes = new Set(parsedData.items.map(i => i.item_code));
+        const { data: existingItems } = await supabase.from('items').select('item_code').limit(20000);
+        if (existingItems) existingItems.forEach(i => validItemCodes.add(i.item_code));
+
+        const validTxns = parsedData.transactions.filter(t => validItemCodes.has(t.item_code));
+        const skippedFK = parsedData.transactions.length - validTxns.length;
+
+        // B3. Insert
+        tick('กำลัง import Transactions...', `0 / ${formatNumber(validTxns.length)}`, pct);
+        const { inserted, skipped } = await batchInsertTxns(
+          validTxns, 1000,
+          (done, total) => tick('กำลัง import Transactions...', `${formatNumber(done)} / ${formatNumber(total)}`, pct + (done / total) * 50),
         );
-      });
-      tick('Items สำเร็จ ✓', `${formatNumber(parsedData.items.length)} รายการ`, 25);
-
-      // ── 3. Filter & Insert Transactions ─────────────────────────────────
-      // Collect valid item_codes from parsed items to filter out FK violations
-      const validItemCodes = new Set(parsedData.items.map((i) => String(i.item_code)));
-
-      // Also fetch existing item_codes from DB (in case items existed before this import)
-      const { data: existingItems } = await supabase
-        .from('items')
-        .select('item_code')
-        .limit(10_000);
-      if (existingItems) {
-        for (const item of existingItems) {
-          validItemCodes.add(item.item_code);
-        }
+        txnInserted = inserted;
+        txnSkipped = skipped + skippedFK;
+        pct += 55;
       }
 
-      const validTransactions = parsedData.transactions.filter(
-        (t) => validItemCodes.has(String(t.item_code)),
-      );
-      const skippedFK = parsedData.transactions.length - validTransactions.length;
-
-      if (skippedFK > 0) {
-        console.warn(`Skipped ${skippedFK} transactions with missing item_code (FK violation prevention)`);
-      }
-
-      const txTotal = validTransactions.length;
-      tick('กำลัง import Transactions...', `0 / ${formatNumber(txTotal)}${skippedFK ? ` (ข้าม ${formatNumber(skippedFK)} รายการ item_code ไม่พบ)` : ''}`, 27);
-
-      const { inserted, errors: skipped } = await batchInsert(
-        'inventory_transactions',
-        validTransactions,
-        1000, // 1,000 rows/batch → ~66 batches only
-        (done, total) => {
-          tick(
-            'กำลัง import Transactions...',
-            `${formatNumber(done)} / ${formatNumber(total)}`,
-            27 + (done / total) * 68,
-          );
-        },
+      // ── C. Update last_sync_at ──────────────────────────────────────────
+      await supabase.from('system_config').upsert(
+        { key: 'last_sync_at', value: new Date().toISOString() },
+        { onConflict: 'key' },
       );
 
-      const totalSkipped = skipped + skippedFK;
-
-      // ── 4. Update last_sync_at ────────────────────────────────────────────
-      await supabase
-        .from('system_config')
-        .upsert({ key: 'last_sync_at', value: new Date().toISOString() }, { onConflict: 'key' });
-
-      // ── 5. Log ────────────────────────────────────────────────────────────
+      // ── D. Log ─────────────────────────────────────────────────────────
+      const hasSkips = txnSkipped > 0;
       await supabase.from('import_logs').insert({
         file_name: file.name,
-        items_count: parsedData.items.length,
-        transactions_count: inserted,
-        status: totalSkipped > 0 ? 'partial' : 'success',
-        error_summary: totalSkipped > 0
-          ? `${skipped > 0 ? `${skipped} duplicates` : ''}${skipped > 0 && skippedFK > 0 ? ', ' : ''}${skippedFK > 0 ? `${skippedFK} missing item_code` : ''}`
-          : null,
+        items_count: itemsUpserted,
+        transactions_count: txnInserted,
+        status: hasSkips ? 'partial' : 'success',
+        error_summary: hasSkips ? `${txnSkipped} rows skipped (duplicate/missing item)` : null,
       });
 
-      tick(
-        '✅ Import สำเร็จ!',
-        `Items: ${formatNumber(parsedData.items.length)} | Transactions: ${formatNumber(inserted)}${totalSkipped ? ` | Skipped: ${formatNumber(totalSkipped)}` : ''}`,
-        100,
-      );
-
+      setLastResult({ itemsUpserted, txnInserted, txnSkipped });
+      setProgress({ step: '✅ Import สำเร็จ!', detail: '', percent: 100, error: '', done: true });
       queryClient.invalidateQueries();
       refetchLogs();
+
     } catch (err) {
       const msg = String(err);
-      setProgress({ step: '❌ Import ล้มเหลว', detail: '', percent: 0, error: msg });
+      setProgress({ step: '❌ Import ล้มเหลว', detail: '', percent: 0, error: msg, done: false });
       await supabase.from('import_logs').insert({
         file_name: file?.name ?? 'unknown',
         items_count: 0,
@@ -303,242 +339,289 @@ export function ImportPage() {
     }
   };
 
+  // ── Reset All ────────────────────────────────────────────────────────────
   const handleResetAll = async () => {
-    // Immediate feedback to verify click
-    console.log('--- Handle Reset All Clicked ---');
-
-    if (!window.confirm('⚠️ คำเตือน: คุณกำลังจะลบข้อมูลทั้งหมด (Items, Transactions, Thresholds) ออกจากระบบ!\n\nการกระทำนี้ไม่สามารถย้อนคืนได้ ยืนยันที่จะลบหรือไม่?')) {
-      console.log('Reset cancelled by user (1st confirm)');
-      return;
-    }
-
-    if (!window.confirm('กรุณายืนยันอีกครั้งเพื่อความปลอดภัย (ยืนยันครั้งที่ 2)')) {
-      console.log('Reset cancelled by user (2nd confirm)');
-      return;
-    }
+    if (!window.confirm('⚠️ คำเตือน: จะลบ Items, Transactions และ Thresholds ทั้งหมด\n\nไม่สามารถย้อนคืนได้ ยืนยันหรือไม่?')) return;
+    if (!window.confirm('ยืนยันครั้งที่ 2 — ลบข้อมูลทั้งหมดจริงๆ?')) return;
 
     setImporting(true);
-    setProgress({ step: 'กำลังล้างข้อมูลทั้งหมด...', detail: 'เริ่มต้น (Server-side reset)...', percent: 5, error: '' });
-
+    setProgress({ step: 'กำลังล้างข้อมูลทั้งหมด...', detail: '', percent: 10, error: '', done: false });
     try {
-      console.log('Step 1: Calling clear_all_data RPC...');
-      // 1. ลองใช้ RPC (Remote Procedure Call) เพื่อลบข้อมูลแบบ atomic และข้าม RLS
       const { error: rpcErr } = await supabase.rpc('clear_all_data');
-
       if (rpcErr) {
-        console.warn('RPC Failed or not found, falling back to manual delete...', rpcErr);
-        // 2. ถ้า RPC ยังไม่ได้ถูกสร้าง ให้ลบแบบ manual (แต่อาจจะติด RLS)
         await supabase.from('inventory_transactions').delete().neq('id', 0);
         await supabase.from('stock_thresholds').delete().neq('id', 0);
         await supabase.from('items').delete().neq('item_code', '');
         await supabase.from('system_config').upsert({ key: 'last_sync_at', value: '' });
       }
-
-      // Verification Step
-      console.log('Verification: Checking actual database counts...');
-      const { count: txLeft } = await supabase.from('inventory_transactions').select('*', { count: 'exact', head: true });
+      const { count: txLeft }    = await supabase.from('inventory_transactions').select('*', { count: 'exact', head: true });
       const { count: itemsLeft } = await supabase.from('items').select('*', { count: 'exact', head: true });
 
-      console.log(`Final Database Stats: Transactions: ${txLeft}, Items: ${itemsLeft}`);
-
-      console.log('Reset COMPLETED. Clearing caches...');
-      setProgress({ step: '✅ ล้างข้อมูลทั้งหมดสำเร็จ', detail: `คงเหลือ: Tx(${txLeft ?? 0}), Items(${itemsLeft ?? 0})`, percent: 100, error: '' });
-
-      // Force Hard Cache Clear
+      setProgress({ step: '✅ ล้างข้อมูลสำเร็จ', detail: `Tx: ${txLeft ?? 0} | Items: ${itemsLeft ?? 0}`, percent: 100, error: '', done: true });
       queryClient.clear();
       await queryClient.refetchQueries();
-
-      setFile(null);
-      setParsedData(null);
+      setFile(null); setParsedData(null);
       refetchLogs();
-
-      if ((txLeft ?? 0) > 0 || (itemsLeft ?? 0) > 0) {
-        alert(`⚠️ ข้อมูลยังลบไม่หมด!\n- Transactions เหลือ: ${txLeft}\n- Items เหลือ: ${itemsLeft}\n\nสาเหตุ: รบกวนคุณลูกค้าเปิดไฟล์ supabase/migration.sql แล้ว Copy โค้ดไปรันใน SQL Editor ของ Supabase Dashboard เพื่ออนุญาตสิทธิ์การลบครับ`);
-      } else {
-        alert('✨ ล้างข้อมูลสำเร็จ 100% (ข้อมูลเป็น 0 รายการ)');
-      }
-
     } catch (err) {
-      console.error('Reset failed:', err);
-      setProgress({ step: '❌ ล้างข้อมูลล้มเหลว', detail: '', percent: 0, error: String(err) });
-      alert('เกิดข้อผิดพลาดในการลบข้อมูล: ' + String(err));
+      setProgress({ step: '❌ ล้างข้อมูลล้มเหลว', detail: '', percent: 0, error: String(err), done: false });
     } finally {
       setImporting(false);
     }
   };
 
-  const isSuccess = progress.percent === 100;
-  const barColor = progress.error
-    ? 'var(--color-critical)'
-    : isSuccess
-      ? 'var(--color-success)'
-      : 'var(--color-primary-light)';
+  const nothingSelected = !includeItems && !includeTxns;
+  const canImport = !!parsedData && !importing && !nothingSelected && (
+    (includeItems && parsedData.items.length > 0) ||
+    (includeTxns && parsedData.transactions.length > 0)
+  );
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* ── Upload Card ── */}
+
+      {/* ══ Section 1: File Upload ══════════════════════════════════════════ */}
       <div className="card">
-        <h3 className="font-semibold mb-1" style={{ color: 'var(--text)' }}>
-          Import Data from SAP B1 Export
-        </h3>
+        <div className="flex items-center gap-3 mb-1">
+          <FileSpreadsheet size={20} style={{ color: 'var(--color-primary-light)' }} />
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Import Data from SAP B1 Export</h3>
+        </div>
         <p className="text-sm mb-5" style={{ color: 'var(--text-muted)' }}>
-          อัปโหลดไฟล์ .xlsx ที่มี 2 sheet: <strong>dbo_OITM</strong> (Item Master) และ{' '}
-          <strong>dbo_OIMN</strong> (Transactions)
+          อัปโหลดไฟล์ .xlsx ที่ export จาก SAP B1 — รองรับ sheet <strong>dbo_OITM</strong> (Item Master) และ <strong>dbo_OIMN</strong> (Transactions)
         </p>
 
-        {/* File Drop Zone */}
+        {/* Drop Zone */}
         <label
           className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-10 cursor-pointer transition-colors"
-          style={{ borderColor: file ? '#2E75B6' : 'var(--border)', backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)' }}
+          style={{
+            borderColor: file ? 'var(--color-primary-light)' : 'var(--border)',
+            backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)',
+          }}
+          onDrop={handleDrop}
+          onDragOver={e => e.preventDefault()}
         >
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleFileChange}
-            disabled={importing}
-            className="hidden"
-          />
-          <Upload size={36} style={{ color: file ? '#2E75B6' : 'var(--text-muted)' }} />
+          <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} disabled={importing} className="hidden" />
+          <Upload size={36} style={{ color: file ? 'var(--color-primary-light)' : 'var(--text-muted)' }} />
           <p className="mt-3 font-medium" style={{ color: 'var(--text)' }}>
-            {file ? file.name : 'คลิกเพื่อเลือกไฟล์ Excel'}
+            {file ? file.name : 'คลิกหรือลากไฟล์ Excel มาวาง'}
           </p>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
             {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'รองรับ .xlsx เท่านั้น'}
           </p>
         </label>
 
-        {/* Parsed Preview */}
-        {parsedData && !importing && (
-          <div className="mt-5 space-y-4">
-            {/* Stats */}
-            <div className="flex flex-wrap items-center gap-6 p-4 rounded-xl" style={{ backgroundColor: 'var(--bg-alt)' }}>
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet size={20} style={{ color: 'var(--color-primary-light)' }} />
-                <span style={{ color: 'var(--text)' }}>
-                  Items: <strong>{formatNumber(parsedData.items.length)}</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet size={20} style={{ color: 'var(--color-accent)' }} />
-                <span style={{ color: 'var(--text)' }}>
-                  Transactions: <strong>{formatNumber(parsedData.transactions.length)}</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Import Mode */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setImportMode('replace')}
-                className={`flex-1 flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-colors ${importMode === 'replace'
-                  ? 'border-[var(--color-primary)] bg-blue-50 dark:bg-blue-950'
-                  : ''
-                  }`}
-                style={{ borderColor: importMode === 'replace' ? '#1F3864' : 'var(--border)' }}
-              >
-                <RefreshCw size={20} style={{ color: importMode === 'replace' ? '#1F3864' : 'var(--text-muted)', flexShrink: 0 }} />
-                <div>
-                  <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>Replace All (แนะนำ)</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    ลบข้อมูลเก่าทั้งหมดแล้ว import ใหม่ — เร็วที่สุด
-                  </p>
-                </div>
-              </button>
-
-              <button
-                onClick={() => setImportMode('append')}
-                className={`flex-1 flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-colors`}
-                style={{ borderColor: importMode === 'append' ? '#1F3864' : 'var(--border)', backgroundColor: importMode === 'append' ? '#EFF6FF' : undefined }}
-              >
-                <PlusCircle size={20} style={{ color: importMode === 'append' ? '#1F3864' : 'var(--text-muted)', flexShrink: 0 }} />
-                <div>
-                  <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>Append (เพิ่มเฉพาะใหม่)</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    ข้ามรายการที่ซ้ำ — ใช้สำหรับ update ข้อมูลบางส่วน
-                  </p>
-                </div>
-              </button>
-            </div>
-
-            {importMode === 'replace' && (
-              <div className="flex items-start gap-2 p-3 rounded-lg text-sm" style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                <Info size={16} className="text-orange-500 mt-0.5 shrink-0" />
-                <span className="text-orange-800">
-                  <strong>Replace mode</strong>: จะลบ Transactions ทั้งหมดก่อน import — ข้อมูล Items จะถูก upsert (ไม่ลบ)
-                </span>
-              </div>
-            )}
-
-            <button
-              onClick={handleImport}
-              disabled={importing}
-              className="btn btn-primary w-full py-3 text-base"
-            >
-              <Upload size={18} />
-              {importMode === 'replace' ? 'Replace & Import' : 'Append Import'}
-            </button>
-          </div>
-        )}
-
-        {/* Progress */}
-        {(importing || progress.step) && (
-          <div className="mt-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{progress.step}</span>
-                {progress.detail && (
-                  <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{progress.detail}</span>
-                )}
-              </div>
-              <span className="text-sm font-semibold" style={{ color: 'var(--text-muted)' }}>
-                {Math.round(progress.percent)}%
-              </span>
-            </div>
-
-            <div className="h-3 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-200"
-                style={{ width: `${progress.percent}%`, backgroundColor: barColor }}
-              />
-            </div>
-
-            {progress.error && (
-              <div className="p-3 rounded-lg text-sm text-red-700 bg-red-50 border border-red-200 mt-2">
-                <strong>Error:</strong> {progress.error}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Dangerous Actions */}
-        {!importing && (
-          <div className="mt-10 pt-6 border-t border-red-100">
-            <h4 className="text-sm font-semibold text-red-600 mb-2">Dangerous Zone</h4>
-            <div className="p-4 rounded-xl border border-red-200 bg-red-50/50 flex items-center justify-between">
-              <div>
-                <p className="font-medium text-sm text-red-900">ล้างข้อมูลทั้งหมดในระบบ</p>
-                <p className="text-xs text-red-700 mt-1">ลบ Items, Transactions และ Thresholds ทั้งหมดเพื่อเริ่มต้นใหม่</p>
-              </div>
-              <button
-                onClick={() => {
-                  console.log('Button clicked via inline wrapper');
-                  handleResetAll();
-                }}
-                className="btn border-red-300 text-red-600 hover:bg-red-600 hover:text-white bg-white transition-colors"
-                style={{ cursor: 'pointer' }}
-                title="ลบข้อมูลทั้งหมดถาวร"
-              >
-                Clear All Data
-              </button>
-            </div>
+        {/* Sheet Detection Result */}
+        {parsedData && (
+          <div className="mt-4 flex flex-wrap gap-3">
+            <SheetBadge
+              label="dbo_OITM (Master Data)"
+              found={parsedData.hasItemSheet}
+              count={parsedData.items.length}
+              unit="items"
+            />
+            <SheetBadge
+              label="dbo_OIMN (Transactions)"
+              found={parsedData.hasTxnSheet}
+              count={parsedData.transactions.length}
+              unit="rows"
+            />
           </div>
         )}
       </div>
 
-      {/* ── Import History ── */}
+      {/* ══ Section 2: Import Configuration ════════════════════════════════ */}
+      {parsedData && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          {/* ── Panel A: Master Data (Items) ── */}
+          <ImportPanel
+            icon={<Package size={20} />}
+            title="Master Data — Items"
+            subtitle="อัปเดตชื่อสินค้า, ราคา, กลุ่มสินค้า (Upsert — ไม่มีการลบ)"
+            available={parsedData.hasItemSheet && parsedData.items.length > 0}
+            count={parsedData.items.length}
+            countLabel="items"
+            enabled={includeItems}
+            onToggle={() => setIncludeItems(v => !v)}
+            unavailableReason={!parsedData.hasItemSheet ? 'ไม่พบ sheet dbo_OITM' : 'ไม่มีข้อมูล item'}
+            modeNode={
+              <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+                style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                <CheckCircle size={14} className="text-green-600" />
+                <span className="text-green-800">Upsert เสมอ — ปลอดภัย ไม่ลบข้อมูลเก่า</span>
+              </div>
+            }
+            previewExpanded={showItemPreview}
+            onTogglePreview={() => setShowItemPreview(v => !v)}
+            previewNode={
+              parsedData.items.length > 0 ? (
+                <PreviewTable
+                  columns={['item_code', 'itemname', 'group_code', 'uom', 'std_cost', 'moving_avg']}
+                  labels={['Code', 'ชื่อสินค้า', 'Group', 'UOM', 'Std Cost', 'Moving Avg']}
+                  rows={parsedData.items.slice(0, 5) as Record<string, unknown>[]}
+                />
+              ) : null
+            }
+          />
+
+          {/* ── Panel B: Transactions ── */}
+          <ImportPanel
+            icon={<ArrowLeftRight size={20} />}
+            title="Transactions — Movement"
+            subtitle="ข้อมูลการเคลื่อนไหวสินค้า (In/Out/Transfer)"
+            available={parsedData.hasTxnSheet && parsedData.transactions.length > 0}
+            count={parsedData.transactions.length}
+            countLabel="rows"
+            enabled={includeTxns}
+            onToggle={() => setIncludeTxns(v => !v)}
+            unavailableReason={!parsedData.hasTxnSheet ? 'ไม่พบ sheet dbo_OIMN' : 'ไม่มีข้อมูล transaction'}
+            infoNode={
+              parsedData.txDateMin && parsedData.txDateMax ? (
+                <div className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-2"
+                  style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+                  <span>📅 ช่วงข้อมูล: <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMin}</strong> ถึง <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMax}</strong></span>
+                </div>
+              ) : null
+            }
+            modeNode={
+              <div className="space-y-2">
+                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Import Mode:</p>
+                <div className="flex gap-2">
+                  <ModeButton
+                    icon={<RefreshCw size={14} />}
+                    label="Replace All"
+                    desc="ลบเดิมทั้งหมด → import ใหม่"
+                    active={txnMode === 'replace'}
+                    onClick={() => setTxnMode('replace')}
+                  />
+                  <ModeButton
+                    icon={<PlusCircle size={14} />}
+                    label="Append"
+                    desc="เพิ่มเฉพาะรายการใหม่ ข้ามซ้ำ"
+                    active={txnMode === 'append'}
+                    onClick={() => setTxnMode('append')}
+                  />
+                </div>
+                {txnMode === 'replace' && includeTxns && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-lg text-xs"
+                    style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
+                    <AlertTriangle size={13} className="text-orange-500 mt-0.5 shrink-0" />
+                    <span className="text-orange-800">
+                      <strong>Replace mode:</strong> จะลบ Transactions ทั้งหมดในระบบก่อน แล้ว import ใหม่จากไฟล์
+                    </span>
+                  </div>
+                )}
+              </div>
+            }
+            previewExpanded={showTxnPreview}
+            onTogglePreview={() => setShowTxnPreview(v => !v)}
+            previewNode={
+              parsedData.transactions.length > 0 ? (
+                <PreviewTable
+                  columns={['item_code', 'doc_date', 'direction', 'warehouse', 'in_qty', 'out_qty', 'amount']}
+                  labels={['Item', 'Date', 'Direction', 'WH', 'In', 'Out', 'Amount']}
+                  rows={parsedData.transactions.slice(0, 5) as Record<string, unknown>[]}
+                />
+              ) : null
+            }
+          />
+        </div>
+      )}
+
+      {/* ══ Section 3: Action & Progress ════════════════════════════════════ */}
+      {parsedData && (
+        <div className="card space-y-4">
+
+          {/* Summary of what will be imported */}
+          <div className="flex flex-wrap gap-3 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+            <h4 className="w-full text-sm font-semibold" style={{ color: 'var(--text)' }}>จะ Import:</h4>
+            {includeItems && parsedData.items.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
+                style={{ backgroundColor: '#DBEAFE', color: '#1E40AF' }}>
+                <Package size={14} />
+                {formatNumber(parsedData.items.length)} Items (Upsert)
+              </span>
+            )}
+            {includeTxns && parsedData.transactions.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
+                style={{ backgroundColor: '#E0E7FF', color: '#3730A3' }}>
+                <ArrowLeftRight size={14} />
+                {formatNumber(parsedData.transactions.length)} Transactions ({txnMode === 'replace' ? 'Replace' : 'Append'})
+              </span>
+            )}
+            {nothingSelected && (
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                — กรุณาเปิด Master Data หรือ Transactions อย่างน้อยหนึ่งอย่าง
+              </span>
+            )}
+          </div>
+
+          {/* Import Button */}
+          <button
+            onClick={handleImport}
+            disabled={!canImport}
+            className="btn btn-primary w-full py-3 text-base gap-2"
+            style={{ opacity: canImport ? 1 : 0.5 }}
+          >
+            <Upload size={18} />
+            {importing ? 'กำลัง import...' : nothingSelected ? 'เลือกข้อมูลที่ต้องการ import' : 'เริ่ม Import'}
+          </button>
+
+          {/* Progress */}
+          {(importing || progress.step) && (
+            <ProgressBar progress={progress} />
+          )}
+
+          {/* Success Result */}
+          {lastResult && progress.done && !progress.error && (
+            <div className="p-4 rounded-xl space-y-2"
+              style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+              <p className="font-semibold text-green-800 flex items-center gap-2">
+                <CheckCircle size={18} /> Import สำเร็จ
+              </p>
+              <div className="flex flex-wrap gap-4 text-sm text-green-700">
+                {lastResult.itemsUpserted > 0 && (
+                  <span>📦 Items upserted: <strong>{formatNumber(lastResult.itemsUpserted)}</strong></span>
+                )}
+                {lastResult.txnInserted > 0 && (
+                  <span>📊 Transactions inserted: <strong>{formatNumber(lastResult.txnInserted)}</strong></span>
+                )}
+                {lastResult.txnSkipped > 0 && (
+                  <span className="text-orange-600">⚠ Skipped: <strong>{formatNumber(lastResult.txnSkipped)}</strong></span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Section 4: Dangerous Zone ════════════════════════════════════════ */}
+      {!importing && (
+        <div className="card">
+          <h4 className="text-sm font-semibold text-red-600 mb-3 flex items-center gap-2">
+            <AlertTriangle size={15} /> Dangerous Zone
+          </h4>
+          <div className="p-4 rounded-xl flex items-center justify-between gap-4"
+            style={{ border: '1px solid #FECACA', backgroundColor: '#FFF5F5' }}>
+            <div>
+              <p className="font-medium text-sm text-red-900">ล้างข้อมูลทั้งหมดในระบบ</p>
+              <p className="text-xs text-red-700 mt-0.5">ลบ Items, Transactions และ Thresholds ทั้งหมด — ไม่สามารถย้อนคืนได้</p>
+            </div>
+            <button
+              onClick={handleResetAll}
+              className="btn shrink-0"
+              style={{ border: '1px solid #FCA5A5', color: '#DC2626', backgroundColor: 'white' }}
+            >
+              <Trash2 size={15} /> Clear All Data
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Section 5: Import History ════════════════════════════════════════ */}
       <div className="card">
-        <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>Import History</h3>
+        <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          Import History
+        </h3>
         <div className="table-container">
           <table>
             <thead>
@@ -555,23 +638,15 @@ export function ImportPage() {
               {(importLogs ?? []).map((log) => (
                 <tr key={log.id}>
                   <td>
-                    {log.status === 'success' && <CheckCircle size={18} className="text-green-600" />}
-                    {log.status === 'error' && <XCircle size={18} className="text-red-600" />}
-                    {log.status === 'partial' && <AlertTriangle size={18} className="text-orange-500" />}
+                    {log.status === 'success' && <CheckCircle size={17} className="text-green-600" />}
+                    {log.status === 'error'   && <XCircle size={17} className="text-red-600" />}
+                    {log.status === 'partial' && <AlertTriangle size={17} className="text-orange-500" />}
                   </td>
                   <td className="font-medium" style={{ color: 'var(--text)' }}>{log.file_name}</td>
                   <td style={{ color: 'var(--text-muted)' }}>{formatDateTime(log.imported_at)}</td>
                   <td className="text-right">{formatNumber(log.items_count)}</td>
                   <td className="text-right">{formatNumber(log.transactions_count)}</td>
-                  <td
-                    className="text-sm"
-                    style={{
-                      color: 'var(--text-muted)',
-                      maxWidth: '220px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
+                  <td className="text-sm" style={{ color: 'var(--text-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {log.error_summary ?? '—'}
                   </td>
                 </tr>
@@ -587,6 +662,206 @@ export function ImportPage() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function SheetBadge({ label, found, count, unit }: { label: string; found: boolean; count: number; unit: string }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+      style={{
+        backgroundColor: found ? '#F0FDF4' : 'var(--bg-alt)',
+        border: `1px solid ${found ? '#BBF7D0' : 'var(--border)'}`,
+        color: found ? '#166534' : 'var(--text-muted)',
+      }}>
+      {found
+        ? <CheckCircle size={14} className="text-green-600 shrink-0" />
+        : <XCircle size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />}
+      <span><strong>{label}</strong>{found ? `: ${formatNumber(count)} ${unit}` : ' — ไม่พบ'}</span>
+    </div>
+  );
+}
+
+interface ImportPanelProps {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  available: boolean;
+  count: number;
+  countLabel: string;
+  enabled: boolean;
+  onToggle: () => void;
+  unavailableReason?: string;
+  infoNode?: React.ReactNode;
+  modeNode?: React.ReactNode;
+  previewExpanded: boolean;
+  onTogglePreview: () => void;
+  previewNode: React.ReactNode;
+}
+
+function ImportPanel({
+  icon, title, subtitle, available, count, countLabel,
+  enabled, onToggle, unavailableReason, infoNode, modeNode,
+  previewExpanded, onTogglePreview, previewNode,
+}: ImportPanelProps) {
+  const isEnabled = available && enabled;
+
+  return (
+    <div
+      className="card flex flex-col gap-4 transition-all"
+      style={{
+        borderWidth: 2,
+        borderColor: isEnabled ? 'var(--color-primary-light)' : 'var(--border)',
+        opacity: available ? 1 : 0.55,
+      }}
+    >
+      {/* Header with toggle */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span style={{ color: isEnabled ? 'var(--color-primary-light)' : 'var(--text-muted)' }}>{icon}</span>
+          <div>
+            <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>{title}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>
+          </div>
+        </div>
+        <button
+          onClick={onToggle}
+          disabled={!available}
+          className="shrink-0 transition-colors"
+          title={isEnabled ? 'ปิด' : 'เปิด'}
+        >
+          {isEnabled
+            ? <ToggleRight size={32} style={{ color: 'var(--color-primary-light)' }} />
+            : <ToggleLeft size={32} style={{ color: 'var(--text-muted)' }} />}
+        </button>
+      </div>
+
+      {/* Unavailable message */}
+      {!available && unavailableReason && (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>⚠ {unavailableReason}</p>
+      )}
+
+      {/* Count badge */}
+      {available && (
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-bold" style={{ color: isEnabled ? 'var(--text)' : 'var(--text-muted)' }}>
+            {formatNumber(count)}
+          </span>
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{countLabel}</span>
+        </div>
+      )}
+
+      {/* Info node (e.g. date range) */}
+      {available && infoNode}
+
+      {/* Mode node */}
+      {available && isEnabled && modeNode}
+
+      {/* Preview toggle */}
+      {available && count > 0 && (
+        <div>
+          <button
+            onClick={onTogglePreview}
+            className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {previewExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {previewExpanded ? 'ซ่อน Preview' : 'แสดง Preview (5 แถวแรก)'}
+          </button>
+          {previewExpanded && (
+            <div className="mt-3 overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+              {previewNode}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModeButton({
+  icon, label, desc, active, onClick,
+}: { icon: React.ReactNode; label: string; desc: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex-1 flex items-start gap-2 p-2.5 rounded-lg border text-left transition-colors"
+      style={{
+        borderColor: active ? 'var(--color-primary-light)' : 'var(--border)',
+        backgroundColor: active ? '#EFF6FF' : 'transparent',
+      }}
+    >
+      <span className="mt-0.5 shrink-0" style={{ color: active ? 'var(--color-primary-light)' : 'var(--text-muted)' }}>{icon}</span>
+      <div>
+        <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>{label}</p>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+      </div>
+    </button>
+  );
+}
+
+function PreviewTable({ columns, labels, rows }: { columns: string[]; labels: string[]; rows: Record<string, unknown>[] }) {
+  return (
+    <table style={{ fontSize: 11, width: '100%' }}>
+      <thead>
+        <tr style={{ backgroundColor: 'var(--bg-alt)' }}>
+          {labels.map(l => (
+            <th key={l} style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {l}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+            {columns.map(col => (
+              <td key={col} style={{ padding: '4px 8px', color: 'var(--text)', whiteSpace: 'nowrap', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {String(row[col] ?? '—')}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ProgressBar({ progress }: { progress: ProgressState }) {
+  const barColor = progress.error
+    ? '#EF4444'
+    : progress.done
+      ? '#22C55E'
+      : 'var(--color-primary-light)';
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{progress.step}</span>
+          {progress.detail && (
+            <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{progress.detail}</span>
+          )}
+        </div>
+        {!progress.error && (
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-muted)' }}>
+            {Math.round(progress.percent)}%
+          </span>
+        )}
+      </div>
+      <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${progress.percent}%`, backgroundColor: barColor }}
+        />
+      </div>
+      {progress.error && (
+        <div className="p-3 rounded-lg text-sm text-red-700 bg-red-50 border border-red-200">
+          <strong>Error:</strong> {progress.error}
+        </div>
+      )}
     </div>
   );
 }
