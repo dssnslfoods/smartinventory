@@ -1,15 +1,14 @@
 export function formatNumber(value: number, decimals = 0): string {
-  return new Intl.NumberFormat('th-TH', {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value);
 }
 
 export function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('th-TH', {
-    style: 'currency',
-    currency: 'THB',
+  return '฿' + new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -84,5 +83,5 @@ export function formatCompact(value: number): string {
   const sign = value < 0 ? '-' : '';
   if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(1)}M`;
   if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(1)}K`;
-  return `${sign}${abs.toFixed(0)}`;
+  return `${sign}${formatNumber(abs, 0)}`;
 }

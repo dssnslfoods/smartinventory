@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ShoppingCart, Plus, ChevronRight, Truck, Package, CheckCircle2, XCircle, Clock, Search } from 'lucide-react';
-import { usePurchaseOrders, useUpdatePOStatus, useSuppliers } from '@/hooks/useSupabaseQuery';
+import { usePurchaseOrders, useUpdatePOStatus } from '@/hooks/useSupabaseQuery';
 import type { PurchaseOrder, POStatus } from '@/types/database';
 import CreatePOModal from './CreatePOModal';
 import PODetailModal from './PODetailModal';
@@ -35,9 +35,6 @@ export default function PurchaseOrdersPage() {
     if (!next) return;
     await updateStatus.mutateAsync({ po_number: po.po_number, status: next });
   }
-
-  const activeCount   = pos.filter(p => ['confirmed','shipped','in_transit','customs'].includes(p.status)).length;
-  const arrivedCount  = pos.filter(p => p.status === 'arrived').length;
 
   return (
     <div className="p-6 space-y-6">

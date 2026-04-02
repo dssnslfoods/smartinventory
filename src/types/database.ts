@@ -25,7 +25,6 @@ export interface TransactionType {
 export interface Item {
   item_code: string;
   itemname: string;
-  foreign_name: string | null;
   uom: string;
   std_cost: number;
   moving_avg: number;
@@ -36,28 +35,25 @@ export interface Item {
   updated_at: string;
 }
 
-/** Raw inventory_transactions row (post-normalization, no redundant name columns) */
 export interface InventoryTransaction {
   id: number;
   trans_num: number;
   doc_date: string;
   trans_type: number;
   warehouse: string;
-  group_code: number;
   doc_line_num: number | null;
   item_code: string;
   in_qty: number;
   out_qty: number;
-  balance_qty: number;
   amount: number;
   direction: string;
   created_at: string;
   // Joined fields (from v_transactions view)
   itemname?: string;
-  foreign_name?: string;
   whs_name?: string;
   group_name?: string;
   trans_name?: string;
+  group_code?: number;
 }
 
 export interface StockThreshold {
@@ -88,7 +84,6 @@ export interface ImportLog {
 export interface StockOnHand {
   item_code: string;
   itemname: string;
-  foreign_name: string | null;
   warehouse: string;
   whs_name: string;
   whs_type: string;
@@ -301,7 +296,6 @@ export interface GoodsInTransit {
   tracking_number: string | null;
   item_code: string;
   itemname: string;
-  foreign_name: string | null;
   uom: string;
   warehouse: string;
   whs_name: string;
@@ -319,7 +313,6 @@ export interface GoodsInTransit {
 export interface StockPosition {
   item_code: string;
   itemname: string;
-  foreign_name: string | null;
   warehouse: string;
   whs_name: string;
   whs_type: string;

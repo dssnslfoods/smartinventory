@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { useThresholds } from '@/hooks/useSupabaseQuery';
+import { useThresholds, useSystemConfig, useUpdateSystemConfig } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatDateTime } from '@/utils/format';
 import { WAREHOUSES } from '@/types/database';
@@ -8,7 +8,22 @@ import { useQueryClient } from '@tanstack/react-query';
 
 export function SettingsPage() {
   const { data: thresholds, isLoading } = useThresholds();
+  const { data: config } = useSystemConfig();
+  const updateConfig = useUpdateSystemConfig();
   const queryClient = useQueryClient();
+
+  const [thresholdValue, setThresholdValue] = useState<string>('90');
+
+  useEffect(() => {
+    if (config) {
+      setThresholdValue(config.find(c => c.key === 'active_item_threshold_days')?.value || '90');
+    }
+  }, [config]);
+
+  const handleSaveThreshold = () => {
+    if (!thresholdValue) return;
+    updateConfig.mutate({ key: 'active_item_threshold_days', value: thresholdValue });
+  };
 
   // Bulk threshold form
   const [bulkItemCode, setBulkItemCode] = useState('');
@@ -62,6 +77,40 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      {/* System Settings */}
+      <div className="card">
+        <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>System Configuration</h3>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="max-w-[200px]">
+            <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+              Active Item Threshold (Days)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={thresholdValue}
+                onChange={(e) => setThresholdValue(e.target.value)}
+                className="input"
+                min="1"
+              />
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>days</span>
+            </div>
+            <button
+              onClick={handleSaveThreshold}
+              disabled={updateConfig.isPending}
+              className="btn btn-primary mt-3 w-full"
+            >
+              {updateConfig.isPending ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          <div className="flex-1 min-w-[300px]">
+            <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+              * สินค้าที่ไม่มีการเคลื่อนไหว (รับ/จ่าย) เกินจำนวนวันที่กำหนด จะไม่ถูกนับรวมในตัวเลข "สินค้า Active" บน Dashboard
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Threshold Management */}
       <div className="card">
         <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>Stock Threshold Settings</h3>

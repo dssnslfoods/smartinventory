@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Truck, AlertTriangle, Clock, CheckCircle2, Package, Search } from 'lucide-react';
 import { useGoodsInTransit, useStockPosition, useWarehouses } from '@/hooks/useSupabaseQuery';
 import type { ArrivalStatus } from '@/types/database';
+import { formatNumber, formatCurrency } from '@/utils/format';
 
 const ARRIVAL_CONFIG: Record<ArrivalStatus, { label: string; color: string; icon: React.ReactNode }> = {
   overdue:        { label: 'เลยกำหนด',       color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',           icon: <AlertTriangle className="w-3 h-3" /> },
@@ -31,7 +32,6 @@ export default function GoodsInTransitPage() {
   const overdueCount = filtered.filter(t => t.arrival_status === 'overdue').length;
   const todayCount   = filtered.filter(t => t.arrival_status === 'arriving_today').length;
   const soonCount    = filtered.filter(t => t.arrival_status === 'arriving_soon').length;
-  const totalPending = filtered.reduce((s, t) => s + Number(t.pending_qty), 0);
   const totalValue   = filtered.reduce((s, t) => s + Number(t.pending_value), 0);
 
   return (
@@ -77,7 +77,7 @@ export default function GoodsInTransitPage() {
             <span className="text-xs font-medium text-gray-600 dark:text-gray-400">มูลค่ารอรับ</span>
           </div>
           <div className="text-xl font-bold text-gray-900 dark:text-white">
-            ฿{totalValue.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+            {formatCurrency(totalValue)}
           </div>
           <div className="text-xs text-gray-500">ทั้งหมด {filtered.length} รายการ</div>
         </div>
@@ -165,10 +165,10 @@ export default function GoodsInTransitPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{t.whs_name}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-white">
-                        {Number(t.pending_qty).toLocaleString()} <span className="text-xs text-gray-400">{t.uom}</span>
+                        {formatNumber(Number(t.pending_qty), 2)} <span className="text-xs text-gray-400">{t.uom}</span>
                       </td>
                       <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                        ฿{Number(t.pending_value).toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                        {formatCurrency(Number(t.pending_value))}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {t.expected_arrival ? (
@@ -232,22 +232,22 @@ export default function GoodsInTransitPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{p.whs_name}</td>
                     <td className="px-4 py-3 text-right text-gray-900 dark:text-white">
-                      {Number(p.current_stock).toLocaleString()} <span className="text-xs text-gray-400">{p.uom}</span>
+                      {formatNumber(Number(p.current_stock), 2)} <span className="text-xs text-gray-400">{p.uom}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
                       {Number(p.transit_qty) > 0 ? (
                         <span className="font-medium text-orange-600 dark:text-orange-400">
-                          +{Number(p.transit_qty).toLocaleString()}
+                          +{formatNumber(Number(p.transit_qty), 2)}
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-blue-600 dark:text-blue-400">
-                      {Number(p.projected_stock).toLocaleString()} <span className="text-xs font-normal text-gray-400">{p.uom}</span>
+                      {formatNumber(Number(p.projected_stock), 2)} <span className="text-xs font-normal text-gray-400">{p.uom}</span>
                     </td>
                     <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                      ฿{Number(p.projected_value).toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                      {formatCurrency(Number(p.projected_value))}
                     </td>
                     <td className="px-4 py-3 text-center text-xs text-gray-600 dark:text-gray-300">
                       {p.nearest_arrival ?? <span className="text-gray-400">-</span>}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Package, CheckCircle2 } from 'lucide-react';
 import { usePurchaseOrderLines, useReceivePOLine } from '@/hooks/useSupabaseQuery';
 import type { PurchaseOrder, PurchaseOrderLine } from '@/types/database';
+import { formatNumber } from '@/utils/format';
 
 export default function PODetailModal({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
   const { data: lines = [], isLoading } = usePurchaseOrderLines(po.po_number);
@@ -70,13 +71,13 @@ export default function PODetailModal({ po, onClose }: { po: PurchaseOrder; onCl
                     </td>
                     <td className="py-2.5 text-gray-600 dark:text-gray-300 text-xs">{line.whs_name ?? line.warehouse}</td>
                     <td className="py-2.5 text-right text-gray-900 dark:text-white">
-                      {line.ordered_qty.toLocaleString()} <span className="text-xs text-gray-400">{line.uom}</span>
+                      {formatNumber(line.ordered_qty, 2)} <span className="text-xs text-gray-400">{line.uom}</span>
                     </td>
                     <td className="py-2.5 text-right text-green-600 dark:text-green-400">
-                      {line.received_qty.toLocaleString()}
+                      {formatNumber(line.received_qty, 2)}
                     </td>
                     <td className="py-2.5 text-right font-medium text-orange-600 dark:text-orange-400">
-                      {remaining(line).toLocaleString()}
+                      {formatNumber(remaining(line), 2)}
                     </td>
                     <td className="py-2.5 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${

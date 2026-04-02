@@ -325,16 +325,16 @@ export function useKPI() {
   return useQuery({
     queryKey: ['kpi'],
     queryFn: async () => {
-      const [stockRes, itemsRes, alertsRes, configRes] = await Promise.all([
+      const [stockRes, activeItemsRes, alertsRes, configRes] = await Promise.all([
         supabase
           .from('v_stock_onhand')
           .select('stock_value, current_stock, item_code, warehouse')
-          .eq('is_active', true)
+          // .eq('is_active', true) // User chose to stop using is_active field
           .limit(LIMIT_STOCK),
         supabase
-          .from('items')
-          .select('item_code', { count: 'exact', head: true })
-          .eq('is_active', true),
+          .from('v_active_item_count')
+          .select('*')
+          .single(),
         supabase
           .from('v_stock_alerts')
           .select('status', { count: 'exact' })
@@ -349,7 +349,7 @@ export function useKPI() {
 
       const stockData      = (stockRes.data ?? []) as Array<{ stock_value: number }>;
       const totalStockValue = stockData.reduce((sum, r) => sum + Number(r.stock_value), 0);
-      const activeItems    = itemsRes.count ?? 0;
+      const activeItems    = activeItemsRes.data?.active_count ?? 0;
       const criticalAlerts = alertsRes.count ?? 0;
 
       return {
@@ -658,5 +658,34 @@ export function useTransactionsExport(filters?: {
       return (data ?? []) as InventoryTransaction[];
     },
     enabled: false, // only run when explicitly triggered
+  });
+}
+// ============ System Config ============
+export function useSystemConfig() {
+  return useQuery({
+    queryKey: ['systemConfig'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('system_config')
+        .select('*');
+      if (error) throw error;
+      return data as Array<{ key: string; value: string }>;
+    },
+  });
+}
+
+export function useUpdateSystemConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ key, value }: { key: string; value: string }) => {
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({ key, value }, { onConflict: 'key' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['systemConfig'] });
+      qc.invalidateQueries({ queryKey: ['kpi'] });
+    },
   });
 }

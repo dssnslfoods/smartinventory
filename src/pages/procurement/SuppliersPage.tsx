@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { Building2, Plus, Pencil, Search, Globe, Clock, CheckCircle, XCircle } from 'lucide-react';
-import { useSuppliers, useUpsertSupplier, useDeleteSupplier } from '@/hooks/useSupabaseQuery';
+import { useSuppliers, useUpsertSupplier } from '@/hooks/useSupabaseQuery';
 import type { Supplier } from '@/types/database';
-
-const SHIPPING_METHODS = ['Sea', 'Air', 'Land', 'Courier'] as const;
 
 const EMPTY_FORM: Partial<Supplier> = {
   supplier_code: '', supplier_name: '', country: '',
@@ -18,7 +16,6 @@ export default function SuppliersPage() {
 
   const { data: suppliers = [], isLoading } = useSuppliers({ search: search || undefined });
   const upsert = useUpsertSupplier();
-  const remove = useDeleteSupplier();
 
   function openCreate() {
     setForm(EMPTY_FORM);

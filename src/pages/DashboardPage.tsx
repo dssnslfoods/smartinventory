@@ -46,7 +46,7 @@ const tooltipStyle = {
 export function DashboardPage() {
   // === Data hooks ===
   const { data: kpi, isLoading: kpiLoading } = useKPI();
-  const { data: stockData } = useStockOnHand({ isActive: true });
+  const { data: stockData } = useStockOnHand();
   const { data: monthlyData, isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
   const { data: alerts } = useStockAlerts();
   const { data: recentTx } = useTransactions({ page: 0, pageSize: 200 });

@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
   RefreshCw, PlusCircle, Info, Package, ArrowLeftRight,
-  ChevronDown, ChevronUp, Trash2, ToggleLeft, ToggleRight,
+  ChevronDown, ChevronUp, Trash2, ToggleLeft, ToggleRight, Download,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
@@ -14,7 +14,6 @@ import { useQueryClient } from '@tanstack/react-query';
 interface ParsedItem {
   item_code: string;
   itemname: string;
-  foreign_name: string | null;
   uom: string;
   std_cost: number;
   moving_avg: number;
@@ -27,12 +26,10 @@ interface ParsedTransaction {
   doc_date: string;
   trans_type: number;
   warehouse: string;
-  group_code: number;
   doc_line_num: number;
   item_code: string;
   in_qty: number;
   out_qty: number;
-  balance_qty: number;
   amount: number;
   direction: string;
 }
@@ -136,33 +133,32 @@ export function ImportPage() {
           return undefined;
         };
 
-        // ── Items (dbo_OITM) ─────────────────────────────────────────────────
-        const oitmSheetName = wb.SheetNames.find(n => n === 'dbo_OITM') ?? wb.SheetNames[0];
+        // ── Items (dbo_OITM or Items) ─────────────────────────────────────────────────
+        const oitmSheetName = wb.SheetNames.find(n => n.toLowerCase() === 'items' || n === 'dbo_OITM') ?? wb.SheetNames[0];
         const oitmSheet = wb.Sheets[oitmSheetName];
         const hasItemSheet = !!oitmSheet;
 
         let items: ParsedItem[] = [];
         if (hasItemSheet) {
           let oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet);
-          if (oitmRaw.length > 0 && !('ItemCode' in oitmRaw[0])) {
+          if (oitmRaw.length > 0 && !('ItemCode' in oitmRaw[0]) && !('Item Code' in oitmRaw[0])) {
             oitmRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oitmSheet, { range: 1 });
           }
           items = oitmRaw
             .map((row) => ({
-              item_code:    String(getVal(row, 'ItemCode')       ?? '').trim(),
-              itemname:     String(getVal(row, 'ItemName')       ?? '').trim(),
-              foreign_name: getVal(row, 'FrgnName') ? String(getVal(row, 'FrgnName')) : null,
-              uom:          String(getVal(row, 'InvntryUom')     ?? 'KG'),
-              std_cost:     Number(getVal(row, 'STD COST')       ?? 0),
-              moving_avg:   Number(getVal(row, 'Moving Average') ?? 0),
-              group_code:   Number(getVal(row, 'ItmsGrpCod')     ?? 0),
-              is_active:    String(getVal(row, 'frozenFor')      ?? '') !== 'Y',
+              item_code:    String((getVal(row, 'Item Code') || getVal(row, 'ItemCode')) ?? '').trim(),
+              itemname:     String((getVal(row, 'Item Name') || getVal(row, 'ItemName')) ?? '').trim(),
+              uom:          String((getVal(row, 'UOM') || getVal(row, 'InvntryUom')) ?? 'KG'),
+              std_cost:     Number((getVal(row, 'Std Cost') || getVal(row, 'STD COST')) ?? 0),
+              moving_avg:   Number((getVal(row, 'Moving Avg') || getVal(row, 'Moving Average')) ?? 0),
+              group_code:   Number((getVal(row, 'Group Code') || getVal(row, 'ItmsGrpCod')) ?? 0),
+              is_active:    String((getVal(row, 'Status') || getVal(row, 'frozenFor')) ?? '') !== 'Y',
             }))
             .filter((i) => i.item_code);
         }
 
-        // ── Transactions (dbo_OIMN) ─────────────────────────────────────────
-        const oimnSheetName = wb.SheetNames.find(n => n === 'dbo_OIMN') ?? wb.SheetNames[1];
+        // ── Transactions (dbo_OIMN or Transactions) ─────────────────────────────────────────
+        const oimnSheetName = wb.SheetNames.find(n => n.toLowerCase() === 'transactions' || n === 'dbo_OIMN') ?? wb.SheetNames[1];
         const oimnSheet = wb.Sheets[oimnSheetName];
         const hasTxnSheet = !!oimnSheet && oitmSheetName !== oimnSheetName;
 
@@ -174,25 +170,25 @@ export function ImportPage() {
           const oimnRaw = XLSX.utils.sheet_to_json<Record<string, unknown>>(oimnSheet);
           transactions = oimnRaw
             .map((row) => {
-              let docDate = row['DocDate'];
+              let docDate = getVal(row, 'Date') || row['DocDate'];
               if (docDate instanceof Date) {
                 docDate = docDate.toISOString().split('T')[0];
               } else {
                 docDate = String(docDate ?? '').split('T')[0].split(' ')[0];
               }
+              const inQty = Number((getVal(row, 'In Qty') || row['InQuantity']) ?? 0);
+              const outQty = Number((getVal(row, 'Out Qty') || row['OutQuantity']) ?? 0);
               return {
-                trans_num:    Number(row['TransNum']        ?? 0),
+                trans_num:    Number((getVal(row, 'Transaction No') || row['TransNum']) ?? 0),
                 doc_date:     String(docDate),
-                trans_type:   Number(row['TransType']       ?? 0),
-                warehouse:    String(row['Warehouse']       ?? '').trim(),
-                group_code:   Number(row['ItmsGrpCod']      ?? 0),
-                doc_line_num: row['DocLineNum'] != null ? Number(row['DocLineNum']) : -1,
-                item_code:    String(row['ItemCode']        ?? '').trim(),
-                in_qty:       Number(row['InQuantity']      ?? 0),
-                out_qty:      Number(row['OutQuantity']     ?? 0),
-                balance_qty:  Number(row['BalanceQuantity'] ?? 0),
-                amount:       Number(row['Amount']          ?? 0),
-                direction:    String(row['Transection']     ?? '').trim(),
+                trans_type:   Number((getVal(row, 'Tx Type') || row['TransType']) ?? 0),
+                warehouse:    String((getVal(row, 'Warehouse') || row['Warehouse']) ?? '').trim(),
+                doc_line_num: getVal(row, 'Line Num') != null ? Number(getVal(row, 'Line Num')) : (row['DocLineNum'] != null ? Number(row['DocLineNum']) : -1),
+                item_code:    String((getVal(row, 'Item Code') || row['ItemCode']) ?? '').trim(),
+                in_qty:       inQty,
+                out_qty:      outQty,
+                amount:       Number((getVal(row, 'Total Amount') || row['Amount']) ?? 0),
+                direction:    String((getVal(row, 'Direction') || row['Transection']) ?? (inQty > 0 ? 'In' : 'Out')).trim(),
               };
             })
             .filter((t) => t.item_code && t.trans_num);
@@ -234,6 +230,123 @@ export function ImportPage() {
     setFile(f);
     setParsedData(null);
     parseExcel(f);
+  };
+
+  const handleDownloadTemplate = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Instructions Sheet
+    const instructions = [
+      ['ระบบนำเข้าข้อมูล Smart Inventory (Template)'],
+      [''],
+      ['คำแนะนำการใช้งาน:'],
+      ['1. ข้อมูลประกอบด้วย 2 Sheet หลักคือ "Items" (ข้อมูลสินค้า) และ "Transactions" (ข้อมูลการเคลื่อนไหว)'],
+      ['2. ระบบจะทำการอัปเดต Items ก่อน จากนั้นจึงนำเข้า Transactions เพื่อป้องกันข้อผิดพลาด'],
+      ['3. ห้ามเปลี่ยนชื่อ Sheet และชื่อ Column ที่กำหนดไว้ในหัวตารางแถวที่ 1'],
+      [''],
+      ['📌 คำอธิบาย Sheet "Items"'],
+      ['Column', 'ความหมาย', 'ตัวอย่าง / ค่าที่ยอมรับ', 'บังคับ?'],
+      ['Item Code', 'รหัสสินค้า', 'RM-10001, FG-0500', 'ใช่'],
+      ['Item Name', 'ชื่อสินค้า', 'แป้งสาลีอเนกประสงค์, แซนวิชแฮมชีส', 'ใช่'],
+      ['Group Code', 'รหัสกลุ่มสินค้า', '125 (Raw), 123 (Finish Goods)', 'ใช่'],
+      ['UOM', 'หน่วยนับ', 'KG, PCS', 'ใช่'],
+      ['Std Cost', 'ต้นทุนมาตรฐาน', '150.50', 'ไม่'],
+      ['Moving Avg', 'ต้นทุนเฉลี่ย', '151.00', 'ไม่'],
+      ['Status', 'สถานะการใช้งาน', 'A (Active) หรือ I (Inactive)', 'ไม่ (ค่าเริ่มต้น: A)'],
+      [''],
+      ['📌 คำอธิบาย Sheet "Transactions"'],
+      ['Column', 'ความหมาย', 'ตัวอย่าง / ค่าที่ยอมรับ', 'บังคับ?'],
+      ['Date', 'วันที่ทำรายการ', '2026-04-01', 'ใช่'],
+      ['Transaction No', 'เลขที่เอกสาร', '100001', 'ใช่'],
+      ['Line Num', 'บรรทัดในเอกสาร', '0, 1, 2', 'ใช่'],
+      ['Tx Type', 'รหัสประเภทรายการ', '20 (รับเข้า), 60 (จ่ายออก), 67 (โอนย้าย)', 'ใช่'],
+      ['Warehouse', 'คลังสินค้า', 'FS-RM01, FS-FG01', 'ใช่'],
+      ['Item Code', 'รหัสสินค้า', 'RM-10001', 'ใช่'],
+      ['In Qty', 'ยอดรับเข้า', '50.00', 'ไม่'],
+      ['Out Qty', 'ยอดจ่ายออก', '10.50', 'ไม่'],
+      ['Total Amount', 'มูลค่ารวม (บาท)', '2500.00', 'ไม่'],
+      ['Direction', 'ทิศทางการเคลื่อนไหว', 'In, Out, Transfers', 'ไม่ (คำนวณอัตโนมัติ)'],
+    ];
+    const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+    wsInstructions['!cols'] = [{wch: 15}, {wch: 25}, {wch: 35}, {wch: 15}];
+    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instructions');
+    
+    // Items Sheet
+    const itemsData = [
+      {
+        'Item Code': 'RM-10001',
+        'Item Name': 'แป้งสาลีอเนกประสงค์ (Wheat Flour)',
+        'Group Code': 125,
+        'UOM': 'KG',
+        'Std Cost': 15.50,
+        'Moving Avg': 16.00,
+        'Status': 'A',
+      },
+      {
+        'Item Code': 'RM-10002',
+        'Item Name': 'น้ำตาลทรายขาว (White Sugar)',
+        'Group Code': 125,
+        'UOM': 'KG',
+        'Std Cost': 25.00,
+        'Moving Avg': 24.50,
+        'Status': 'A',
+      },
+      {
+        'Item Code': 'FG-05001',
+        'Item Name': 'แซนวิชแฮมชีส (Ham Cheese Sandwich)',
+        'Group Code': 123,
+        'UOM': 'PCS',
+        'Std Cost': 22.00,
+        'Moving Avg': 22.50,
+        'Status': 'A',
+      }
+    ];
+    const wsItems = XLSX.utils.json_to_sheet(itemsData);
+    XLSX.utils.book_append_sheet(wb, wsItems, 'Items');
+    
+    // Transactions Sheet
+    const txData = [
+      {
+        'Date': '2026-04-01',
+        'Transaction No': 2000101,
+        'Line Num': 0,
+        'Tx Type': 20,
+        'Warehouse': 'FS-RM01',
+        'Item Code': 'RM-10001',
+        'In Qty': 1000,
+        'Out Qty': 0,
+        'Total Amount': 16000,
+        'Direction': 'In'
+      },
+      {
+        'Date': '2026-04-01',
+        'Transaction No': 2000101,
+        'Line Num': 1,
+        'Tx Type': 20,
+        'Warehouse': 'FS-RM01',
+        'Item Code': 'RM-10002',
+        'In Qty': 500,
+        'Out Qty': 0,
+        'Total Amount': 12250,
+        'Direction': 'In'
+      },
+      {
+        'Date': '2026-04-02',
+        'Transaction No': 6000205,
+        'Line Num': 0,
+        'Tx Type': 60,
+        'Warehouse': 'FS-RM01',
+        'Item Code': 'RM-10001',
+        'In Qty': 0,
+        'Out Qty': 50,
+        'Total Amount': -800,
+        'Direction': 'Out'
+      }
+    ];
+    const wsTx = XLSX.utils.json_to_sheet(txData);
+    XLSX.utils.book_append_sheet(wb, wsTx, 'Transactions');
+    
+    XLSX.writeFile(wb, 'SmartInventory_Template.xlsx');
   };
 
   // ── Main Import ──────────────────────────────────────────────────────────
@@ -380,161 +493,177 @@ export function ImportPage() {
     <div className="space-y-5">
 
       {/* ══ Page Header ══════════════════════════════════════════════════════ */}
+      {/* ══ Page Header ══════════════════════════════════════════════════════ */}
       <div>
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>Data Import</h2>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>ระบบนำเข้าข้อมูล (Data Import)</h2>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          นำเข้าข้อมูลจาก SAP B1 — อัปเดต Master Data (Items) และ Transactions แยกกันได้อิสระ
+          นำเข้าข้อมูล Master Data และพฤติกรรมการเคลื่อนไหวอย่างปลอดภัยตามลำดับขั้นตอน
         </p>
       </div>
 
-      {/* ══ Section 1+2: Upload + Config Panels (always visible) ════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        {/* ── Left: File Upload ── */}
-        <div className="card flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet size={18} style={{ color: 'var(--color-primary-light)' }} />
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>1. เลือกไฟล์ Excel</h3>
+        {/* ── Left Column: Step 1 & 2 ── */}
+        <div className="lg:col-span-4 space-y-6">
+          
+          {/* Step 1 */}
+          <div className="card flex flex-col gap-4" style={{ border: '2px solid var(--color-primary-light)' }}>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold uppercase" style={{ color: 'var(--color-primary-light)' }}>Step 1</span>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>เตรียมข้อมูลจาก Template</h3>
+            </div>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              ดาวน์โหลดฟอร์มมาตรฐาน ซึ่งมีตัวอย่างข้อมูลสมจริงและ "คำแนะนำ" ใน Sheet แรก
+            </p>
+            <button onClick={handleDownloadTemplate} className="btn btn-primary w-full py-2.5 shadow-sm">
+              <Download size={16} className="mr-2" /> โหลด Template 
+            </button>
           </div>
 
-          {/* Drop Zone */}
-          <label
-            className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors flex-1"
-            style={{
-              borderColor: file ? 'var(--color-primary-light)' : 'var(--border)',
-              backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)',
-            }}
-            onDrop={handleDrop}
-            onDragOver={e => e.preventDefault()}
-          >
-            <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} disabled={importing} className="hidden" />
-            <Upload size={32} style={{ color: file ? 'var(--color-primary-light)' : 'var(--text-muted)' }} />
-            <p className="mt-2 font-medium text-sm text-center" style={{ color: 'var(--text)' }}>
-              {file ? file.name : 'คลิกหรือลากไฟล์มาวาง'}
-            </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              {file
-                ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
-                : 'รองรับ .xlsx — SAP B1 Export'}
-            </p>
-          </label>
+          {/* Step 2 */}
+          <div className="card flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold uppercase" style={{ color: 'var(--text-muted)' }}>Step 2</span>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>อัปโหลดไฟล์ Excel</h3>
+            </div>
+            
+            <label
+              className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors flex-1"
+              style={{
+                borderColor: file ? 'var(--color-primary-light)' : 'var(--border)',
+                backgroundColor: file ? '#EFF6FF' : 'var(--bg-alt)',
+              }}
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+            >
+              <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} disabled={importing} className="hidden" />
+              <Upload size={32} style={{ color: file ? 'var(--color-primary-light)' : 'var(--text-muted)' }} />
+              <p className="mt-2 font-medium text-sm text-center" style={{ color: 'var(--text)' }}>
+                {file ? file.name : 'คลิกหรือลากไฟล์มาวาง'}
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'รองรับไฟล์ .xlsx'}
+              </p>
+            </label>
 
-          {/* Sheet Detection */}
-          {parsedData ? (
-            <div className="space-y-2">
-              <SheetBadge label="dbo_OITM" sublabel="Master Data" found={parsedData.hasItemSheet} count={parsedData.items.length} unit="items" />
-              <SheetBadge label="dbo_OIMN" sublabel="Transactions" found={parsedData.hasTxnSheet} count={parsedData.transactions.length} unit="rows" />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <SheetBadge label="dbo_OITM" sublabel="Master Data" found={false} count={0} unit="items" waiting />
-              <SheetBadge label="dbo_OIMN" sublabel="Transactions" found={false} count={0} unit="rows" waiting />
-            </div>
-          )}
+            {parsedData ? (
+              <div className="space-y-2 mt-1">
+                <SheetBadge label="Items" sublabel="สินค้า" found={parsedData.hasItemSheet} count={parsedData.items.length} unit="items" />
+                <SheetBadge label="Transactions" sublabel="เคลื่อนไหว" found={parsedData.hasTxnSheet} count={parsedData.transactions.length} unit="rows" />
+              </div>
+            ) : (
+              <div className="space-y-2 mt-1">
+                <SheetBadge label="Items" sublabel="รอข้อมูล..." found={false} count={0} unit="items" waiting />
+                <SheetBadge label="Transactions" sublabel="รอข้อมูล..." found={false} count={0} unit="rows" waiting />
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* ── Middle: Master Data Panel ── */}
-        <ImportPanel
-          step="2"
-          icon={<Package size={20} />}
-          title="Master Data — Items"
-          subtitle="อัปเดตชื่อสินค้า, ราคา, กลุ่มสินค้า"
-          waiting={!parsedData}
-          available={!!parsedData && parsedData.hasItemSheet && parsedData.items.length > 0}
-          count={parsedData?.items.length ?? 0}
-          countLabel="items"
-          enabled={includeItems}
-          onToggle={() => setIncludeItems(v => !v)}
-          unavailableReason={
-            !parsedData ? undefined
-              : !parsedData.hasItemSheet ? 'ไม่พบ sheet dbo_OITM ในไฟล์'
-              : 'ไม่มีข้อมูล item'
-          }
-          modeNode={
-            <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-              style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-              <CheckCircle size={13} className="text-green-600" />
-              <span className="text-green-800"><strong>Upsert</strong> — อัปเดตถ้ามีอยู่แล้ว สร้างใหม่ถ้ายังไม่มี ปลอดภัย ไม่ลบ</span>
-            </div>
-          }
-          previewExpanded={showItemPreview}
-          onTogglePreview={() => setShowItemPreview(v => !v)}
-          previewNode={
-            parsedData && parsedData.items.length > 0 ? (
-              <PreviewTable
-                columns={['item_code', 'itemname', 'group_code', 'uom', 'std_cost', 'moving_avg']}
-                labels={['Code', 'ชื่อสินค้า', 'Group', 'UOM', 'Std Cost', 'Moving Avg']}
-                rows={parsedData.items.slice(0, 5) as Record<string, unknown>[]}
-              />
-            ) : null
-          }
-        />
-
-        {/* ── Right: Transactions Panel ── */}
-        <ImportPanel
-          step="3"
-          icon={<ArrowLeftRight size={20} />}
-          title="Transactions"
-          subtitle="ข้อมูลการเคลื่อนไหวสินค้า In / Out / Transfer"
-          waiting={!parsedData}
-          available={!!parsedData && parsedData.hasTxnSheet && parsedData.transactions.length > 0}
-          count={parsedData?.transactions.length ?? 0}
-          countLabel="rows"
-          enabled={includeTxns}
-          onToggle={() => setIncludeTxns(v => !v)}
-          unavailableReason={
-            !parsedData ? undefined
-              : !parsedData.hasTxnSheet ? 'ไม่พบ sheet dbo_OIMN ในไฟล์'
-              : 'ไม่มีข้อมูล transaction'
-          }
-          infoNode={
-            parsedData?.txDateMin && parsedData?.txDateMax ? (
-              <div className="text-xs px-3 py-1.5 rounded-lg"
-                style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-                📅 <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMin}</strong> ถึง <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMax}</strong>
-              </div>
-            ) : null
-          }
-          modeNode={
-            <div className="space-y-2">
-              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Import Mode:</p>
-              <div className="flex gap-2">
-                <ModeButton
-                  icon={<RefreshCw size={13} />}
-                  label="Replace All"
-                  desc="ลบเดิมทั้งหมด → import ใหม่"
-                  active={txnMode === 'replace'}
-                  onClick={() => setTxnMode('replace')}
-                />
-                <ModeButton
-                  icon={<PlusCircle size={13} />}
-                  label="Append"
-                  desc="เพิ่มเฉพาะรายการใหม่ ข้ามซ้ำ"
-                  active={txnMode === 'append'}
-                  onClick={() => setTxnMode('append')}
-                />
-              </div>
-              {txnMode === 'replace' && includeTxns && parsedData && (
-                <div className="flex items-start gap-2 p-2.5 rounded-lg text-xs"
-                  style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                  <AlertTriangle size={13} className="text-orange-500 mt-0.5 shrink-0" />
-                  <span className="text-orange-800"><strong>Replace:</strong> จะลบ Transactions ทั้งหมดในระบบก่อน แล้ว import ใหม่</span>
+        {/* ── Right Column: Step 3 (Review) ── */}
+        <div className="lg:col-span-8 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+            <ImportPanel
+              step="3.1"
+              icon={<Package size={20} />}
+              title="ตรวจสอบข้อมูล Items"
+              subtitle="ระบบจะบันทึก Master Data ก่อนเสมอ"
+              waiting={!parsedData}
+              available={!!parsedData && parsedData.hasItemSheet && parsedData.items.length > 0}
+              count={parsedData?.items.length ?? 0}
+              countLabel="items"
+              enabled={includeItems}
+              onToggle={() => setIncludeItems(v => !v)}
+              unavailableReason={
+                !parsedData ? undefined
+                  : !parsedData.hasItemSheet ? 'ไม่พบ sheet ชื่อ Items ในไฟล์'
+                  : 'พบ Sheet แต่ไม่มีข้อมูล'
+              }
+              modeNode={
+                <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                  <CheckCircle size={13} className="text-green-600" />
+                  <span className="text-green-800"><strong>Upsert:</strong> อัปเดตข้อมูลที่มีอยู่แล้ว หรือสร้างใหม่ (ไม่ลบข้อมูลเก่า)</span>
                 </div>
-              )}
-            </div>
-          }
-          previewExpanded={showTxnPreview}
-          onTogglePreview={() => setShowTxnPreview(v => !v)}
-          previewNode={
-            parsedData && parsedData.transactions.length > 0 ? (
-              <PreviewTable
-                columns={['item_code', 'doc_date', 'direction', 'warehouse', 'in_qty', 'out_qty', 'amount']}
-                labels={['Item', 'Date', 'Dir', 'WH', 'In Qty', 'Out Qty', 'Amount']}
-                rows={parsedData.transactions.slice(0, 5) as Record<string, unknown>[]}
-              />
-            ) : null
-          }
-        />
+              }
+              previewExpanded={showItemPreview}
+              onTogglePreview={() => setShowItemPreview(v => !v)}
+              previewNode={
+                parsedData && parsedData.items.length > 0 ? (
+                  <PreviewTable
+                    columns={['item_code', 'itemname', 'group_code', 'uom', 'std_cost', 'moving_avg']}
+                    labels={['Code', 'ชื่อสินค้า', 'Group', 'UOM', 'Std Cost', 'Moving Avg']}
+                    rows={parsedData.items.slice(0, 5) as unknown as Record<string, unknown>[]}
+                  />
+                ) : null
+              }
+            />
+
+            <ImportPanel
+              step="3.2"
+              icon={<ArrowLeftRight size={20} />}
+              title="ตั้งค่า Transactions"
+              subtitle="นำเข้าหลังจาก Items เรียบร้อยแล้ว"
+              waiting={!parsedData}
+              available={!!parsedData && parsedData.hasTxnSheet && parsedData.transactions.length > 0}
+              count={parsedData?.transactions.length ?? 0}
+              countLabel="rows"
+              enabled={includeTxns}
+              onToggle={() => setIncludeTxns(v => !v)}
+              unavailableReason={
+                !parsedData ? undefined
+                  : !parsedData.hasTxnSheet ? 'ไม่พบ sheet Transactions ในไฟล์'
+                  : 'พบ Sheet แต่ไม่มีข้อมูล'
+              }
+              infoNode={
+                parsedData?.txDateMin && parsedData?.txDateMax ? (
+                  <div className="text-xs px-3 py-1.5 rounded-lg"
+                    style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+                    📅 <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMin}</strong> ถึง <strong style={{ color: 'var(--text)' }}>{parsedData.txDateMax}</strong>
+                  </div>
+                ) : null
+              }
+              modeNode={
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <ModeButton
+                      icon={<RefreshCw size={13} />}
+                      label="Replace All"
+                      desc="ล้างข้อมูลเดิม แล้วทับใหม่"
+                      active={txnMode === 'replace'}
+                      onClick={() => setTxnMode('replace')}
+                    />
+                    <ModeButton
+                      icon={<PlusCircle size={13} />}
+                      label="Append Only"
+                      desc="เพิ่มบรรทัดใหม่ ข้ามรายการซ้ำ"
+                      active={txnMode === 'append'}
+                      onClick={() => setTxnMode('append')}
+                    />
+                  </div>
+                  {txnMode === 'replace' && includeTxns && parsedData && (
+                    <div className="flex items-start gap-2 p-2.5 rounded-lg text-xs"
+                      style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
+                      <AlertTriangle size={13} className="text-orange-500 mt-0.5 shrink-0" />
+                      <span className="text-orange-800"><strong>Replace:</strong> จะลบประวัติการรับจ่าย ยอดคงเหลือเก่าย้อนหลังทั้งหมด แล้วเริ่มต้นใหม่ด้วยไฟล์นี้</span>
+                    </div>
+                  )}
+                </div>
+              }
+              previewExpanded={showTxnPreview}
+              onTogglePreview={() => setShowTxnPreview(v => !v)}
+              previewNode={
+                parsedData && parsedData.transactions.length > 0 ? (
+                  <PreviewTable
+                    columns={['item_code', 'doc_date', 'direction', 'warehouse', 'in_qty', 'out_qty', 'amount']}
+                    labels={['Item', 'Date', 'Dir', 'WH', 'In', 'Out', 'Amount']}
+                    rows={parsedData.transactions.slice(0, 5) as unknown as Record<string, unknown>[]}
+                  />
+                ) : null
+              }
+            />
+          </div>
+        </div>
       </div>
 
       {/* ══ Section 3: Action & Progress ════════════════════════════════════ */}
@@ -734,7 +863,6 @@ function ImportPanel({
   previewExpanded, onTogglePreview, previewNode,
 }: ImportPanelProps) {
   const isEnabled = available && enabled;
-  const isWaiting = waiting || !available;
 
   return (
     <div

@@ -8,7 +8,7 @@ import { exportToExcel } from '@/utils/export';
 export function StockOnHandPage() {
   const [warehouse, setWarehouse] = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
-  const [isActive, setIsActive] = useState<boolean | undefined>(true);
+  const [isActive, setIsActive] = useState<boolean | undefined>(undefined);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<string>('stock_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
