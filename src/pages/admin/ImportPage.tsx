@@ -1,17 +1,18 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
-  Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
-  RefreshCw, PlusCircle, Info, Package, ArrowLeftRight,
-  ChevronDown, ChevronUp, Trash2, ToggleLeft, ToggleRight, Download, Truck, Archive
+  Upload, AlertTriangle, Package, ArrowLeftRight,
+  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Truck, Archive, FileSpreadsheet
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useImportLogs } from '@/hooks/useSupabaseQuery';
-import { formatDateTime, formatNumber } from '@/utils/format';
+import { formatNumber } from '@/utils/format';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
   parseComprehensiveExcel, 
   executeComprehensiveImport, 
-  generateComprehensiveTemplate,
+  generateComprehensiveTemplate
+} from '@/services/importService';
+import type { 
   SheetConfigKey,
   ImportState
 } from '@/services/importService';
@@ -36,7 +37,7 @@ const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any
 ];
 
 export function ImportPage() {
-  const { data: importLogs, refetch: refetchLogs } = useImportLogs();
+  const { refetch: refetchLogs } = useImportLogs();
   const queryClient = useQueryClient();
 
   const [file, setFile] = useState<File | null>(null);
@@ -51,7 +52,7 @@ export function ImportPage() {
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
 
   const [progress, setProgress] = useState<ProgressState>({ step: '', detail: '', percent: 0, error: '', done: false });
-  const [lastResult, setLastResult] = useState<{ success: boolean; error?: string } | null>(null);
+
 
   const setSheetInclude = (key: SheetConfigKey, val: boolean) => setIncludeSheets(p => ({ ...p, [key]: val }));
   const togglePreview = (key: string) => setPreviewOpen(p => ({ ...p, [key]: !p[key] }));
@@ -70,7 +71,6 @@ export function ImportPage() {
   const processFile = async (f: File) => {
     setFile(f);
     setImportState(null);
-    setLastResult(null);
     setProgress({ step: 'Reading Excel...', detail: '', percent: 0, error: '', done: false });
     try {
       const state = await parseComprehensiveExcel(f, (step, detail, pct) => setProgress({ step, detail, percent: pct, error: '', done: false }));
@@ -85,7 +85,6 @@ export function ImportPage() {
   const handleImport = async () => {
     if (!importState || !importState.parsedData) return;
     setImporting(true);
-    setLastResult(null);
     setProgress({ step: 'Initializing Import...', detail: '', percent: 10, error: '', done: false });
     
     const result = await executeComprehensiveImport(
@@ -95,7 +94,6 @@ export function ImportPage() {
       (step, detail, pct) => setProgress({ step, detail, percent: pct, error: '', done: false })
     );
 
-    setLastResult(result);
     setImporting(false);
     
     if (result.success) {
@@ -249,7 +247,7 @@ export function ImportPage() {
                                    <tr>{c.headers.map(h => <th key={h} className="px-2 py-1.5">{h}</th>)}</tr>
                                  </thead>
                                  <tbody>
-                                   {importState.parsedData?.[c.key]?.slice(0, 5).map((row: any, i: number) => (
+                                   {importState?.parsedData?.[c.key]?.slice(0, 5).map((row: any, i: number) => (
                                      <tr key={i} className="border-t">{c.cols.map(col => <td key={col} className="px-2 py-1.5">{String(row[col] ?? '')}</td>)}</tr>
                                    ))}
                                  </tbody>
