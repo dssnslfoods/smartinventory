@@ -14,11 +14,46 @@ export function SettingsPage() {
 
   const [thresholdValue, setThresholdValue] = useState<string>('90');
 
+  // ABC thresholds (stored as percent string e.g. "80")
+  const [abcA, setAbcA] = useState<string>('80');
+  const [abcB, setAbcB] = useState<string>('95');
+  const [abcSaving, setAbcSaving] = useState(false);
+  const [abcError, setAbcError] = useState<string>('');
+
   useEffect(() => {
     if (config) {
       setThresholdValue(config.find(c => c.key === 'active_item_threshold_days')?.value || '90');
+      const rawA = config.find(c => c.key === 'abc_threshold_a')?.value;
+      const rawB = config.find(c => c.key === 'abc_threshold_b')?.value;
+      if (rawA) setAbcA(String(Math.round(parseFloat(rawA) * 100)));
+      if (rawB) setAbcB(String(Math.round(parseFloat(rawB) * 100)));
     }
   }, [config]);
+
+  const handleSaveAbcThresholds = async () => {
+    const a = Number(abcA);
+    const b = Number(abcB);
+    if (isNaN(a) || isNaN(b) || a <= 0 || b <= 0 || a >= 100 || b >= 100) {
+      setAbcError('กรุณาใส่ตัวเลขระหว่าง 1–99');
+      return;
+    }
+    if (a >= b) {
+      setAbcError('เกณฑ์ A ต้องน้อยกว่าเกณฑ์ B');
+      return;
+    }
+    setAbcError('');
+    setAbcSaving(true);
+    try {
+      await Promise.all([
+        supabase.from('system_config').upsert({ key: 'abc_threshold_a', value: String(a / 100) }, { onConflict: 'key' }),
+        supabase.from('system_config').upsert({ key: 'abc_threshold_b', value: String(b / 100) }, { onConflict: 'key' }),
+      ]);
+      queryClient.invalidateQueries({ queryKey: ['systemConfig'] });
+      queryClient.invalidateQueries({ queryKey: ['abcAnalysis'] });
+    } finally {
+      setAbcSaving(false);
+    }
+  };
 
   const handleSaveThreshold = () => {
     if (!thresholdValue) return;
@@ -109,6 +144,94 @@ export function SettingsPage() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* ABC Analysis Thresholds */}
+      <div className="card">
+        <h3 className="font-semibold mb-1" style={{ color: 'var(--text)' }}>ABC Analysis Thresholds</h3>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+          กำหนดเกณฑ์ Cumulative Value % สำหรับแบ่งกลุ่มสินค้า A / B / C
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          {/* Class A */}
+          <div className="p-4 rounded-xl border-l-4" style={{ borderLeftColor: '#1F3864', backgroundColor: 'var(--bg-alt)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-7 h-7 rounded flex items-center justify-center text-white text-sm font-bold" style={{ backgroundColor: '#1F3864' }}>A</span>
+              <span className="font-medium" style={{ color: 'var(--text)' }}>High-value items</span>
+            </div>
+            <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>
+              Cumulative % สะสม ≤
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={abcA}
+                onChange={e => setAbcA(e.target.value)}
+                className="input w-24"
+                min="1" max="99"
+              />
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
+            </div>
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              สินค้าที่มีมูลค่าสะสมใน {abcA || '?'}% แรก
+            </p>
+          </div>
+
+          {/* Class B */}
+          <div className="p-4 rounded-xl border-l-4" style={{ borderLeftColor: '#2E75B6', backgroundColor: 'var(--bg-alt)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-7 h-7 rounded flex items-center justify-center text-white text-sm font-bold" style={{ backgroundColor: '#2E75B6' }}>B</span>
+              <span className="font-medium" style={{ color: 'var(--text)' }}>Mid-value items</span>
+            </div>
+            <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>
+              Cumulative % สะสม ≤
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={abcB}
+                onChange={e => setAbcB(e.target.value)}
+                className="input w-24"
+                min="1" max="99"
+              />
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
+            </div>
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              สินค้าที่มีมูลค่าสะสมใน {abcA || '?'}–{abcB || '?'}%
+            </p>
+          </div>
+
+          {/* Class C */}
+          <div className="p-4 rounded-xl border-l-4" style={{ borderLeftColor: '#808080', backgroundColor: 'var(--bg-alt)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-7 h-7 rounded flex items-center justify-center text-white text-sm font-bold" style={{ backgroundColor: '#808080' }}>C</span>
+              <span className="font-medium" style={{ color: 'var(--text)' }}>Low-value items</span>
+            </div>
+            <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>
+              Cumulative % สะสม &gt;
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-lg font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{abcB || '?'}</span>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
+            </div>
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              สินค้าที่เหลือ ({abcB ? 100 - Number(abcB) : '?'}% สุดท้าย) — คำนวณอัตโนมัติ
+            </p>
+          </div>
+        </div>
+
+        {abcError && (
+          <p className="text-sm text-red-500 mt-3">{abcError}</p>
+        )}
+
+        <button
+          onClick={handleSaveAbcThresholds}
+          disabled={abcSaving}
+          className="btn btn-primary mt-4"
+        >
+          {abcSaving ? 'Saving...' : 'Save ABC Thresholds'}
+        </button>
       </div>
 
       {/* Threshold Management */}

@@ -31,6 +31,7 @@ export interface Item {
   group_code: number;
   // group_name removed — join via item_groups table
   is_active: boolean;
+  expire_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +96,7 @@ export interface StockOnHand {
   std_cost: number;
   stock_value: number;
   is_active: boolean;
+  expire_date: string | null;
 }
 
 /** v_movement_monthly — monthly movement aggregates for trend charts */
