@@ -15,6 +15,7 @@ import { ImportPage } from '@/pages/admin/ImportPage';
 import { SettingsPage } from '@/pages/admin/SettingsPage';
 import { UsersPage } from '@/pages/admin/UsersPage';
 import { PermissionsPage } from '@/pages/admin/PermissionsPage';
+import { VVMatrixGuidePage } from '@/pages/admin/VVMatrixGuidePage';
 import SuppliersPage from '@/pages/procurement/SuppliersPage';
 import PurchaseOrdersPage from '@/pages/procurement/PurchaseOrdersPage';
 import GoodsInTransitPage from '@/pages/procurement/GoodsInTransitPage';
@@ -158,6 +159,7 @@ function App() {
                       <Route path="/admin/settings"     element={<RequirePermission permission="menu.admin.settings"><SettingsPage /></RequirePermission>} />
                       <Route path="/admin/users"        element={<RequirePermission permission="menu.admin.users"><UsersPage /></RequirePermission>} />
                       <Route path="/admin/permissions"  element={<RequirePermission permission="menu.admin.users"><PermissionsPage /></RequirePermission>} />
+                      <Route path="/admin/vv-guide"    element={<RequirePermission permission="menu.admin.settings"><VVMatrixGuidePage /></RequirePermission>} />
                     </Routes>
                   </AppLayout>
                 </ActiveUserRoute>

@@ -18,6 +18,7 @@ import {
   Shield,
   UserCog,
   ExternalLink,
+  Info,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -55,6 +56,7 @@ const mainMenu: MenuEntry[] = [
   { type: 'divider' },
   { path: '/admin/import',   label: 'Data Import', icon: Upload,    permission: PERMISSIONS.MENU_IMPORT },
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },
+  { path: '/admin/vv-guide', label: 'คู่มือ VV Matrix', icon: Info,      permission: PERMISSIONS.MENU_SETTINGS },
 ];
 
 // ── User management items per role ───────────────────────────────────────────
