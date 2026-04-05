@@ -117,11 +117,19 @@ const RISK_RECOMMENDATIONS: Record<'critical' | 'high_expiry', string> = {
 
 // ── VV Config defaults (mirrored from SettingsPage) ──
 const VV_DEFAULTS = {
+  // Validity thresholds (days)
   validity_v5: 180, validity_v4: 90, validity_v3: 60, validity_v2: 30,
   validity_no_expiry: 3,
+  // Value score percentile bands
   value_p5: 0.20, value_p4: 0.40, value_p3: 0.60, value_p2: 0.80,
+  // Simple (weighted) model — kept for reference display
   class_a: 4.0, class_b: 2.5,
   weight_value: 0.5, weight_validity: 0.5,
+  // Exponential model
+  vv_alpha: 2,          // default exponential factor
+  exp_class_a: 3.5,     // exp score ≥ this → Class A
+  exp_class_b: 1.5,     // exp score ≥ this → Class B (else C)
+  // Risk flagging
   urgent_value_min: 4, urgent_validity_max: 2,
 };
 
@@ -144,6 +152,9 @@ function parseVVConfig(config: Array<{ key: string; value: string }> | undefined
   c.class_b            = n('class_b',            VV_DEFAULTS.class_b);
   c.weight_value       = n('weight_value',       VV_DEFAULTS.weight_value);
   c.weight_validity    = n('weight_validity',    VV_DEFAULTS.weight_validity);
+  c.vv_alpha           = n('vv_alpha',           VV_DEFAULTS.vv_alpha);
+  c.exp_class_a        = n('exp_class_a',        VV_DEFAULTS.exp_class_a);
+  c.exp_class_b        = n('exp_class_b',        VV_DEFAULTS.exp_class_b);
   c.urgent_value_min   = n('urgent_value_min',   VV_DEFAULTS.urgent_value_min);
   c.urgent_validity_max= n('urgent_validity_max',VV_DEFAULTS.urgent_validity_max);
   return c;
@@ -153,11 +164,19 @@ function parseVVConfig(config: Array<{ key: string; value: string }> | undefined
 function VVMatrixTab() {
   const [vvClass, setVvClass]     = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
-  const [alpha, setAlpha]         = useState(2);   // exponential factor
 
   const { data: stockData, isLoading } = useStockOnHand();
   const { data: sysConfig }            = useSystemConfig();
   const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
+
+  // Alpha initialises from config (admin can still override in-page)
+  const [alpha, setAlpha] = useState(2);
+  // Sync alpha from cfg once config loads (only on first load)
+  const [alphaSynced, setAlphaSynced] = useState(false);
+  if (!alphaSynced && cfg.vv_alpha !== VV_DEFAULTS.vv_alpha) {
+    setAlpha(Math.round(cfg.vv_alpha) as 1 | 2 | 3);
+    setAlphaSynced(true);
+  }
 
   const vvItems = useMemo<VVItem[]>(() => {
     const all = stockData ?? [];
@@ -220,8 +239,8 @@ function VVMatrixTab() {
       const exp_factor = Math.pow(normalized_validity, alpha);
       const exp_score  = Math.round(value_score * exp_factor * 100) / 100;
       const exp_class: 'A' | 'B' | 'C' =
-        exp_score >= 3.5 ? 'A' :
-        exp_score >= 1.5 ? 'B' : 'C';
+        exp_score >= cfg.exp_class_a ? 'A' :
+        exp_score >= cfg.exp_class_b ? 'B' : 'C';
 
       // ── Risk flagging ──
       const risk_flag: VVItem['risk_flag'] =
@@ -474,9 +493,9 @@ function VVMatrixTab() {
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-xs border-t pt-3" style={{ borderColor: 'var(--border)' }}>
             {[
-              { color: VV_COLORS.A, label: 'A  (Exp Score ≥ 3.5)',   desc: 'Strategic — high value + fresh → push growth' },
-              { color: VV_COLORS.B, label: 'B  (Exp Score 1.5–3.49)', desc: 'Core / Monitor — optimise & watch' },
-              { color: VV_COLORS.C, label: 'C  (Exp Score < 1.5)',    desc: 'Risk / Clearance — reduce & stop purchasing' },
+              { color: VV_COLORS.A, label: `A  (Exp Score ≥ ${cfg.exp_class_a})`,                           desc: 'Strategic — high value + fresh → push growth' },
+              { color: VV_COLORS.B, label: `B  (Exp Score ${cfg.exp_class_b}–${cfg.exp_class_a - 0.01})`, desc: 'Core / Monitor — optimise & watch' },
+              { color: VV_COLORS.C, label: `C  (Exp Score < ${cfg.exp_class_b})`,                         desc: 'Risk / Clearance — reduce & stop purchasing' },
               { color: '#7c3aed',   label: '🔴 Critical',              desc: `Value ≥ 4 AND Validity ≤ 2 — urgent sale` },
             ].map(({ color, label, desc }) => (
               <div key={label} className="flex items-start gap-2">
@@ -500,7 +519,11 @@ function VVMatrixTab() {
               const val   = cls === 'A' ? summary.valA   : cls === 'B' ? summary.valB   : summary.valC;
               const pct   = summary.total ? (count / summary.total) * 100 : 0;
               const labels = { A: 'Strategic', B: 'Core', C: 'At Risk' };
-              const thresholds = { A: '≥ 3.5', B: '1.5 – 3.49', C: '< 1.5' };
+              const thresholds = {
+                A: `≥ ${cfg.exp_class_a}`,
+                B: `${cfg.exp_class_b} – ${(cfg.exp_class_a - 0.01).toFixed(2)}`,
+                C: `< ${cfg.exp_class_b}`,
+              };
               return (
                 <div key={cls}>
                   <div className="flex items-center justify-between mb-1.5">

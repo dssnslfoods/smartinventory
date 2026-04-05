@@ -17,16 +17,19 @@ export function SettingsPage() {
 
   // ── VV Matrix Config ──
   const DEFAULT_VV = {
-    // Validity score thresholds (days): score 5 if > v5, score 4 if > v4, etc.
+    // Validity score thresholds (days)
     validity_v5: '180', validity_v4: '90', validity_v3: '60', validity_v2: '30',
-    validity_no_expiry: '3',  // score assigned when no expiry date
-    // Value score percentile bands (0-1, cumulative from top)
+    validity_no_expiry: '3',
+    // Value score percentile bands (0–1, cumulative from top by stock value)
     value_p5: '0.20', value_p4: '0.40', value_p3: '0.60', value_p2: '0.80',
-    // Class thresholds (final score)
+    // Exponential model
+    vv_alpha: '2',           // exponential factor α (1=linear, 2=moderate, 3=aggressive)
+    exp_class_a: '3.5',      // exp score ≥ this → Class A
+    exp_class_b: '1.5',      // exp score ≥ this → Class B (else C)
+    // Simple (weighted-average) model — shown as reference only
     class_a: '4.0', class_b: '2.5',
-    // Weights (must sum to 1)
     weight_value: '0.5', weight_validity: '0.5',
-    // Urgent rule
+    // Risk flagging
     urgent_value_min: '4', urgent_validity_max: '2',
   };
 
@@ -77,28 +80,36 @@ export function SettingsPage() {
 
   // ── VV Matrix save ──
   const handleSaveVV = async () => {
-    // Basic validation
-    const wV = Number(vv.weight_value);
-    const wVa = Number(vv.weight_validity);
-    if (Math.abs(wV + wVa - 1) > 0.01) {
-      setVvError('Weight รวมต้องเท่ากับ 1.0 (เช่น 0.5 + 0.5)');
-      return;
-    }
+    // Validity thresholds validation
     const v5 = Number(vv.validity_v5), v4 = Number(vv.validity_v4),
           v3 = Number(vv.validity_v3), v2 = Number(vv.validity_v2);
     if (v5 <= v4 || v4 <= v3 || v3 <= v2 || v2 <= 0) {
       setVvError('Validity thresholds ต้องเรียงจากมากไปน้อย: v5 > v4 > v3 > v2 > 0');
       return;
     }
+    // Value percentile validation
     const p5 = parseFloat(vv.value_p5), p4 = parseFloat(vv.value_p4),
           p3 = parseFloat(vv.value_p3), p2 = parseFloat(vv.value_p2);
     if (!(0 < p5 && p5 < p4 && p4 < p3 && p3 < p2 && p2 < 1)) {
       setVvError('Value percentile bands ต้องเรียง: 0 < p5 < p4 < p3 < p2 < 1');
       return;
     }
-    const cA = parseFloat(vv.class_a), cB = parseFloat(vv.class_b);
-    if (!(cA > cB && cB > 1 && cA <= 5)) {
-      setVvError('Class thresholds ต้องอยู่ในช่วง 1–5 และ A > B');
+    // Alpha validation
+    const alpha = Number(vv.vv_alpha);
+    if (![1, 2, 3].includes(alpha)) {
+      setVvError('Alpha (α) ต้องเป็น 1, 2 หรือ 3');
+      return;
+    }
+    // Exp class thresholds validation (exp score range 0–5)
+    const expA = parseFloat(vv.exp_class_a), expB = parseFloat(vv.exp_class_b);
+    if (!(expA > expB && expB > 0 && expA <= 5)) {
+      setVvError('Exp Class thresholds: 0 < B < A ≤ 5 (เช่น A=3.5, B=1.5)');
+      return;
+    }
+    // Simple model weights (reference only — still validate they sum to 1)
+    const wV = Number(vv.weight_value), wVa = Number(vv.weight_validity);
+    if (Math.abs(wV + wVa - 1) > 0.01) {
+      setVvError('Simple Model Weight รวมต้องเท่ากับ 1.0');
       return;
     }
     setVvError('');
@@ -266,31 +277,43 @@ export function SettingsPage() {
           </button>
         </div>
 
+        {/* Formula banner */}
+        <div className="mb-5 px-4 py-3 rounded-xl flex items-center gap-3"
+          style={{ backgroundColor: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)' }}>
+          <span className="text-base">🧮</span>
+          <div className="text-xs" style={{ color: 'var(--text)' }}>
+            <span className="font-semibold">Exponential Scoring Formula: </span>
+            <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
+              Final Score = ValueScore × (ValidityScore / 5) ^ α
+            </code>
+            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>— ค่า α ยิ่งสูง ยิ่งลงโทษ validity ต่ำมากขึ้น</span>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* ── Validity Score Thresholds ── */}
           <div className="p-4 rounded-xl border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
             <p className="text-xs font-bold mb-1 uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
-              Validity Score (Days to Expiry)
+              Validity Score (วันก่อนหมดอายุ)
             </p>
             <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-              กำหนดช่วงวันก่อนหมดอายุสำหรับแต่ละ Score (1–5)
+              กำหนดช่วงวันสำหรับแต่ละ Score 1–5 · ยิ่งสด ยิ่งคะแนนสูง
             </p>
             <div className="space-y-2">
               {([
-                { label: 'Score 5 — มากกว่า', field: 'validity_v5', color: '#16a34a', unit: 'วัน' },
-                { label: 'Score 4 — มากกว่า', field: 'validity_v4', color: '#65a30d', unit: 'วัน' },
-                { label: 'Score 3 — มากกว่า', field: 'validity_v3', color: '#d97706', unit: 'วัน' },
-                { label: 'Score 2 — มากกว่า', field: 'validity_v2', color: '#ea580c', unit: 'วัน' },
-              ] as { label: string; field: keyof typeof vv; color: string; unit: string }[]).map(({ label, field, color }) => (
+                { label: 'Score 5 — มากกว่า', field: 'validity_v5', color: '#16a34a' },
+                { label: 'Score 4 — มากกว่า', field: 'validity_v4', color: '#65a30d' },
+                { label: 'Score 3 — มากกว่า', field: 'validity_v3', color: '#d97706' },
+                { label: 'Score 2 — มากกว่า', field: 'validity_v2', color: '#ea580c' },
+              ] as { label: string; field: keyof typeof vv; color: string }[]).map(({ label, field, color }) => (
                 <div key={field} className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
                     <span className="text-xs" style={{ color: 'var(--text)' }}>{label}</span>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <input
-                      type="number" min="1"
+                    <input type="number" min="1"
                       value={vv[field]}
                       onChange={e => setVv(p => ({ ...p, [field]: e.target.value }))}
                       className="input w-20 text-center text-xs tabular-nums"
@@ -301,19 +324,18 @@ export function SettingsPage() {
               ))}
               <div className="flex items-center justify-between gap-3 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#94a3b8' }} />
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Score 1 — ≤ Score 2 threshold</span>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#dc2626' }} />
+                  <span className="text-xs" style={{ color: 'var(--text)' }}>Score 1 — ≤ {vv.validity_v2} วัน หรือหมดอายุแล้ว</span>
                 </div>
-                <span className="text-xs font-medium tabular-nums px-3" style={{ color: 'var(--text-muted)' }}>Auto</span>
+                <span className="text-xs px-3" style={{ color: 'var(--text-muted)' }}>Auto</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#94a3b8' }} />
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#94a3b8' }} />
                   <span className="text-xs" style={{ color: 'var(--text)' }}>ไม่มีข้อมูล Expire Date → Score</span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <input
-                    type="number" min="1" max="5"
+                  <input type="number" min="1" max="5"
                     value={vv.validity_no_expiry}
                     onChange={e => setVv(p => ({ ...p, validity_no_expiry: e.target.value }))}
                     className="input w-20 text-center text-xs tabular-nums"
@@ -327,17 +349,17 @@ export function SettingsPage() {
           {/* ── Value Score Percentile Bands ── */}
           <div className="p-4 rounded-xl border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
             <p className="text-xs font-bold mb-1 uppercase tracking-wide" style={{ color: '#2E75B6' }}>
-              Value Score (Stock Value Percentile)
+              Value Score (Percentile ตามมูลค่า Stock)
             </p>
             <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-              Cumulative percentile จากมูลค่าสูงสุด (0 = อันดับ 1)
+              จัดอันดับสินค้าตามมูลค่า stock จากสูงสุด → กำหนดว่า top X% ได้ Score 5, 4, 3, 2, 1
             </p>
             <div className="space-y-2">
               {([
                 { label: 'Score 5 — top 0% ถึง', field: 'value_p5', color: '#16a34a' },
-                { label: 'Score 4 — ถึง', field: 'value_p4', color: '#65a30d' },
-                { label: 'Score 3 — ถึง', field: 'value_p3', color: '#d97706' },
-                { label: 'Score 2 — ถึง', field: 'value_p2', color: '#ea580c' },
+                { label: 'Score 4 — ถึง',         field: 'value_p4', color: '#65a30d' },
+                { label: 'Score 3 — ถึง',         field: 'value_p3', color: '#d97706' },
+                { label: 'Score 2 — ถึง',         field: 'value_p2', color: '#ea580c' },
               ] as { label: string; field: keyof typeof vv; color: string }[]).map(({ label, field, color }) => (
                 <div key={field} className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
@@ -345,8 +367,7 @@ export function SettingsPage() {
                     <span className="text-xs" style={{ color: 'var(--text)' }}>{label}</span>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <input
-                      type="number" min="0.01" max="0.99" step="0.05"
+                    <input type="number" min="0.01" max="0.99" step="0.05"
                       value={vv[field]}
                       onChange={e => setVv(p => ({ ...p, [field]: e.target.value }))}
                       className="input w-20 text-center text-xs tabular-nums"
@@ -360,127 +381,194 @@ export function SettingsPage() {
               <div className="flex items-center justify-between gap-3 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#dc2626' }} />
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Score 1 — ที่เหลือ (&gt; {(parseFloat(vv.value_p2) * 100).toFixed(0)}%)</span>
+                  <span className="text-xs" style={{ color: 'var(--text)' }}>Score 1 — ที่เหลือ (ต่ำกว่า {(parseFloat(vv.value_p2) * 100).toFixed(0)}%)</span>
                 </div>
                 <span className="text-xs px-3" style={{ color: 'var(--text-muted)' }}>Auto</span>
+              </div>
+            </div>
+            <div className="mt-3 p-2.5 rounded-lg text-xs" style={{ backgroundColor: 'rgba(46,117,182,0.06)', color: '#1e40af' }}>
+              ✓ Percentile-based ranking ถูกต้องสำหรับ VV Matrix — ปรับตามการกระจายข้อมูลจริง ไม่ต้องกำหนดค่าตายตัว
+            </div>
+          </div>
+
+          {/* ── Exponential Factor (α) ── */}
+          <div className="p-4 rounded-xl border" style={{ borderColor: 'rgba(99,102,241,0.3)', backgroundColor: 'rgba(99,102,241,0.04)' }}>
+            <p className="text-xs font-bold mb-1 uppercase tracking-wide" style={{ color: '#6366f1' }}>
+              Exponential Factor (α) — ค่าเริ่มต้น
+            </p>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+              ควบคุมความรุนแรงของการลงโทษ validity ต่ำ — ผู้ใช้ยังสามารถเปลี่ยนค่าชั่วคราวในหน้า Reports ได้
+            </p>
+            <div className="flex gap-2 mb-4">
+              {([
+                { val: '1', label: 'α = 1', sub: 'Linear', desc: 'เหมือน weighted average' },
+                { val: '2', label: 'α = 2', sub: 'Moderate', desc: 'ค่า default — สมดุล' },
+                { val: '3', label: 'α = 3', sub: 'Aggressive', desc: 'แนะนำสำหรับอาหาร/ของสด' },
+              ]).map(({ val, label, sub, desc }) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setVv(p => ({ ...p, vv_alpha: val }))}
+                  className="flex-1 p-2.5 rounded-lg border text-center transition-all"
+                  style={vv.vv_alpha === val
+                    ? { backgroundColor: '#6366f1', borderColor: '#6366f1', color: '#fff' }
+                    : { borderColor: 'var(--border)', color: 'var(--text)' }
+                  }
+                >
+                  <div className="text-sm font-bold">{label}</div>
+                  <div className="text-xs font-medium mt-0.5" style={{ opacity: vv.vv_alpha === val ? 0.85 : 1, color: vv.vv_alpha === val ? '#fff' : '#6366f1' }}>{sub}</div>
+                  <div className="text-xs mt-0.5" style={{ opacity: 0.7 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+            {/* Preview of multipliers */}
+            <div className="pt-3 border-t" style={{ borderColor: 'rgba(99,102,241,0.2)' }}>
+              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>
+                Validity Multiplier ที่ α={vv.vv_alpha} (คูณกับ Value Score)
+              </p>
+              <div className="grid grid-cols-5 gap-1 text-center">
+                {[1,2,3,4,5].map(s => {
+                  const mult = Math.pow(s / 5, Number(vv.vv_alpha));
+                  return (
+                    <div key={s} className="px-1 py-1.5 rounded text-xs"
+                      style={{ backgroundColor: 'var(--bg-alt)' }}>
+                      <div className="font-semibold" style={{ color: ['#dc2626','#ea580c','#d97706','#65a30d','#16a34a'][s-1] }}>Sc.{s}</div>
+                      <div className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>×{mult.toFixed(2)}</div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          {/* ── Class Thresholds + Weights ── */}
+          {/* ── Exp Classification Thresholds ── */}
           <div className="p-4 rounded-xl border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
             <p className="text-xs font-bold mb-1 uppercase tracking-wide text-emerald-600">
-              Classification Thresholds
+              Exp Classification Thresholds
             </p>
             <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-              Final Score = (Value × Weight) + (Validity × Weight)
+              กำหนดเกณฑ์ A/B/C จาก <strong>Exp Score</strong> (ช่วง 0–5 ขึ้นอยู่กับ α)
             </p>
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded text-white text-xs font-bold flex items-center justify-center" style={{ backgroundColor: '#16a34a' }}>A</span>
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Class A — Score ≥</span>
+              {[
+                { cls: 'A', color: '#16a34a', field: 'exp_class_a' as keyof typeof vv, label: 'Class A — Exp Score ≥' },
+                { cls: 'B', color: '#d97706', field: 'exp_class_b' as keyof typeof vv, label: 'Class B — Exp Score ≥' },
+              ].map(({ cls, color, field, label }) => (
+                <div key={cls} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded text-white text-xs font-bold flex items-center justify-center" style={{ backgroundColor: color }}>{cls}</span>
+                    <span className="text-xs" style={{ color: 'var(--text)' }}>{label}</span>
+                  </div>
+                  <input type="number" min="0.1" max="5" step="0.1"
+                    value={vv[field]}
+                    onChange={e => setVv(p => ({ ...p, [field]: e.target.value }))}
+                    className="input w-20 text-center text-xs tabular-nums"
+                  />
                 </div>
-                <input
-                  type="number" min="1" max="5" step="0.1"
-                  value={vv.class_a}
-                  onChange={e => setVv(p => ({ ...p, class_a: e.target.value }))}
-                  className="input w-20 text-center text-xs tabular-nums"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded text-white text-xs font-bold flex items-center justify-center" style={{ backgroundColor: '#d97706' }}>B</span>
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Class B — Score ≥</span>
-                </div>
-                <input
-                  type="number" min="1" max="5" step="0.1"
-                  value={vv.class_b}
-                  onChange={e => setVv(p => ({ ...p, class_b: e.target.value }))}
-                  className="input w-20 text-center text-xs tabular-nums"
-                />
-              </div>
+              ))}
               <div className="flex items-center justify-between gap-3 pt-1">
                 <div className="flex items-center gap-2">
                   <span className="w-6 h-6 rounded text-white text-xs font-bold flex items-center justify-center" style={{ backgroundColor: '#dc2626' }}>C</span>
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Class C — Score &lt; {vv.class_b}</span>
+                  <span className="text-xs" style={{ color: 'var(--text)' }}>Class C — Exp Score &lt; {vv.exp_class_b}</span>
                 </div>
                 <span className="text-xs px-3" style={{ color: 'var(--text-muted)' }}>Auto</span>
               </div>
             </div>
 
+            {/* Simple model reference — collapsed */}
             <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
-              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>Score Weights (รวม = 1.0)</p>
+              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>
+                Simple Score (Reference) — Weight &amp; Threshold
+              </p>
+              <p className="text-xs mb-2 italic" style={{ color: 'var(--text-muted)' }}>
+                Simple Score = (Value×W) + (Validity×W) · แสดงควบคู่ใน Reports เพื่อเปรียบเทียบ
+              </p>
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Value Weight</span>
+                {[
+                  { label: 'Class A ≥', field: 'class_a' as keyof typeof vv },
+                  { label: 'Class B ≥', field: 'class_b' as keyof typeof vv },
+                ].map(({ label, field }) => (
+                  <div key={field} className="flex items-center justify-between gap-3">
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</span>
+                    <input type="number" min="1" max="5" step="0.1"
+                      value={vv[field]}
+                      onChange={e => setVv(p => ({ ...p, [field]: e.target.value }))}
+                      className="input w-20 text-center text-xs tabular-nums"
+                    />
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Value Weight</span>
                   <div className="flex items-center gap-1.5">
-                    <input
-                      type="number" min="0" max="1" step="0.1"
+                    <input type="number" min="0" max="1" step="0.1"
                       value={vv.weight_value}
                       onChange={e => setVv(p => ({ ...p, weight_value: e.target.value }))}
                       className="input w-20 text-center text-xs tabular-nums"
                     />
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>({(parseFloat(vv.weight_value) * 100).toFixed(0)}%)</span>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>({(parseFloat(vv.weight_value)*100).toFixed(0)}%)</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs" style={{ color: 'var(--text)' }}>Validity Weight</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Validity Weight</span>
                   <div className="flex items-center gap-1.5">
-                    <input
-                      type="number" min="0" max="1" step="0.1"
+                    <input type="number" min="0" max="1" step="0.1"
                       value={vv.weight_validity}
                       onChange={e => setVv(p => ({ ...p, weight_validity: e.target.value }))}
                       className="input w-20 text-center text-xs tabular-nums"
                     />
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>({(parseFloat(vv.weight_validity) * 100).toFixed(0)}%)</span>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>({(parseFloat(vv.weight_validity)*100).toFixed(0)}%)</span>
                   </div>
                 </div>
-                <div className="flex items-center justify-between pt-1 text-xs font-semibold"
-                  style={{ color: Math.abs(parseFloat(vv.weight_value) + parseFloat(vv.weight_validity) - 1) > 0.01 ? '#dc2626' : '#16a34a' }}>
+                <div className="flex justify-between text-xs font-semibold pt-1"
+                  style={{ color: Math.abs(parseFloat(vv.weight_value)+parseFloat(vv.weight_validity)-1)>0.01 ? '#dc2626' : '#16a34a' }}>
                   <span>รวม</span>
-                  <span>{(parseFloat(vv.weight_value) + parseFloat(vv.weight_validity)).toFixed(2)}</span>
+                  <span>{(parseFloat(vv.weight_value)+parseFloat(vv.weight_validity)).toFixed(2)}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ── Urgent Rule ── */}
-          <div className="p-4 rounded-xl border border-red-200" style={{ backgroundColor: 'rgba(220,38,38,0.03)' }}>
+          {/* ── Critical / Risk Rule ── */}
+          <div className="p-4 rounded-xl border border-red-200 md:col-span-2" style={{ backgroundColor: 'rgba(220,38,38,0.03)' }}>
             <p className="text-xs font-bold mb-1 uppercase tracking-wide text-red-600">
-              ⚠ Urgent Risk Rule
+              🔴 Risk Flagging Rule
             </p>
             <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-              สินค้าที่ติด Urgent คือสินค้าที่มีมูลค่าสูง <strong>แต่</strong> ใกล้หมดอายุ — ต้องเร่งจัดการ
+              กำหนดเกณฑ์ที่จะแสดง <span className="font-semibold" style={{ color: '#7c3aed' }}>CRITICAL</span> (มูลค่าสูง + ใกล้หมดอายุ) และ <span className="font-semibold text-orange-600">HIGH RISK</span> (ใกล้หมดอายุ)
             </p>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs" style={{ color: 'var(--text)' }}>Value Score ≥</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number" min="1" max="5"
-                    value={vv.urgent_value_min}
-                    onChange={e => setVv(p => ({ ...p, urgent_value_min: e.target.value }))}
-                    className="input w-20 text-center text-xs tabular-nums"
-                  />
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>/5</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs" style={{ color: 'var(--text)' }}>Value Score ≥</span>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" min="1" max="5"
+                      value={vv.urgent_value_min}
+                      onChange={e => setVv(p => ({ ...p, urgent_value_min: e.target.value }))}
+                      className="input w-20 text-center text-xs tabular-nums"
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>/5</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs" style={{ color: 'var(--text)' }}>AND Validity Score ≤</span>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" min="1" max="5"
+                      value={vv.urgent_validity_max}
+                      onChange={e => setVv(p => ({ ...p, urgent_validity_max: e.target.value }))}
+                      className="input w-20 text-center text-xs tabular-nums"
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>/5</span>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs" style={{ color: 'var(--text)' }}>AND Validity Score ≤</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number" min="1" max="5"
-                    value={vv.urgent_validity_max}
-                    onChange={e => setVv(p => ({ ...p, urgent_validity_max: e.target.value }))}
-                    className="input w-20 text-center text-xs tabular-nums"
-                  />
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>/5</span>
+              <div className="space-y-2">
+                <div className="p-2.5 rounded-lg text-xs" style={{ backgroundColor: 'rgba(124,58,237,0.08)', color: '#7c3aed' }}>
+                  <strong>CRITICAL:</strong> Value ≥ {vv.urgent_value_min} AND Validity ≤ {vv.urgent_validity_max}
+                </div>
+                <div className="p-2.5 rounded-lg text-xs" style={{ backgroundColor: 'rgba(234,88,12,0.08)', color: '#ea580c' }}>
+                  <strong>HIGH RISK:</strong> Validity ≤ {vv.urgent_validity_max} (ทุก value)
                 </div>
               </div>
-            </div>
-            <div className="mt-3 p-2.5 rounded-lg text-xs" style={{ backgroundColor: 'rgba(220,38,38,0.06)', color: '#b91c1c' }}>
-              สินค้าที่ได้ Value ≥ {vv.urgent_value_min} และ Validity ≤ {vv.urgent_validity_max} จะถูกแสดง ⚠ Urgent
             </div>
           </div>
         </div>
