@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import {
   useStockOnHand, useSlowMoving, useInventoryTurnover, useReorderSuggestions,
+  useSystemConfig,
 } from '@/hooks/useSupabaseQuery';
 import { ITEM_GROUPS, WAREHOUSES } from '@/types/database';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
@@ -83,8 +84,17 @@ interface VVItem {
   remaining_days: number | null;
   value_score: number;
   validity_score: number;
+  // ── Simple (weighted-average) model ──
   final_score: number;
   vv_class: 'A' | 'B' | 'C';
+  // ── Exponential model ──
+  normalized_validity: number;       // validity_score / 5
+  exp_factor: number;                // (normalized_validity)^alpha
+  exp_score: number;                 // value_score * exp_factor
+  exp_class: 'A' | 'B' | 'C';       // A≥3.5  B≥1.5  C<1.5
+  // ── Risk ──
+  risk_flag: 'critical' | 'high_expiry' | null;
+  priority_rank: number;             // rank by exp_score desc
   recommendation: string;
   is_urgent: boolean;
 }
@@ -94,27 +104,60 @@ function getRemainingDays(expireDate: string | null): number | null {
   return Math.floor((new Date(expireDate).getTime() - Date.now()) / 86_400_000);
 }
 
-function getValidityScore(remaining: number | null): number {
-  if (remaining === null) return 3;
-  if (remaining > 180) return 5;
-  if (remaining > 90)  return 4;
-  if (remaining > 60)  return 3;
-  if (remaining > 30)  return 2;
-  return 1;
-}
-
 const RECOMMENDATIONS: Record<'A' | 'B' | 'C', string> = {
-  A: 'Push sales / Maintain availability',
-  B: 'Optimize pricing / Monitor demand',
+  A: 'Push growth / Maintain availability',
+  B: 'Monitor / Optimize pricing',
   C: 'Clearance / Reduce stock / Stop purchasing',
 };
+
+const RISK_RECOMMENDATIONS: Record<'critical' | 'high_expiry', string> = {
+  critical:    'URGENT SALE REQUIRED — High value at expiry risk',
+  high_expiry: 'Prioritise clearance — Expiry approaching',
+};
+
+// ── VV Config defaults (mirrored from SettingsPage) ──
+const VV_DEFAULTS = {
+  validity_v5: 180, validity_v4: 90, validity_v3: 60, validity_v2: 30,
+  validity_no_expiry: 3,
+  value_p5: 0.20, value_p4: 0.40, value_p3: 0.60, value_p2: 0.80,
+  class_a: 4.0, class_b: 2.5,
+  weight_value: 0.5, weight_validity: 0.5,
+  urgent_value_min: 4, urgent_validity_max: 2,
+};
+
+function parseVVConfig(config: Array<{ key: string; value: string }> | undefined) {
+  const c = { ...VV_DEFAULTS };
+  if (!config) return c;
+  const get = (k: string) => config.find(r => r.key === `vv_${k}`)?.value;
+  const n = (k: keyof typeof VV_DEFAULTS, fallback: number) =>
+    parseFloat(get(k) ?? '') || fallback;
+  c.validity_v5        = n('validity_v5',        VV_DEFAULTS.validity_v5);
+  c.validity_v4        = n('validity_v4',        VV_DEFAULTS.validity_v4);
+  c.validity_v3        = n('validity_v3',        VV_DEFAULTS.validity_v3);
+  c.validity_v2        = n('validity_v2',        VV_DEFAULTS.validity_v2);
+  c.validity_no_expiry = n('validity_no_expiry', VV_DEFAULTS.validity_no_expiry);
+  c.value_p5           = n('value_p5',           VV_DEFAULTS.value_p5);
+  c.value_p4           = n('value_p4',           VV_DEFAULTS.value_p4);
+  c.value_p3           = n('value_p3',           VV_DEFAULTS.value_p3);
+  c.value_p2           = n('value_p2',           VV_DEFAULTS.value_p2);
+  c.class_a            = n('class_a',            VV_DEFAULTS.class_a);
+  c.class_b            = n('class_b',            VV_DEFAULTS.class_b);
+  c.weight_value       = n('weight_value',       VV_DEFAULTS.weight_value);
+  c.weight_validity    = n('weight_validity',    VV_DEFAULTS.weight_validity);
+  c.urgent_value_min   = n('urgent_value_min',   VV_DEFAULTS.urgent_value_min);
+  c.urgent_validity_max= n('urgent_validity_max',VV_DEFAULTS.urgent_validity_max);
+  return c;
+}
 
 // ── VV Matrix Tab ─────────────────────────────────────────────────────────────
 function VVMatrixTab() {
   const [vvClass, setVvClass]     = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
+  const [alpha, setAlpha]         = useState(2);   // exponential factor
 
   const { data: stockData, isLoading } = useStockOnHand();
+  const { data: sysConfig }            = useSystemConfig();
+  const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
 
   const vvItems = useMemo<VVItem[]>(() => {
     const all = stockData ?? [];
@@ -148,95 +191,176 @@ function VVMatrixTab() {
 
     const total = sorted.length;
 
-    return sorted.map(([item_code, v], idx) => {
+    const computed = sorted.map(([item_code, v], idx) => {
       const pct = total > 1 ? idx / (total - 1) : 0;
       const value_score =
-        pct < 0.20 ? 5 :
-        pct < 0.40 ? 4 :
-        pct < 0.60 ? 3 :
-        pct < 0.80 ? 2 : 1;
+        pct < cfg.value_p5 ? 5 :
+        pct < cfg.value_p4 ? 4 :
+        pct < cfg.value_p3 ? 3 :
+        pct < cfg.value_p2 ? 2 : 1;
 
-      const remaining     = getRemainingDays(v.expire_date);
-      const validity_score = getValidityScore(remaining);
-      const final_score   = Math.round(((value_score + validity_score) / 2) * 10) / 10;
+      const remaining = getRemainingDays(v.expire_date);
+      const validity_score =
+        remaining === null            ? cfg.validity_no_expiry :
+        remaining > cfg.validity_v5  ? 5 :
+        remaining > cfg.validity_v4  ? 4 :
+        remaining > cfg.validity_v3  ? 3 :
+        remaining > cfg.validity_v2  ? 2 : 1;
+
+      // ── Simple (weighted-average) model ──
+      const final_score = Math.round(
+        (value_score * cfg.weight_value + validity_score * cfg.weight_validity) * 10
+      ) / 10;
       const vv_class: 'A' | 'B' | 'C' =
-        final_score >= 4.0 ? 'A' :
-        final_score >= 2.5 ? 'B' : 'C';
+        final_score >= cfg.class_a ? 'A' :
+        final_score >= cfg.class_b ? 'B' : 'C';
+
+      // ── Exponential model ──
+      const normalized_validity = validity_score / 5;
+      const exp_factor = Math.pow(normalized_validity, alpha);
+      const exp_score  = Math.round(value_score * exp_factor * 100) / 100;
+      const exp_class: 'A' | 'B' | 'C' =
+        exp_score >= 3.5 ? 'A' :
+        exp_score >= 1.5 ? 'B' : 'C';
+
+      // ── Risk flagging ──
+      const risk_flag: VVItem['risk_flag'] =
+        value_score >= 4 && validity_score <= 2 ? 'critical' :
+        validity_score <= 2                      ? 'high_expiry' : null;
+
+      const recommendation =
+        risk_flag === 'critical'    ? RISK_RECOMMENDATIONS.critical :
+        risk_flag === 'high_expiry' ? RISK_RECOMMENDATIONS.high_expiry :
+        RECOMMENDATIONS[exp_class];
 
       return {
-        item_code,
-        ...v,
-        remaining_days:  remaining,
-        value_score,
-        validity_score,
-        final_score,
-        vv_class,
-        recommendation:  RECOMMENDATIONS[vv_class],
-        is_urgent:       value_score >= 4 && validity_score <= 2,
-      };
+        item_code, ...v,
+        remaining_days: remaining,
+        value_score, validity_score,
+        final_score, vv_class,
+        normalized_validity, exp_factor, exp_score, exp_class,
+        risk_flag, priority_rank: 0,
+        recommendation,
+        is_urgent: value_score >= cfg.urgent_value_min && validity_score <= cfg.urgent_validity_max,
+      } satisfies VVItem;
     });
-  }, [stockData]);
+
+    // Assign priority rank by exp_score desc
+    const byExpScore = [...computed].sort((a, b) => b.exp_score - a.exp_score);
+    byExpScore.forEach((item, i) => { item.priority_rank = i + 1; });
+
+    return computed;
+  }, [stockData, cfg, alpha]);
 
   const filtered = useMemo(() =>
-    vvItems.filter(item => {
-      if (vvClass    && item.vv_class    !== vvClass)              return false;
-      if (groupCode  && item.group_name  !== ITEM_GROUPS[groupCode]) return false;
-      return true;
-    }),
+    vvItems
+      .filter(item => {
+        if (vvClass   && item.exp_class  !== vvClass)               return false;
+        if (groupCode && item.group_name !== ITEM_GROUPS[groupCode]) return false;
+        return true;
+      })
+      .sort((a, b) => a.priority_rank - b.priority_rank),
     [vvItems, vvClass, groupCode],
   );
 
   const summary = useMemo(() => {
-    const all     = vvItems;
-    const countA  = all.filter(i => i.vv_class === 'A').length;
-    const countB  = all.filter(i => i.vv_class === 'B').length;
-    const countC  = all.filter(i => i.vv_class === 'C').length;
+    const all      = vvItems;
+    const countA   = all.filter(i => i.exp_class === 'A').length;
+    const countB   = all.filter(i => i.exp_class === 'B').length;
+    const countC   = all.filter(i => i.exp_class === 'C').length;
     const totalVal = all.reduce((s, i) => s + i.stock_value, 0);
-    const valA    = all.filter(i => i.vv_class === 'A').reduce((s, i) => s + i.stock_value, 0);
-    const valB    = all.filter(i => i.vv_class === 'B').reduce((s, i) => s + i.stock_value, 0);
-    const valC    = all.filter(i => i.vv_class === 'C').reduce((s, i) => s + i.stock_value, 0);
-    const avgScore = all.length ? all.reduce((s, i) => s + i.final_score, 0) / all.length : 0;
-    const urgentCount = all.filter(i => i.is_urgent).length;
-    return { countA, countB, countC, total: all.length, totalVal, valA, valB, valC, avgScore, urgentCount };
+    const valA     = all.filter(i => i.exp_class === 'A').reduce((s, i) => s + i.stock_value, 0);
+    const valB     = all.filter(i => i.exp_class === 'B').reduce((s, i) => s + i.stock_value, 0);
+    const valC     = all.filter(i => i.exp_class === 'C').reduce((s, i) => s + i.stock_value, 0);
+    const avgExpScore   = all.length ? all.reduce((s, i) => s + i.exp_score,   0) / all.length : 0;
+    const avgSimScore   = all.length ? all.reduce((s, i) => s + i.final_score, 0) / all.length : 0;
+    const criticalCount = all.filter(i => i.risk_flag === 'critical').length;
+    const highRiskCount = all.filter(i => i.risk_flag === 'high_expiry').length;
+    return { countA, countB, countC, total: all.length, totalVal, valA, valB, valC, avgExpScore, avgSimScore, criticalCount, highRiskCount };
   }, [vvItems]);
 
   const scatterData = useMemo(() => ({
-    A: vvItems.filter(i => i.vv_class === 'A').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname })),
-    B: vvItems.filter(i => i.vv_class === 'B').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname })),
-    C: vvItems.filter(i => i.vv_class === 'C').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname })),
+    A: vvItems.filter(i => i.exp_class === 'A').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
+    B: vvItems.filter(i => i.exp_class === 'B').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
+    C: vvItems.filter(i => i.exp_class === 'C').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
   }), [vvItems]);
 
   const handleExport = () => {
-    exportToExcel(filtered.map((r, i) => ({
-      'Rank':                 i + 1,
-      'Item Code':            r.item_code,
-      'Item Name':            r.itemname,
-      'Group':                r.group_name,
-      'Stock Value (฿)':      r.stock_value,
-      'Expire Date':          r.expire_date ?? 'N/A',
-      'Days Remaining':       r.remaining_days ?? 'N/A',
-      'Value Score (1-5)':    r.value_score,
-      'Validity Score (1-5)': r.validity_score,
-      'Final Score':          r.final_score,
-      'VV Class':             r.vv_class,
-      'Urgent':               r.is_urgent ? 'YES' : '',
-      'Recommendation':       r.recommendation,
-    })), 'VV_Matrix');
+    exportToExcel(filtered.map(r => ({
+      'Priority Rank':             r.priority_rank,
+      'Item Code':                 r.item_code,
+      'Item Name':                 r.itemname,
+      'Group':                     r.group_name,
+      'Stock Value (฿)':           r.stock_value,
+      'Expire Date':               r.expire_date ?? 'N/A',
+      'Days Remaining':            r.remaining_days ?? 'N/A',
+      'Value Score (1-5)':         r.value_score,
+      'Validity Score (1-5)':      r.validity_score,
+      'Simple Score':              r.final_score,
+      'Simple Class':              r.vv_class,
+      'Normalized Validity':       r.normalized_validity.toFixed(2),
+      'Exp Factor':                r.exp_factor.toFixed(4),
+      'Exponential Score':         r.exp_score,
+      'Exponential Class':         r.exp_class,
+      'Risk Flag':                 r.risk_flag ?? '',
+      'Recommendation':            r.recommendation,
+    })), 'VV_Matrix_Exponential');
   };
+
+  const alphaInfo = {
+    1: { label: 'α=1 Linear',   desc: 'Same as weighted average' },
+    2: { label: 'α=2 Moderate', desc: 'Default — balanced risk penalty' },
+    3: { label: 'α=3 Aggressive', desc: 'Recommended for perishables / food' },
+  } as const;
 
   return (
     <div className="space-y-6">
 
-      {/* ── KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="card">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Final Score</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
-            {summary.avgScore.toFixed(2)}
+      {/* ── Alpha Selector Bar */}
+      <div className="card py-3 px-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Exponential Factor (α)</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Controls how aggressively low validity is penalised</p>
+          </div>
+          <div className="flex gap-2">
+            {([1, 2, 3] as const).map(a => (
+              <button
+                key={a}
+                onClick={() => setAlpha(a)}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-all"
+                style={alpha === a
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff', borderColor: 'var(--color-primary)' }
+                  : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                }
+              >
+                {alphaInfo[a].label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+            {alphaInfo[alpha as 1|2|3].desc}
           </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Scale 1.0 – 5.0</p>
+          <div className="ml-auto text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+            Score = ValueScore × (ValidityScore/5)<sup>α</sup>
+          </div>
+        </div>
+      </div>
+
+      {/* ── KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {/* Avg Exp Score */}
+        <div className="card lg:col-span-1">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Exp Score</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
+            {summary.avgExpScore.toFixed(2)}
+          </p>
+          <p className="text-xs mt-1 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+            Simple: {summary.avgSimScore.toFixed(2)}
+          </p>
         </div>
 
+        {/* Class A / B / C — based on exp_class */}
         {(['A', 'B', 'C'] as const).map(cls => {
           const count = cls === 'A' ? summary.countA : cls === 'B' ? summary.countB : summary.countC;
           const val   = cls === 'A' ? summary.valA   : cls === 'B' ? summary.valB   : summary.valC;
@@ -254,20 +378,56 @@ function VVMatrixTab() {
           );
         })}
 
+        {/* Critical */}
+        <div className="card border-l-4" style={{ borderLeftColor: '#7c3aed' }}>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Critical Items</p>
+          <p className="text-2xl font-bold" style={{ color: '#7c3aed' }}>{summary.criticalCount}</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            High value + near expiry
+          </p>
+        </div>
+
+        {/* Value at Risk */}
         <div className="card border-l-4" style={{ borderLeftColor: '#dc2626' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Urgent Items</p>
-          <p className="text-2xl font-bold" style={{ color: '#dc2626' }}>{summary.urgentCount}</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>High value + near expiry ⚠</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Value at Risk</p>
+          <p className="text-xl font-bold tabular-nums" style={{ color: '#dc2626' }}>
+            ฿{formatCompact(summary.valC)}
+          </p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            Class C inventory
+          </p>
         </div>
       </div>
+
+      {/* ── Risk Alert Banner */}
+      {(summary.criticalCount > 0 || summary.highRiskCount > 0) && (
+        <div className="rounded-xl px-4 py-3 flex items-start gap-3"
+          style={{ backgroundColor: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)' }}>
+          <span className="text-lg leading-none mt-0.5">🚨</span>
+          <div className="text-sm">
+            <span className="font-semibold" style={{ color: '#dc2626' }}>Expiry Risk Alert — </span>
+            <span style={{ color: 'var(--text)' }}>
+              {summary.criticalCount > 0 && <><strong>{summary.criticalCount} Critical</strong> (high-value items expiring soon){summary.highRiskCount > 0 ? ' · ' : ''}</>}
+              {summary.highRiskCount > 0 && <><strong>{summary.highRiskCount} High-Risk</strong> items with validity ≤ 2</>}
+              . Immediate action required.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ── Matrix Scatter + Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <div className="card lg:col-span-2">
-          <h3 className="font-semibold mb-0.5" style={{ color: 'var(--text)' }}>VV Matrix — Value × Validity</h3>
+          <div className="flex items-start justify-between mb-0.5">
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>VV Matrix — Value × Validity</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+              style={{ backgroundColor: 'rgba(var(--color-primary-rgb,99,102,241),0.1)', color: 'var(--color-primary)' }}>
+              Coloured by Exp Class (α={alpha})
+            </span>
+          </div>
           <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-            Each dot = 1 product &nbsp;·&nbsp; X-axis = Value Score (stock ranking) &nbsp;·&nbsp; Y-axis = Validity Score (days to expiry)
+            Each dot = 1 product · X = Value Score · Y = Validity Score · Penalty zone: high X, low Y (bottom-right)
           </p>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -290,28 +450,34 @@ function VVMatrixTab() {
                   cursor={{ strokeDasharray: '3 3' }}
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null;
-                    const d = payload[0]?.payload as { x: number; y: number; name: string; itemname: string };
+                    const d = payload[0]?.payload as { x: number; y: number; name: string; itemname: string; exp_score: number; risk_flag: string | null };
                     return (
-                      <div style={{ ...tooltipStyle.contentStyle, padding: '8px 12px', minWidth: 180 }}>
+                      <div style={{ ...tooltipStyle.contentStyle, padding: '8px 12px', minWidth: 200 }}>
                         <p className="font-semibold text-xs mb-0.5">{d.name}</p>
-                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{d.itemname}</p>
-                        <p className="text-xs mt-1">Value Score: <strong>{d.x}</strong> &nbsp;·&nbsp; Validity Score: <strong>{d.y}</strong></p>
+                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{d.itemname}</p>
+                        <p className="text-xs">Value: <strong>{d.x}</strong> · Validity: <strong>{d.y}</strong></p>
+                        <p className="text-xs">Exp Score: <strong>{d.exp_score.toFixed(2)}</strong> (α={alpha})</p>
+                        {d.risk_flag && (
+                          <p className="text-xs font-semibold mt-1" style={{ color: '#dc2626' }}>
+                            {d.risk_flag === 'critical' ? '🔴 CRITICAL' : '🟠 HIGH EXPIRY RISK'}
+                          </p>
+                        )}
                       </div>
                     );
                   }}
                 />
                 {(['A', 'B', 'C'] as const).map(cls => (
-                  <Scatter key={cls} name={cls} data={scatterData[cls]} fill={VV_COLORS[cls]} fillOpacity={0.8} r={5} />
+                  <Scatter key={cls} name={`Class ${cls}`} data={scatterData[cls]} fill={VV_COLORS[cls]} fillOpacity={0.8} r={5} />
                 ))}
               </ScatterChart>
             </ResponsiveContainer>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-xs border-t pt-3" style={{ borderColor: 'var(--border)' }}>
             {[
-              { color: VV_COLORS.A, label: 'A  (Score ≥ 4.0)', desc: 'High value + fresh stock → push sales' },
-              { color: VV_COLORS.B, label: 'B  (Score 2.5 – 3.9)', desc: 'Moderate → optimize & monitor' },
-              { color: VV_COLORS.C, label: 'C  (Score < 2.5)', desc: 'Low / stale → clearance / stop buying' },
-              { color: '#dc2626',   label: '⚠ Urgent Risk', desc: 'Value ≥ 4 but Validity ≤ 2' },
+              { color: VV_COLORS.A, label: 'A  (Exp Score ≥ 3.5)',   desc: 'Strategic — high value + fresh → push growth' },
+              { color: VV_COLORS.B, label: 'B  (Exp Score 1.5–3.49)', desc: 'Core / Monitor — optimise & watch' },
+              { color: VV_COLORS.C, label: 'C  (Exp Score < 1.5)',    desc: 'Risk / Clearance — reduce & stop purchasing' },
+              { color: '#7c3aed',   label: '🔴 Critical',              desc: `Value ≥ 4 AND Validity ≤ 2 — urgent sale` },
             ].map(({ color, label, desc }) => (
               <div key={label} className="flex items-start gap-2">
                 <span className="mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
@@ -324,22 +490,27 @@ function VVMatrixTab() {
           </div>
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar — Exp Classification + Score Reference */}
         <div className="card">
-          <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>Classification</h3>
+          <h3 className="font-semibold mb-1" style={{ color: 'var(--text)' }}>Exp Classification</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Based on exponential score (α={alpha})</p>
           <div className="space-y-4">
             {(['A', 'B', 'C'] as const).map(cls => {
               const count = cls === 'A' ? summary.countA : cls === 'B' ? summary.countB : summary.countC;
               const val   = cls === 'A' ? summary.valA   : cls === 'B' ? summary.valB   : summary.valC;
               const pct   = summary.total ? (count / summary.total) * 100 : 0;
               const labels = { A: 'Strategic', B: 'Core', C: 'At Risk' };
+              const thresholds = { A: '≥ 3.5', B: '1.5 – 3.49', C: '< 1.5' };
               return (
                 <div key={cls}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2">
                       <span className="w-6 h-6 rounded text-white text-xs font-bold flex items-center justify-center"
                         style={{ backgroundColor: VV_COLORS[cls] }}>{cls}</span>
-                      <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{labels[cls]}</span>
+                      <div>
+                        <span className="text-sm font-medium block" style={{ color: 'var(--text)' }}>{labels[cls]}</span>
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{thresholds[cls]}</span>
+                      </div>
                     </div>
                     <span className="text-xs font-semibold" style={{ color: VV_COLORS[cls] }}>{pct.toFixed(0)}%</span>
                   </div>
@@ -355,25 +526,27 @@ function VVMatrixTab() {
           </div>
 
           <div className="mt-5 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
-            <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text)' }}>Validity Score (Days to Expiry)</p>
+            <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text)' }}>Validity Score Reference</p>
             <div className="space-y-1.5 text-xs">
               {[
-                { score: 5, label: '> 180 days',          color: '#16a34a' },
-                { score: 4, label: '91 – 180 days',        color: '#65a30d' },
-                { score: 3, label: '61 – 90 days',         color: '#d97706' },
-                { score: 2, label: '31 – 60 days',         color: '#ea580c' },
-                { score: 1, label: '≤ 30 days / expired',  color: '#dc2626' },
-              ].map(({ score, label, color }) => (
+                { score: 5, label: '> 180 days',         color: '#16a34a', norm: '1.00', ef: Math.pow(1.00, alpha).toFixed(2) },
+                { score: 4, label: '91 – 180 days',       color: '#65a30d', norm: '0.80', ef: Math.pow(0.80, alpha).toFixed(2) },
+                { score: 3, label: '61 – 90 days',        color: '#d97706', norm: '0.60', ef: Math.pow(0.60, alpha).toFixed(2) },
+                { score: 2, label: '31 – 60 days',        color: '#ea580c', norm: '0.40', ef: Math.pow(0.40, alpha).toFixed(2) },
+                { score: 1, label: '≤ 30 days / expired', color: '#dc2626', norm: '0.20', ef: Math.pow(0.20, alpha).toFixed(2) },
+              ].map(({ score, label, color, ef }) => (
                 <div key={score} className="flex items-center justify-between">
-                  <span className="font-bold" style={{ color }}>Score {score}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold w-10" style={{ color }}>Sc.{score}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+                  </div>
+                  <span className="font-mono font-semibold" style={{ color }}>×{ef}</span>
                 </div>
               ))}
-              <div className="flex items-center justify-between pt-1 border-t" style={{ borderColor: 'var(--border)' }}>
-                <span className="font-bold" style={{ color: 'var(--text-muted)' }}>Score 3</span>
-                <span style={{ color: 'var(--text-muted)' }}>No expiry data</span>
-              </div>
             </div>
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              Multiplier = (score/5)<sup>α</sup> applied to value score
+            </p>
           </div>
         </div>
       </div>
@@ -383,7 +556,7 @@ function VVMatrixTab() {
         <div className="flex flex-wrap items-center gap-4">
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
           <select className="select" value={vvClass} onChange={e => setVvClass(e.target.value)}>
-            <option value="">All Classes</option>
+            <option value="">All Classes (Exp)</option>
             <option value="A">Class A – Strategic</option>
             <option value="B">Class B – Core</option>
             <option value="C">Class C – At Risk</option>
@@ -410,17 +583,19 @@ function VVMatrixTab() {
           <div className="table-container" style={{ border: 'none' }}>
             <table>
               <colgroup>
-                <col style={{ width: 40 }} />
-                <col style={{ width: 60 }} />
+                <col style={{ width: 36 }} />
+                <col style={{ width: 72 }} />
                 <col style={{ width: 110 }} />
-                <col style={{ width: 200 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 80 }} />
+                <col style={{ width: 190 }} />
+                <col style={{ width: 55 }} />
+                <col style={{ width: 95 }} />
+                <col style={{ width: 95 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 68 }} />
+                <col style={{ width: 82 }} />
                 <col style={{ width: 90 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 70 }} />
                 <col />
               </colgroup>
               <thead>
@@ -435,29 +610,39 @@ function VVMatrixTab() {
                   <th className="text-right">Days Left</th>
                   <th className="text-right">Value</th>
                   <th className="text-right">Validity</th>
-                  <th className="text-right">Score</th>
+                  <th className="text-right">Simple</th>
+                  <th className="text-right">Exp Score</th>
+                  <th>Risk</th>
                   <th>Recommendation</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, i) => (
+                {filtered.map(row => (
                   <tr key={row.item_code}
-                    style={row.is_urgent ? { backgroundColor: 'rgba(220,38,38,0.04)' } : {}}>
-                    <td className="text-center text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                    style={row.risk_flag === 'critical'    ? { backgroundColor: 'rgba(220,38,38,0.05)' } :
+                           row.risk_flag === 'high_expiry' ? { backgroundColor: 'rgba(234,88,12,0.04)'  } : {}}>
+                    <td className="text-center text-xs tabular-nums font-semibold" style={{ color: 'var(--text-muted)' }}>
+                      {row.priority_rank}
+                    </td>
                     <td>
-                      <div className="flex items-center gap-1">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded text-white text-xs font-bold flex-shrink-0"
-                          style={{ backgroundColor: VV_COLORS[row.vv_class] }}>
-                          {row.vv_class}
+                      <div className="flex flex-col gap-0.5">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded text-white text-xs font-bold"
+                          style={{ backgroundColor: VV_COLORS[row.exp_class] }}>
+                          {row.exp_class}
                         </span>
-                        {row.is_urgent && <span className="text-red-500 text-xs leading-none">⚠</span>}
+                        {row.vv_class !== row.exp_class && (
+                          <span className="text-xs leading-none px-1 rounded"
+                            style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-alt)' }}>
+                            {row.vv_class}↑
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="font-mono text-xs font-medium whitespace-nowrap" style={{ color: 'var(--color-primary-light)' }}>
                       {row.item_code}
                     </td>
                     <td className="text-xs" style={{ overflow: 'hidden' }}>
-                      <span className="block truncate" style={{ maxWidth: 190 }} title={row.itemname}>{row.itemname}</span>
+                      <span className="block truncate" style={{ maxWidth: 180 }} title={row.itemname}>{row.itemname}</span>
                     </td>
                     <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
                       {row.group_name.split('-')[0].trim()}
@@ -474,18 +659,39 @@ function VVMatrixTab() {
                         </span>
                       ) : '—'}
                     </td>
-                    <td><ScoreBar score={row.value_score} color={VV_COLORS[row.vv_class]} /></td>
-                    <td><ScoreBar score={row.validity_score} color={VV_COLORS[row.vv_class]} /></td>
-                    <td className="text-right tabular-nums font-bold whitespace-nowrap">
-                      <span style={{ color: VV_COLORS[row.vv_class] }}>{row.final_score.toFixed(1)}</span>
+                    <td><ScoreBar score={row.value_score} color={VV_COLORS[row.exp_class]} /></td>
+                    <td><ScoreBar score={row.validity_score} color={VV_COLORS[row.exp_class]} /></td>
+                    <td className="text-right tabular-nums text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
+                      {row.final_score.toFixed(1)}
+                    </td>
+                    <td className="text-right tabular-nums whitespace-nowrap">
+                      <span className="font-bold text-sm" style={{ color: VV_COLORS[row.exp_class] }}>
+                        {row.exp_score.toFixed(2)}
+                      </span>
+                    </td>
+                    <td>
+                      {row.risk_flag === 'critical' && (
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                          style={{ backgroundColor: 'rgba(124,58,237,0.1)', color: '#7c3aed' }}>
+                          CRITICAL
+                        </span>
+                      )}
+                      {row.risk_flag === 'high_expiry' && (
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                          style={{ backgroundColor: 'rgba(234,88,12,0.1)', color: '#ea580c' }}>
+                          HIGH RISK
+                        </span>
+                      )}
                     </td>
                     <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      <span className="block truncate" style={{ maxWidth: 180 }} title={row.recommendation}>{row.recommendation}</span>
+                      <span className="block truncate" style={{ maxWidth: 200 }} title={row.recommendation}>
+                        {row.recommendation}
+                      </span>
                     </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={12} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={14} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
                 )}
               </tbody>
             </table>

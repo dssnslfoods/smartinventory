@@ -69,7 +69,8 @@ export const parseComprehensiveExcel = async (
            return code ? {
              group_code: Number(code),
              group_name: String(getVal(row, ['Group Name', 'Name']) ?? code).trim(),
-             description: getVal(row, ['Description', 'Desc']) ? String(getVal(row, ['Description', 'Desc'])) : null
+             description: getVal(row, ['Description', 'Desc']) ? String(getVal(row, ['Description', 'Desc'])) : null,
+             shelf_life_days: getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life']) ? Number(getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life'])) : null
            } : null;
         });
 
@@ -84,6 +85,19 @@ export const parseComprehensiveExcel = async (
            } : null;
         });
 
+        const parseExcelDate = (val: unknown): string | null => {
+          if (!val) return null;
+          if (val instanceof Date) return val.toISOString().split('T')[0];
+          const s = String(val).trim();
+          if (!s || s === 'null' || s === 'undefined') return null;
+          // Handle Excel serial numbers (e.g. 46000)
+          if (/^\d{5}$/.test(s)) {
+            const d = XLSX.SSF.parse_date_code(Number(s));
+            if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+          }
+          return s.split('T')[0].split(' ')[0] || null;
+        };
+
         const items = extract(['Items', 'สินค้า', 'dbo_OITM'], row => {
            const code = getVal(row, ['Item Code', 'ItemCode']);
            return code ? {
@@ -93,7 +107,8 @@ export const parseComprehensiveExcel = async (
              std_cost: Number(getVal(row, ['Std Cost', 'STD COST']) ?? 0),
              moving_avg: Number(getVal(row, ['Moving Avg', 'Moving Average']) ?? 0),
              group_code: Number(getVal(row, ['Group Code', 'ItmsGrpCod']) ?? 0),
-             is_active: String(getVal(row, ['Status', 'frozenFor']) ?? '') !== 'Y' && String(getVal(row, ['Status']) ?? '') !== 'In'
+             is_active: String(getVal(row, ['Status', 'frozenFor']) ?? '') !== 'Y' && String(getVal(row, ['Status']) ?? '') !== 'In',
+             expire_date: parseExcelDate(getVal(row, ['Expire Date', 'ExpireDate', 'Expiry Date', 'ExpiryDate', 'Expiration Date']))
            } : null;
         });
 
@@ -294,6 +309,7 @@ export const generateComprehensiveTemplate = () => {
       ['Code', 'รหัสกลุ่มสินค้า', '125, 123', 'ใช่'],
       ['Name', 'ชื่อกลุ่มสินค้า', 'FRM-Raw Materials', 'ใช่'],
       ['Desc', 'รายละเอียดจำเพาะ', 'คำอธิบายเพิ่มเติมของกลุ่มนี้', 'ไม่'],
+      ['Shelf Life Days', 'อายุขัย (default ของกลุ่มนี้, ใช้คำนวณ Expire Date อัตโนมัติ)', '365 = 1 ปี, 548 = 1.5 ปี, 730 = 2 ปี', 'ไม่ (ค่าเริ่มต้น: 365 วัน)'],
       [''],
       ['📌 คำอธิบาย Sheet "Suppliers" (ผู้จัดจำหน่าย)'],
       ['Column', 'ความหมาย', 'ตัวอย่าง / ค่าที่ยอมรับ', 'บังคับ?'],
@@ -311,6 +327,7 @@ export const generateComprehensiveTemplate = () => {
       ['STD COST', 'ต้นทุนมาตรฐาน', '15.5', 'ไม่ (ค่าเริ่มต้น: 0)'],
       ['Moving Average', 'ต้นทุนเฉลี่ย', '16.0', 'ไม่ (ค่าเริ่มต้น: 0)'],
       ['Status', 'สถานะใช้งาน', 'A (Active) หรือ In (Inactive)', 'ไม่ (ค่าเริ่มต้น: A)'],
+      ['Expire Date', 'วันหมดอายุของสินค้า (สำหรับ VV Matrix)', '2026-12-31', 'ไม่ (ถ้าว่างจะคำนวณจาก Shelf Life อัตโนมัติ)'],
       [''],
       ['📌 คำอธิบาย Sheet "Thresholds" (จุดสั่งซื้อแจ้งเตือน)'],
       ['Column', 'ความหมาย', 'ตัวอย่าง / ค่าที่ยอมรับ', 'บังคับ?'],
@@ -364,9 +381,13 @@ export const generateComprehensiveTemplate = () => {
     XLSX.utils.book_append_sheet(wb, wsWhs, 'Warehouses');
 
     // 3. Item Groups
-    const wsGroups = XLSX.utils.json_to_sheet([{
-      'Group Code': 125, 'Group Name': 'FRM-Raw Materials'
-    }]);
+    const wsGroups = XLSX.utils.json_to_sheet([
+      { 'Group Code': 123, 'Group Name': 'FFG-Finish Goods',  'Shelf Life Days': 365 },
+      { 'Group Code': 125, 'Group Name': 'FRM-Raw Materials', 'Shelf Life Days': 548 },
+      { 'Group Code': 126, 'Group Name': 'FBY-By Product',    'Shelf Life Days': 730 },
+      { 'Group Code': 127, 'Group Name': 'FPKG-Packaging',    'Shelf Life Days': 365 },
+    ]);
+    wsGroups['!cols'] = [{wch: 13}, {wch: 24}, {wch: 18}];
     XLSX.utils.book_append_sheet(wb, wsGroups, 'Item Groups');
 
     // 4. Suppliers
@@ -376,9 +397,11 @@ export const generateComprehensiveTemplate = () => {
     XLSX.utils.book_append_sheet(wb, wsSuppliers, 'Suppliers');
 
     // 5. Items
-    const wsItems = XLSX.utils.json_to_sheet([{
-      'Item Code': 'RM-10001', 'Item Name': 'แป้งสาลี', 'Group Code': 125, 'UOM': 'KG', 'Std Cost': 15.5, 'Moving Avg': 16.0, 'Status': 'A'
-    }]);
+    const wsItems = XLSX.utils.json_to_sheet([
+      { 'Item Code': 'RM-10001', 'Item Name': 'แป้งสาลีอเนกประสงค์', 'Group Code': 125, 'UOM': 'KG', 'Std Cost': 15.5, 'Moving Avg': 16.0, 'Status': 'A', 'Expire Date': '2026-12-31' },
+      { 'Item Code': 'RM-10002', 'Item Name': 'น้ำตาลทราย', 'Group Code': 125, 'UOM': 'KG', 'Std Cost': 22.0, 'Moving Avg': 23.5, 'Status': 'A', 'Expire Date': '2027-06-30' },
+    ]);
+    wsItems['!cols'] = [{wch: 14}, {wch: 28}, {wch: 13}, {wch: 8}, {wch: 12}, {wch: 14}, {wch: 10}, {wch: 14}];
     XLSX.utils.book_append_sheet(wb, wsItems, 'Items');
 
     // 6. PO & Lines (Combined for example logic, but separate sheets)

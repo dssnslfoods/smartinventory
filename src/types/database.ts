@@ -134,21 +134,6 @@ export interface StockAlertView {
   status: StockStatus;
 }
 
-/** v_abc_analysis — ABC classification by cumulative outbound value */
-export interface ABCItem {
-  rank: number;
-  item_code: string;
-  itemname: string;
-  group_name: string;
-  uom: string;
-  total_out_qty: number;
-  total_out_value: number;
-  value_pct: number;
-  cumulative_pct: number;
-  abc_class: 'A' | 'B' | 'C';
-  active_days: number;
-  last_movement_date: string;
-}
 
 /** v_slow_moving — items with low or no recent outbound activity */
 export interface SlowMovingItem {

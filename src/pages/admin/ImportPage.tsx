@@ -29,7 +29,7 @@ const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any
   { key: 'warehouses', label: 'Warehouses', sub: 'คลังสินค้า', icon: <Archive size={20}/>, cols: ['code', 'whs_name', 'whs_type'], headers: ['Code', 'Name', 'Type'] },
   { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'] },
   { key: 'suppliers', label: 'Suppliers', sub: 'ผู้จัดจำหน่าย', icon: <Truck size={20}/>, cols: ['supplier_code', 'supplier_name'], headers: ['Code', 'Name'] },
-  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom'], headers: ['Code', 'Name', 'UOM'] },
+  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'expire_date'], headers: ['Code', 'Name', 'UOM', 'Expire Date'] },
   { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'] },
   { key: 'purchase_orders', label: 'Purchase Orders', sub: 'ใบสั่งซื้อ', icon: <FileSpreadsheet size={20}/>, cols: ['po_number', 'supplier_code', 'order_date'], headers: ['PO', 'Supplier', 'Date'] },
   { key: 'purchase_order_lines', label: 'PO Lines', sub: 'รายละเอียดสั่งซื้อ', icon: <FileSpreadsheet size={20}/>, cols: ['po_number', 'item_code', 'ordered_qty'], headers: ['PO', 'Item', 'Qty'] },

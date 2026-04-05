@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type {
   StockOnHand, InventoryTransaction, MovementMonthly,
   StockThreshold, Item, ImportLog,
-  StockAlertView, ABCItem, SlowMovingItem,
+  StockAlertView, SlowMovingItem,
   InventoryTurnover, ReorderSuggestion,
   Warehouse, ItemGroup,
   Supplier, PurchaseOrder, PurchaseOrderLine,
@@ -241,23 +241,6 @@ export function useStockAlerts(filters?: { status?: string }) {
   });
 }
 
-// ============ ABC Analysis ============
-export function useABCAnalysis(filters?: { groupName?: string; abcClass?: string }) {
-  return useQuery({
-    queryKey: ['abcAnalysis', filters],
-    queryFn: async () => {
-      let query = supabase.from('v_abc_analysis').select('*');
-      if (filters?.groupName) query = query.eq('group_name', filters.groupName);
-      if (filters?.abcClass)  query = query.eq('abc_class',  filters.abcClass);
-
-      const { data, error } = await query
-        .order('rank', { ascending: true })
-        .limit(LIMIT_REPORTS);
-      if (error) throw error;
-      return (data ?? []) as ABCItem[];
-    },
-  });
-}
 
 // ============ Slow Moving Items ============
 export function useSlowMoving(filters?: {
