@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Upload, AlertTriangle, Package, ArrowLeftRight,
-  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Truck, Archive, FileSpreadsheet
+  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Archive
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useImportLogs } from '@/hooks/useSupabaseQuery';
@@ -28,11 +28,8 @@ interface ProgressState {
 const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any; cols: string[]; headers: string[] }[] = [
   { key: 'warehouses', label: 'Warehouses', sub: 'คลังสินค้า', icon: <Archive size={20}/>, cols: ['code', 'whs_name', 'whs_type'], headers: ['Code', 'Name', 'Type'] },
   { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'] },
-  { key: 'suppliers', label: 'Suppliers', sub: 'ผู้จัดจำหน่าย', icon: <Truck size={20}/>, cols: ['supplier_code', 'supplier_name'], headers: ['Code', 'Name'] },
   { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'expire_date'], headers: ['Code', 'Name', 'UOM', 'Expire Date'] },
   { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'] },
-  { key: 'purchase_orders', label: 'Purchase Orders', sub: 'ใบสั่งซื้อ', icon: <FileSpreadsheet size={20}/>, cols: ['po_number', 'supplier_code', 'order_date'], headers: ['PO', 'Supplier', 'Date'] },
-  { key: 'purchase_order_lines', label: 'PO Lines', sub: 'รายละเอียดสั่งซื้อ', icon: <FileSpreadsheet size={20}/>, cols: ['po_number', 'item_code', 'ordered_qty'], headers: ['PO', 'Item', 'Qty'] },
   { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'] }
 ];
 
@@ -115,10 +112,7 @@ export function ImportPage() {
       await supabase.from('inventory_transactions').delete().neq('id', 0);
       await supabase.from('stock_thresholds').delete().neq('id', 0);
       await supabase.from('items').delete().neq('item_code', '');
-      await supabase.from('purchase_order_lines').delete().neq('id', 0);
-      await supabase.from('purchase_orders').delete().neq('po_number', '');
       await supabase.from('item_groups').delete().neq('group_code', 0);
-      await supabase.from('suppliers').delete().neq('supplier_code', '');
       await supabase.from('warehouses').delete().neq('code', '');
       
       queryClient.clear();
@@ -148,7 +142,7 @@ export function ImportPage() {
               <span className="text-xs font-bold uppercase text-primary-light">Step 1</span>
               <h3 className="font-semibold text-sm">เตรียมข้อมูลจาก Template</h3>
             </div>
-            <p className="text-xs text-muted-foreground">แบบฟอร์ม Comprehensive Template จะมีครบทั้ง 8 หน้า (Warehouses, Suppliers, POs, Items, ฯลฯ)</p>
+            <p className="text-xs text-muted-foreground">แบบฟอร์ม Master Data Template จะมี 5 หน้า (Warehouses, Item Groups, Items, Thresholds, Transactions)</p>
             <button onClick={generateComprehensiveTemplate} className="btn btn-primary py-2.5 shadow-sm">
               <Download size={16} className="mr-2" /> โหลด All-in-One Template
             </button>

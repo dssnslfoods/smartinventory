@@ -5,6 +5,7 @@
 // Operations:
 //   POST  /admin-users { action: "create", email, password, full_name, role, company_id }
 //   POST  /admin-users { action: "reset-password", user_id, password }
+//   POST  /admin-users { action: "delete", user_id }   (super_admin only)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -81,6 +82,9 @@ Deno.serve(async (req: Request) => {
     }
     if (action === 'reset-password') {
       return await handleResetPassword(admin, callerRole, caller.company_id, body);
+    }
+    if (action === 'delete') {
+      return await handleDelete(admin, callerRole, callerId, body);
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
@@ -192,6 +196,40 @@ async function handleResetPassword(
 
   const { error } = await admin.auth.admin.updateUserById(userId, { password });
   if (error) return json({ error: error.message }, 400);
+
+  return json({ ok: true });
+}
+
+// ── Action: delete user (super_admin only) ──────────────────────────────────
+
+async function handleDelete(
+  admin: ReturnType<typeof createClient>,
+  callerRole: Role,
+  callerId: string,
+  body: Record<string, unknown>,
+) {
+  if (callerRole !== 'super_admin') {
+    return json({ error: 'Only super_admin may delete users' }, 403);
+  }
+
+  const userId = String(body.user_id ?? '');
+  if (!userId) return json({ error: 'user_id is required' }, 400);
+  if (userId === callerId) {
+    return json({ error: 'You cannot delete your own account' }, 400);
+  }
+
+  // Delete profile first — if this fails we haven't touched auth yet.
+  const { error: profileErr } = await admin
+    .from('user_profiles')
+    .delete()
+    .eq('id', userId);
+  if (profileErr) return json({ error: `profile delete: ${profileErr.message}` }, 500);
+
+  // Then delete auth user. If this fails, the profile is gone but auth remains —
+  // we surface the error so an admin can retry; next call will short-circuit on
+  // missing profile (already deleted) and just retry the auth delete.
+  const { error: authErr } = await admin.auth.admin.deleteUser(userId);
+  if (authErr) return json({ error: `auth delete: ${authErr.message}` }, 500);
 
   return json({ ok: true });
 }
