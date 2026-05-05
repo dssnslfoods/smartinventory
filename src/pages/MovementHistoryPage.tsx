@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import { Download, Search, Filter, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -84,6 +86,41 @@ export function MovementHistoryPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Movement History"
+        subtitle="ประวัติการเคลื่อนไหวสินค้า รับ/จ่าย/โอน"
+        helpTitle="Movement History (ประวัติการเคลื่อนไหว)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้แสดงอะไร">
+            ทุกธุรกรรม (transaction) ที่เกิดในระบบ พร้อมกราฟแนวโน้มรายเดือน
+          </HelpSection>
+          <HelpSection title="กราฟด้านบน">
+            <HelpLegend items={[
+              { color: '#2E7D32', label: 'พื้นที่เขียว — In',  meaning: 'จำนวนหน่วยที่รับเข้า' },
+              { color: '#C62828', label: 'พื้นที่แดง — Out',   meaning: 'จำนวนหน่วยที่จ่ายออก' },
+              { color: '#1F3864', label: 'เส้น Net',          meaning: 'ผลต่างสุทธิ In − Out' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="ฟิลเตอร์">
+            <ul className="list-disc ml-5 text-xs space-y-1">
+              <li>ช่วงวันที่ — กรองเฉพาะระหว่างวันที่ที่กำหนด</li>
+              <li>คลังสินค้า / กลุ่มสินค้า / ประเภท Tx</li>
+              <li>ค้นหา — รหัสหรือชื่อสินค้า</li>
+            </ul>
+          </HelpSection>
+          <HelpSection title="ประเภทรายการ (Tx Type) ที่พบบ่อย">
+            <HelpLegend items={[
+              { color: '#16a34a', label: '20 — Goods Receipt PO', meaning: 'รับของตามใบสั่งซื้อ (In)' },
+              { color: '#dc2626', label: '60 — Goods Issue',       meaning: 'จ่ายออกทั่วไป (Out)' },
+              { color: '#2E75B6', label: '67 — Inventory Transfers', meaning: 'โอนระหว่างคลัง' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="Export">
+            กรองข้อมูลที่ต้องการก่อน → กดปุ่ม Export Excel เพื่อดาวน์โหลดทั้งหมด (ไม่จำกัดที่ pagination)
+          </HelpSection>
+        </>)}
+      />
+
       {/* Movement Trend Chart */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">

@@ -8,6 +8,8 @@ import { useStockOnHand, useMovementMonthly } from '@/hooks/useSupabaseQuery';
 import { formatCurrency, formatNumber, formatDate, formatCompact } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpFormula } from '@/components/HelpButton';
 
 export function ValuationPage() {
   const [warehouse, setWarehouse] = useState('');
@@ -121,6 +123,32 @@ export function ValuationPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Cost & Valuation"
+        subtitle="วิเคราะห์มูลค่าสต็อกและต้นทุน"
+        helpTitle="Cost & Valuation (ต้นทุนและมูลค่า)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้แสดงอะไร">
+            มูลค่าสต็อกของบริษัทใน 2 วิธีคำนวณ + แยกตามกลุ่มสินค้า + แยกตามคลัง + กราฟ trend ต้นทุน
+          </HelpSection>
+          <HelpSection title="2 วิธีคำนวณมูลค่า">
+            <HelpFormula>Inventory Value (Moving Avg) = Σ (qty × moving_avg cost)</HelpFormula>
+            ใช้ราคาเฉลี่ยล่าสุด — เป็นวิธีที่ใกล้ราคาตลาดจริง
+            <HelpFormula>Inventory Value (Std Cost) = Σ (qty × std cost)</HelpFormula>
+            ใช้ต้นทุนมาตรฐาน — เหมาะกับการเปรียบเทียบเชิงบัญชี
+          </HelpSection>
+          <HelpSection title="ฟิลเตอร์">
+            กรองตามคลังหรือกลุ่มสินค้า — ตัวเลขทุกการ์ดและกราฟทุกตัวจะอัปเดตตามฟิลเตอร์
+          </HelpSection>
+          <HelpSection title="กราฟ Transaction Value Trend">
+            แนวโน้มมูลค่ารับเข้า/จ่ายออกย้อนหลัง 12 เดือน — ใช้ดูว่าเงินไหลเข้าออกในแต่ละเดือนเท่าไร
+          </HelpSection>
+          <HelpSection title="Export">
+            กดปุ่ม Export Excel เพื่อนำตารางมูลค่าตามฟิลเตอร์ที่กำหนดไปใช้ในรายงาน
+          </HelpSection>
+        </>)}
+      />
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
