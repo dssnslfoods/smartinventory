@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Search, Loader2, Users, Save, X, UserPlus, KeyRound } from 'lucide-react';
+import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, Trash2, AlertTriangle } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { supabase, invokeAdminUsers } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils/format';
 import { formatDateTime } from '@/utils/format';
 import type { UserProfile, Company, UserRole } from '@/types/auth';
@@ -49,12 +50,17 @@ function UserRow({
   companies: Pick<Company, 'id' | 'name' | 'slug'>[];
   onSaved: () => void;
 }) {
+  const { user: authUser } = useAuthStore();
+  const isSelf = authUser?.id === user.id;
   const [editing, setEditing] = useState(false);
   const [role, setRole] = useState<UserRole>(user.role);
   const [companyId, setCompanyId] = useState(user.company_id ?? '');
   const [active, setActive] = useState(user.is_active);
   const [saving, setSaving] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const handleSave = async () => {
     setSaving(true);
@@ -79,6 +85,19 @@ function UserRow({
     setCompanyId(user.company_id ?? '');
     setActive(user.is_active);
     setEditing(false);
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await invokeAdminUsers({ action: 'delete', user_id: user.id });
+      onSaved();
+    } catch (e: any) {
+      setDeleteError(e.message ?? 'ลบไม่สำเร็จ');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const inputCls = 'rounded-lg border px-2 py-1 text-sm w-full';
@@ -183,6 +202,15 @@ function UserRow({
             >
               <KeyRound size={14} />
             </button>
+            <button
+              onClick={() => { setConfirmDelete(true); setDeleteError(''); }}
+              disabled={isSelf}
+              className="p-1.5 rounded-lg border transition-colors hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ borderColor: 'var(--border)', color: '#dc2626' }}
+              title={isSelf ? 'ลบบัญชีตัวเองไม่ได้' : 'ลบผู้ใช้'}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         )}
       </td>
@@ -195,7 +223,105 @@ function UserRow({
           onClose={() => setShowReset(false)}
         />
       )}
+
+      {confirmDelete && (
+        <DeleteUserModal
+          user={user}
+          deleting={deleting}
+          error={deleteError}
+          onConfirm={handleDelete}
+          onClose={() => { setConfirmDelete(false); setDeleteError(''); }}
+        />
+      )}
     </tr>
+  );
+}
+
+// ── Delete confirmation modal ────────────────────────────────────────────────
+
+function DeleteUserModal({
+  user,
+  deleting,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  user: UserProfile;
+  deleting: boolean;
+  error: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const expected = user.email ?? user.id;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="rounded-xl shadow-xl w-full max-w-md" style={{ backgroundColor: 'var(--bg-card)' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 text-red-600">
+            <AlertTriangle size={18} />
+            <h2 className="font-semibold">ลบผู้ใช้</h2>
+          </div>
+          <button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={20} /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="p-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/10 dark:border-red-900">
+            <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">
+              การลบนี้ไม่สามารถย้อนกลับได้
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-500">
+              ทั้ง auth.users และ user_profiles จะถูกลบออก ผู้ใช้รายนี้จะ login ไม่ได้อีก
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>กำลังลบบัญชีของ:</p>
+            <div className="px-3 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text)' }}>
+              {expected}
+            </div>
+            {user.full_name && (
+              <p className="text-xs pl-1" style={{ color: 'var(--text-muted)' }}>{user.full_name} · {ROLE_LABELS[user.role]}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+              พิมพ์ <code className="font-mono">{expected}</code> เพื่อยืนยัน
+            </label>
+            <input
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ backgroundColor: 'var(--bg-alt)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              autoFocus
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-3 justify-end pt-1">
+            <button
+              onClick={onClose}
+              disabled={deleting}
+              className="px-4 py-2 rounded-lg text-sm border"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              ยกเลิก
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={deleting || confirmText !== expected}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {deleting && <Loader2 size={14} className="animate-spin" />}
+              {deleting ? 'กำลังลบ…' : 'ลบถาวร'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
