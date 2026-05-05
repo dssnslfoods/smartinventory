@@ -7,11 +7,13 @@ import { supabase } from '@/lib/supabase';
 import { useImportLogs } from '@/hooks/useSupabaseQuery';
 import { formatNumber } from '@/utils/format';
 import { useQueryClient } from '@tanstack/react-query';
-import { 
-  parseComprehensiveExcel, 
-  executeComprehensiveImport, 
+import {
+  parseComprehensiveExcel,
+  executeComprehensiveImport,
   generateComprehensiveTemplate
 } from '@/services/importService';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import type { 
   SheetConfigKey,
   ImportState
@@ -129,10 +131,41 @@ export function ImportPage() {
 
   return (
     <div className="space-y-5 pb-10">
-      <div>
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>ระบบนำเข้าข้อมูล Master Data & Transactions</h2>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>นำเข้าโครงสร้างและข้อมูลทั้งหมดของระบบจาก Excel เดียว ตามลำดับความสัมพันธ์ตารางอัตโนมัติ</p>
-      </div>
+      <PageHeader
+        title="Data Import"
+        subtitle="นำเข้า Master Data + Transactions จาก Excel ตามลำดับความสัมพันธ์"
+        helpTitle="Data Import (นำเข้าข้อมูล)"
+        helpBody={(<>
+          <HelpSection title="ทำงานยังไง">
+            อัปโหลด Excel เดียวที่มี 5 sheets — ระบบจะนำเข้าทีละตารางตามลำดับ FK (Warehouses → Item Groups → Items → Thresholds → Transactions)
+          </HelpSection>
+          <HelpSection title="ขั้นตอน 4 Step">
+            <ol className="list-decimal ml-5 text-xs space-y-1">
+              <li>กดปุ่ม "โหลด All-in-One Template" → ได้ไฟล์ Excel ที่จัดดีไซน์มาแล้ว</li>
+              <li>กรอกข้อมูลในแต่ละ Sheet ตามตัวอย่าง — ใช้ dropdown ที่ระบบเตรียมให้</li>
+              <li>กลับมาหน้านี้ ลากไฟล์มาวาง — ระบบจะ preview จำนวนแถวแต่ละ Sheet</li>
+              <li>เลือก toggle Sheet ที่ต้องการ → กด "เริ่ม Import"</li>
+            </ol>
+          </HelpSection>
+          <HelpSection title="โหมด Transactions">
+            <HelpLegend items={[
+              { color: '#E65100', label: 'Replace All', meaning: 'ลบ Transactions เดิมทั้งหมดก่อน Import (ใช้ตอนเริ่มต้นใหม่)' },
+              { color: '#2E75B6', label: 'Append Only', meaning: 'เพิ่มเฉพาะรายการใหม่ (ใช้ในการดำเนินงานปกติ)' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="Shelf Life อัตโนมัติ">
+            ลำดับการคำนวณ Expire Date เมื่อไม่ระบุใน Excel:
+            <ol className="list-decimal ml-5 text-xs space-y-1 mt-1">
+              <li>ใช้ Expire Date จาก Excel ถ้ามี</li>
+              <li>ใช้ Shelf Life ของ Item Group</li>
+              <li>ใช้ Global Fallback ที่ Settings (default 365 วัน)</li>
+            </ol>
+          </HelpSection>
+          <HelpSection title="⚠️ Danger Zone">
+            ปุ่ม "Clear All Data" จะลบข้อมูลทั้งหมด — ใช้สำหรับเริ่มโครงการใหม่เท่านั้น
+          </HelpSection>
+        </>)}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Side */}

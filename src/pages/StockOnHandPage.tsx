@@ -4,6 +4,8 @@ import { useStockOnHand } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
+import { PageHeader } from '@/components/PageHeader';
 
 export function StockOnHandPage() {
   const [warehouse, setWarehouse] = useState('');
@@ -64,6 +66,35 @@ export function StockOnHandPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Stock On-Hand"
+        subtitle="สต็อกคงเหลือทุกสินค้าในทุกคลัง"
+        helpTitle="Stock On-Hand (สต็อกคงเหลือ)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้แสดงอะไร">
+            จำนวนสต็อกปัจจุบันแยกตาม "สินค้า × คลัง" — 1 บรรทัด = สินค้า 1 รหัสในคลัง 1 แห่ง
+          </HelpSection>
+          <HelpSection title="3 KPI ด้านบน">
+            <HelpLegend items={[
+              { color: '#1F3864', label: 'Total Stock Lines', meaning: 'จำนวนบรรทัดทั้งหมด (สินค้า × คลัง ที่มีของอยู่)' },
+              { color: '#2E75B6', label: 'Total Stock Value', meaning: 'มูลค่ารวมจาก Σ (qty × moving_avg)' },
+              { color: '#00897B', label: 'Avg Value per Line', meaning: 'มูลค่าเฉลี่ยต่อ 1 บรรทัด — ใช้ดูสินค้าราคาสูง' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="ฟิลเตอร์">
+            <ul className="list-disc ml-5 text-xs space-y-1">
+              <li>ค้นหา — พิมพ์รหัสหรือชื่อสินค้า</li>
+              <li>All Warehouses — กรองเฉพาะคลัง</li>
+              <li>All Groups — กรองตามกลุ่มสินค้า (FFG/FRM/FBY/FPKG)</li>
+              <li>All Status — Active / Inactive</li>
+            </ul>
+          </HelpSection>
+          <HelpSection title="Export Excel">
+            ปุ่มมุมขวา → ดาวน์โหลดข้อมูลที่กรองอยู่ตอนนี้เป็นไฟล์ .xlsx
+          </HelpSection>
+        </>)}
+      />
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">

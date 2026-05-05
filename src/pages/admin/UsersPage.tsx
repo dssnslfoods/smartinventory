@@ -8,6 +8,8 @@ import type { UserProfile, UserRole } from '@/types/auth';
 import { ROLE_LABELS, ROLE_COLORS } from '@/types/auth';
 import { CreateUserModal } from '@/components/CreateUserModal';
 import { ResetPasswordModal } from '@/components/ResetPasswordModal';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
 
 function useCompanyUsers(companyId: string | null) {
   return useQuery({
@@ -171,21 +173,53 @@ export function UsersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>User Management</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            จัดการผู้ใช้ภายใน {company?.name ?? 'บริษัท'}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-[var(--color-primary)] text-white"
-        >
-          <UserPlus size={16} />
-          เพิ่มผู้ใช้งาน
-        </button>
-      </div>
+      <PageHeader
+        title="User Management"
+        subtitle={`จัดการผู้ใช้ภายใน ${company?.name ?? 'บริษัท'}`}
+        helpTitle="User Management (จัดการผู้ใช้)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้ทำอะไรได้">
+            สร้าง / แก้ไข / Reset Password ผู้ใช้ภายในบริษัทของคุณ
+          </HelpSection>
+          <HelpSection title="Roles ที่ Admin สร้างได้">
+            <HelpLegend items={[
+              { color: '#1F3864', label: 'Admin',      meaning: 'จัดการระบบเต็มภายในบริษัท' },
+              { color: '#D97706', label: 'Executive',  meaning: 'ผู้บริหาร ดูข้อมูลทั้งหมด แต่ไม่แก้ไข' },
+              { color: '#16A34A', label: 'Supervisor', meaning: 'หัวหน้างาน — Import + ตั้ง Threshold' },
+              { color: '#6B7280', label: 'Staff',      meaning: 'พนักงาน — ดู Dashboard / Stock / Alerts' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="ขั้นตอนสร้างผู้ใช้">
+            <ol className="list-decimal ml-5 text-xs space-y-1">
+              <li>กดปุ่ม "เพิ่มผู้ใช้งาน" มุมขวาบน</li>
+              <li>กรอกชื่อ-นามสกุล + Email</li>
+              <li>เลือก Role ที่ต้องการ</li>
+              <li>กด "สร้างผู้ใช้" — ระบบจะสุ่มรหัสผ่านให้</li>
+              <li>คัดลอก credentials ส่งให้ผู้ใช้นำไป login ครั้งแรก</li>
+            </ol>
+          </HelpSection>
+          <HelpSection title="Reset Password / Edit Role">
+            กดไอคอน 🔑 = Reset Password, ปุ่ม "Edit" = แก้ Role + Active/Inactive
+          </HelpSection>
+          <HelpSection title="🔒 ข้อจำกัด">
+            <ul className="list-disc ml-5 text-xs space-y-1">
+              <li>Admin สร้าง super_admin ไม่ได้</li>
+              <li>Admin reset password ของ super_admin ไม่ได้</li>
+              <li>การลบผู้ใช้ทำได้เฉพาะ Super Admin</li>
+            </ul>
+          </HelpSection>
+        </>)}
+        trailing={(
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-[var(--color-primary)] text-white"
+          >
+            <UserPlus size={16} />
+            เพิ่มผู้ใช้งาน
+          </button>
+        )}
+      />
+      <div className="mb-6" />
 
       {/* Search */}
       <div className="relative mb-5 max-w-sm">

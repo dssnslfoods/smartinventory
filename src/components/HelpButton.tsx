@@ -4,25 +4,36 @@ import { HelpCircle, X } from 'lucide-react';
 interface HelpContent {
   title: string;
   body: ReactNode;
+  /**
+   * 'card'   = absolutely positioned in top-right of a `relative` parent (default)
+   * 'inline' = renders inline at normal document flow — for next-to-heading use
+   */
+  variant?: 'card' | 'inline';
+  /** Inline label shown next to the icon (variant='inline' only) */
+  label?: string;
 }
 
 /**
  * Small `?` icon — clicking opens a modal explaining what the chart/card means.
- * Use as an absolutely-positioned element inside a card with `relative` parent.
  */
-export function HelpButton({ title, body }: HelpContent) {
+export function HelpButton({ title, body, variant = 'card', label }: HelpContent) {
   const [open, setOpen] = useState(false);
+
+  const triggerCls = variant === 'card'
+    ? 'absolute top-3 right-3 p-1.5 rounded-full transition-colors hover:bg-[var(--bg-alt,#f8fafc)] text-[var(--text-muted)] hover:text-[var(--color-primary)] z-10'
+    : 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors text-[var(--color-primary)] bg-[var(--color-primary)]/10 hover:bg-[var(--color-primary)]/20';
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="absolute top-3 right-3 p-1.5 rounded-full transition-colors hover:bg-[var(--bg-alt,#f8fafc)] text-[var(--text-muted)] hover:text-[var(--color-primary)] z-10"
+        className={triggerCls}
         title="ช่วยเหลือ / Help"
         aria-label="ช่วยเหลือ"
       >
-        <HelpCircle size={16} />
+        <HelpCircle size={variant === 'inline' ? 14 : 16} />
+        {variant === 'inline' && <span>{label ?? 'ช่วยเหลือ'}</span>}
       </button>
 
       {open && (

@@ -13,6 +13,8 @@ import {
 import { ITEM_GROUPS, WAREHOUSES } from '@/types/database';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
 import { exportToExcel } from '@/utils/export';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 
 // ── Color palettes ─────────────────────────────────────────────────────────────
 const VV_COLORS   = { A: '#16a34a', B: '#d97706', C: '#dc2626' } as const;
@@ -45,6 +47,40 @@ export function ReportsPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Management Reports"
+        subtitle="รายงานเชิงวิเคราะห์: VV Matrix, Slow Moving, Turnover, Reorder"
+        helpTitle="Management Reports (รายงานบริหาร)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้แสดงอะไร">
+            4 แท็บรายงานเชิงวิเคราะห์ที่ใช้ตัดสินใจระดับบริหาร
+          </HelpSection>
+          <HelpSection title="แท็บ VV Matrix (Value × Validity)">
+            จัดอันดับสินค้า A/B/C โดยรวมมูลค่าและวันที่จะหมดอายุ
+            <HelpFormula>Final Score = ValueScore × (ValidityScore / 5)^α</HelpFormula>
+            <HelpLegend items={[
+              { color: '#16a34a', label: 'Class A', meaning: 'Score สูง — สำคัญและสด' },
+              { color: '#d97706', label: 'Class B', meaning: 'ปานกลาง' },
+              { color: '#dc2626', label: 'Class C', meaning: 'Score ต่ำ — ต้องเร่งระบาย' },
+            ]} />
+            <p className="text-xs mt-2 italic">ปรับเกณฑ์ A/B และค่า α ได้ที่ Settings → VV Matrix Configuration</p>
+          </HelpSection>
+          <HelpSection title="แท็บ Slow Moving">
+            <HelpLegend items={[
+              { color: '#C62828', label: 'Dead Stock',   meaning: 'ไม่มีการเคลื่อนไหวเลยใน 180 วัน' },
+              { color: '#E65100', label: 'Slow Moving',  meaning: 'เคลื่อนไหวบ้างแต่นานๆ ครั้ง' },
+              { color: '#2E7D32', label: 'Normal',        meaning: 'หมุนเวียนปกติ' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="แท็บ Inventory Turnover">
+            <HelpFormula>Turnover Ratio = Annual COGS / Average Inventory Value</HelpFormula>
+            ค่าสูง = หมุนเร็ว ดี — Days on Hand = 365 / Turnover
+          </HelpSection>
+          <HelpSection title="แท็บ Reorder Suggestions">
+            แสดงสินค้าที่ควรสั่งเพิ่ม + จำนวนแนะนำที่ควรสั่ง — คำนวณจาก Reorder Point และ Max Level
+          </HelpSection>
+        </>)}
+      />
       <div className="card p-1.5">
         <div className="flex flex-wrap gap-1">
           {TABS.map(({ id, label, icon: Icon }) => (

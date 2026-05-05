@@ -6,6 +6,8 @@ import { formatNumber, formatCompact, getStockStatusColor, getStockStatusLabel }
 import { WAREHOUSES } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 import { useQueryClient } from '@tanstack/react-query';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
 
 export function AlertsPage() {
   const { data: alerts, isLoading } = useStockAlerts();
@@ -87,6 +89,37 @@ export function AlertsPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Low Stock Alerts"
+        subtitle="แจ้งเตือนสต็อกต่ำ + เครื่องมือตั้ง Threshold"
+        helpTitle="Low Stock Alerts (แจ้งเตือนสต็อกต่ำ)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้แสดงอะไร">
+            สรุปจำนวนรายการแยกตามสถานะ + ตารางรายการที่ต้องดำเนินการ + เครื่องมือตั้ง/แก้ Threshold
+          </HelpSection>
+          <HelpSection title="4 สถานะ">
+            <HelpLegend items={[
+              { color: '#C62828', label: 'Critical', meaning: 'จำนวนคงเหลือ < Min Level → สั่งด่วน' },
+              { color: '#E65100', label: 'Warning',  meaning: 'Min ≤ คงเหลือ < Reorder Point → เตรียมสั่ง' },
+              { color: '#2E7D32', label: 'Normal',   meaning: 'อยู่ในช่วงปกติ' },
+              { color: '#2E75B6', label: 'Overstock', meaning: 'คงเหลือ > Max Level → พิจารณาระบาย' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="Days Remaining">
+            ประมาณการว่าจะหมดสต็อกในกี่วัน — คำนวณจาก: คงเหลือปัจจุบัน ÷ ค่าเฉลี่ยจ่ายออกต่อวันใน 90 วันล่าสุด
+            <p className="mt-1 text-xs italic">ถ้าไม่มี movement ใน 90 วัน จะแสดง "—"</p>
+          </HelpSection>
+          <HelpSection title="ตั้งค่า Threshold">
+            <ul className="list-disc ml-5 text-xs space-y-1">
+              <li><strong>Min Level</strong> — ระดับต่ำสุด (Safety Stock)</li>
+              <li><strong>Reorder Point</strong> — ระดับที่ควรเริ่มสั่งซื้อใหม่</li>
+              <li><strong>Max Level</strong> — ระดับสูงสุดที่ต้องการให้มี</li>
+            </ul>
+            <p className="mt-2 text-xs">ตั้งจากหน้า Settings → Stock Threshold Settings ก็ได้</p>
+          </HelpSection>
+        </>)}
+      />
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card border-l-4" style={{ borderLeftColor: 'var(--color-critical)' }}>

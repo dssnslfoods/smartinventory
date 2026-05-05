@@ -12,6 +12,8 @@ import {
   ROLE_LABELS,
   ROLE_COLORS,
 } from '@/types/auth';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpLegend } from '@/components/HelpButton';
 
 type ConfigRole = Exclude<UserRole, 'super_admin' | 'admin'>;
 const CONFIG_ROLES: ConfigRole[] = ['executive', 'supervisor', 'staff'];
@@ -173,38 +175,58 @@ export function PermissionsPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Role Permissions</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            กำหนดสิทธิ์การเข้าถึงสำหรับแต่ละ role ใน {company?.name}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={resetToDefaults}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition-colors hover:bg-[var(--bg-alt)]"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-          >
-            <RotateCcw size={14} />
-            Reset to Defaults
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !isDirty}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors',
-              savedOk
-                ? 'bg-green-500 text-white'
-                : 'bg-[var(--color-primary)] text-white disabled:opacity-50'
-            )}
-          >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : savedOk ? <Check size={14} /> : <Save size={14} />}
-            {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Role Permissions"
+        subtitle={`กำหนดสิทธิ์การเข้าถึงสำหรับแต่ละ role ใน ${company?.name ?? 'บริษัท'}`}
+        helpTitle="Role Permissions (สิทธิ์การเข้าถึง)"
+        helpBody={(<>
+          <HelpSection title="หน้านี้ทำอะไร">
+            ตั้งสิทธิ์การเข้าถึงเมนู / การกระทำต่างๆ แยกตาม Role (Executive / Supervisor / Staff) — Admin มีสิทธิ์ทุกอย่างโดย default
+          </HelpSection>
+          <HelpSection title="วิธีใช้">
+            <ol className="list-decimal ml-5 text-xs space-y-1">
+              <li>เลือกแท็บ Role ที่ต้องการ (Executive / Supervisor / Staff)</li>
+              <li>ติ๊กเปิด/ปิดสิทธิ์แต่ละข้อ</li>
+              <li>กด "Save Changes" — มีผลทันทีกับผู้ใช้ใน Role นั้นทุกคน</li>
+            </ol>
+          </HelpSection>
+          <HelpSection title="ประเภทสิทธิ์">
+            <HelpLegend items={[
+              { color: '#1F3864', label: 'Menu',    meaning: 'เห็นเมนูในแถบด้านซ้าย (เช่น เห็น Reports ไหม)' },
+              { color: '#2E75B6', label: 'Action',  meaning: 'ทำการกระทำเฉพาะอย่าง (เช่น Edit Threshold, Import)' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="Reset to Defaults">
+            ปุ่มนี้จะกลับค่าทุกสิทธิ์เป็นค่าเริ่มต้นของระบบ (DEFAULT_ROLE_PERMISSIONS) — เหมาะตอนตั้งค่ากลับมาเริ่มใหม่
+          </HelpSection>
+        </>)}
+        trailing={(
+          <div className="flex gap-2">
+            <button
+              onClick={resetToDefaults}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition-colors hover:bg-[var(--bg-alt)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              <RotateCcw size={14} />
+              Reset to Defaults
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !isDirty}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors',
+                savedOk
+                  ? 'bg-green-500 text-white'
+                  : 'bg-[var(--color-primary)] text-white disabled:opacity-50'
+              )}
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : savedOk ? <Check size={14} /> : <Save size={14} />}
+              {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save Changes'}
+            </button>
+          </div>
+        )}
+      />
+      <div className="mb-6" />
 
       {/* Info banner */}
       {!hasDbConfig && (

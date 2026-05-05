@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Trash2, Plus, Clock, Check, Info, Target, RotateCcw } from 'lucide-react';
+import { PageHeader } from '@/components/PageHeader';
+import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 import { useThresholds, useSystemConfig, useUpdateSystemConfig, useItemGroups } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatDateTime } from '@/utils/format';
@@ -218,6 +220,36 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Settings"
+        subtitle="ตั้งค่าระบบ — Stock Threshold, VV Matrix, Shelf Life"
+        helpTitle="Settings (ตั้งค่าระบบ)"
+        helpBody={(<>
+          <HelpSection title="System Configuration">
+            <strong>Active Item Threshold (Days)</strong> — สินค้าที่ไม่เคลื่อนไหวเกินกี่วันจะไม่ถูกนับใน "สินค้า Active" บน Dashboard (default 90 วัน)
+          </HelpSection>
+          <HelpSection title="VV Matrix Configuration">
+            ปรับเกณฑ์การคำนวณ Class A/B/C สำหรับสินค้า — มีผลกับหน้า Reports → VV Matrix ทันที
+            <HelpFormula>Final Score = ValueScore × (ValidityScore / 5)^α</HelpFormula>
+            <HelpLegend items={[
+              { color: '#1F3864', label: 'Validity Thresholds', meaning: 'จำนวนวันก่อนหมดอายุที่ใช้แบ่ง score 1-5' },
+              { color: '#2E75B6', label: 'Value Percentile',     meaning: 'top X% ของมูลค่า = score 5, 4, 3, 2, 1' },
+              { color: '#6366f1', label: 'Alpha (α)',             meaning: '1 = Linear, 2 = Moderate, 3 = Aggressive (แนะนำสำหรับอาหาร)' },
+              { color: '#16a34a', label: 'Class A/B Threshold',  meaning: 'Score ≥ A = Class A, ≥ B = Class B, ที่เหลือ = C' },
+            ]} />
+          </HelpSection>
+          <HelpSection title="Shelf Life ตามกลุ่มสินค้า">
+            ตั้ง Shelf Life แยกแต่ละ Item Group — ระบบใช้คำนวณ Expire Date อัตโนมัติเมื่อ Excel ไม่มีค่า
+            <p className="text-xs mt-1 italic">FFG=365 / FRM=548 / FBY=730 / FPKG=365 (วัน)</p>
+          </HelpSection>
+          <HelpSection title="Stock Threshold Settings">
+            กำหนด Min / Reorder Point / Max ต่อสินค้า · คลัง — ใช้กับหน้า Low Stock Alerts
+          </HelpSection>
+          <HelpSection title="⚠️ Danger Zone">
+            ปุ่ม "Clear All Data" — ลบข้อมูล Transactions / Items / Thresholds / Item Groups / Warehouses ทั้งหมด ห้ามใช้ระหว่างปฏิบัติงาน
+          </HelpSection>
+        </>)}
+      />
       {/* System Settings */}
       <div className="card">
         <h3 className="font-semibold mb-4" style={{ color: 'var(--text)' }}>System Configuration</h3>
