@@ -10,13 +10,15 @@ import type {
   GoodsInTransit, StockPosition,
 } from '@/types/database';
 
-// Supabase default max rows = 1,000 — always set an explicit limit above data size
+// Supabase default max rows = 1,000 — always set an explicit limit above data size.
+// Right-sized for current data volume (≈66k transactions, ≈4k stock rows, ≈600 turnover rows)
+// to avoid concurrent-load timeouts on the reporting views.
 const LIMIT_ITEMS        = 5_000;
-const LIMIT_STOCK        = 20_000;
-const LIMIT_MOVEMENT     = 50_000;
+const LIMIT_STOCK        = 5_000;   // covers ~3.8k onhand rows with headroom
+const LIMIT_MOVEMENT     = 5_000;   // monthly buckets — never close to this
 const LIMIT_THRESHOLDS   = 5_000;
-const LIMIT_TRANSACTIONS = 500_000;
-const LIMIT_REPORTS      = 10_000;
+const LIMIT_TRANSACTIONS = 100_000; // export only — UI uses pagination
+const LIMIT_REPORTS      = 5_000;   // turnover/slow_moving max ~1k rows today
 
 // ============ Stock On-Hand ============
 export function useStockOnHand(filters?: {
