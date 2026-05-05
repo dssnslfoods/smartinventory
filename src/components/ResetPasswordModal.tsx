@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Loader2, KeyRound, Eye, EyeOff, RefreshCw, Copy, Check } from 'lucide-react';
-import { adminSupabase, supabase } from '@/lib/supabase';
+import { supabase, invokeAdminUsers } from '@/lib/supabase';
 
 interface Props {
   /** 'admin' = reset another user (uses service role) | 'self' = reset own password */
@@ -40,8 +40,11 @@ export function ResetPasswordModal({ mode, targetUserId, targetEmail, onClose }:
     try {
       if (mode === 'admin') {
         if (!targetUserId) throw new Error('ไม่พบ User ID');
-        const { error: err } = await adminSupabase.auth.admin.updateUserById(targetUserId, { password });
-        if (err) throw new Error(err.message);
+        await invokeAdminUsers({
+          action:   'reset-password',
+          user_id:  targetUserId,
+          password,
+        });
       } else {
         // self-reset uses current session
         const { error: err } = await supabase.auth.updateUser({ password });

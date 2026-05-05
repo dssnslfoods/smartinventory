@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X, Loader2, UserPlus, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { adminSupabase, supabase } from '@/lib/supabase';
+import { invokeAdminUsers } from '@/lib/supabase';
 import type { Company, UserRole } from '@/types/auth';
 import { ROLE_LABELS } from '@/types/auth';
 
@@ -49,35 +49,14 @@ export function CreateUserModal({ fixedCompany, companies = [], allowedRoles, in
     setError('');
 
     try {
-      // 1. Create auth user (service role — skips email confirmation)
-      const { data: authData, error: authErr } = await adminSupabase.auth.admin.createUser({
-        email:            email.trim().toLowerCase(),
+      await invokeAdminUsers({
+        action:     'create',
+        email:      email.trim().toLowerCase(),
         password,
-        email_confirm:    true,
-        user_metadata:    { full_name: fullName.trim() },
+        full_name:  fullName.trim(),
+        role,
+        company_id: companyId,
       });
-
-      if (authErr) throw new Error(authErr.message);
-
-      const userId = authData.user.id;
-
-      // 2. Upsert profile with correct role + company
-      //    (handle_new_user trigger may have already created it with defaults)
-      const { error: profileErr } = await supabase
-        .from('user_profiles')
-        .upsert(
-          {
-            id:         userId,
-            role,
-            company_id: companyId,
-            full_name:  fullName.trim(),
-            email:      email.trim().toLowerCase(),
-            is_active:  true,
-          },
-          { onConflict: 'id' }
-        );
-
-      if (profileErr) throw new Error(profileErr.message);
 
       invalidateKeys.forEach(k => qc.invalidateQueries({ queryKey: k }));
       setCreated({ email: email.trim(), password });
