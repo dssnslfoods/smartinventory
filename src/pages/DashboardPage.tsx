@@ -17,6 +17,7 @@ import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
   formatThaiMonthRange, formatCompact,
 } from '@/utils/format';
+import { HelpButton, HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 
 // ── Color constants ──────────────────────────────────────────────────────────
 const GROUP_COLORS = ['#1F3864', '#2E75B6', '#00897B', '#E65100'];
@@ -186,6 +187,19 @@ export function DashboardPage() {
           value={kpiLoading ? '...' : `฿${formatCompact(kpi?.totalStockValue ?? 0)}`}
           sublabel="Total Stock Value"
           color="#1F3864"
+          help={{
+            title: 'มูลค่าคงคลังรวม (Total Stock Value)',
+            body: (<>
+              <HelpSection title="คืออะไร">มูลค่ารวมของสินค้าทั้งหมดที่มีในทุกคลัง — ใช้รายงานทางบัญชี/ผู้บริหาร</HelpSection>
+              <HelpSection title="คำนวณยังไง">
+                <HelpFormula>Σ (จำนวนคงเหลือ × Moving Avg Cost) ของทุกรายการ × ทุกคลัง</HelpFormula>
+                จำนวนคงเหลือมาจาก Σ in_qty − Σ out_qty ของทุก transaction
+              </HelpSection>
+              <HelpSection title="ข้อสังเกต">
+                ตัวเลขจะเปลี่ยนทุกครั้งที่ Import ข้อมูลใหม่ — เวลาที่อัปเดตล่าสุดดูที่ KPI "อัปเดตล่าสุด"
+              </HelpSection>
+            </>),
+          }}
         />
         <KPICard
           icon={<Package size={20} />}
@@ -193,6 +207,17 @@ export function DashboardPage() {
           value={kpiLoading ? '...' : formatNumber(kpi?.activeItems ?? 0)}
           sublabel="Active Items"
           color="#2E75B6"
+          help={{
+            title: 'สินค้า Active (Active Items)',
+            body: (<>
+              <HelpSection title="คืออะไร">จำนวนรหัสสินค้าที่ "ยังคล่องตัว" — มีการเคลื่อนไหวรับ/จ่ายภายในระยะที่กำหนด</HelpSection>
+              <HelpSection title="ปรับเกณฑ์ได้ที่">
+                Settings → System Configuration → <strong>Active Item Threshold (Days)</strong>
+                <p className="mt-1 text-xs">ค่า default คือ 90 วัน — สินค้าที่ไม่เคลื่อนไหวเกินกว่านี้จะไม่ถูกนับ</p>
+              </HelpSection>
+              <HelpSection title="ใช้ทำอะไร">ตัดสินใจว่าจะเก็บ SKU ไว้กี่รายการในระบบ — ลด Dead Stock</HelpSection>
+            </>),
+          }}
         />
         <KPICard
           icon={<ArrowLeftRight size={20} />}
@@ -205,6 +230,19 @@ export function DashboardPage() {
           trend={mom ? {
             pct: ((mom.inCurr + mom.outCurr) - (mom.inPrev + mom.outPrev)) / Math.max(mom.inPrev + mom.outPrev, 1) * 100,
           } : undefined}
+          help={{
+            title: 'เคลื่อนไหว/เดือน (Monthly Movement)',
+            body: (<>
+              <HelpSection title="คืออะไร">จำนวนหน่วยรวม (รับเข้า + จ่ายออก) ของเดือนล่าสุดในข้อมูล</HelpSection>
+              <HelpSection title="แท็ก % สีเขียว/แดง">
+                <HelpLegend items={[
+                  { color: '#2E7D32', label: '↑ สีเขียว', meaning: 'เพิ่มขึ้นเทียบกับเดือนก่อนหน้า' },
+                  { color: '#C62828', label: '↓ สีแดง',   meaning: 'ลดลงเทียบกับเดือนก่อนหน้า' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ใช้ทำอะไร">ดูภาพรวมการดำเนินงาน — ช่วงไหน busy ช่วงไหน slow</HelpSection>
+            </>),
+          }}
         />
         <KPICard
           icon={<AlertTriangle size={20} />}
@@ -212,6 +250,16 @@ export function DashboardPage() {
           value={formatNumber(kpi?.criticalAlerts ?? 0)}
           sublabel="Critical Alerts"
           color={(kpi?.criticalAlerts ?? 0) > 0 ? '#C62828' : '#2E7D32'}
+          help={{
+            title: 'แจ้งเตือนวิกฤต (Critical Alerts)',
+            body: (<>
+              <HelpSection title="คืออะไร">จำนวนรายการ (สินค้า × คลัง) ที่ stock ปัจจุบันต่ำกว่า Min Level — ต้องเร่งสั่งหรือเร่งผลิต</HelpSection>
+              <HelpSection title="เกณฑ์มาจากไหน">
+                ตั้งค่าที่ Settings → Stock Threshold Settings (Min / Reorder Point / Max ของแต่ละสินค้า · คลัง)
+              </HelpSection>
+              <HelpSection title="ดูรายละเอียด">เมนู <strong>Low Stock Alerts</strong> — มีคอลัมน์ Days Remaining บอกว่าจะหมดอีกกี่วัน</HelpSection>
+            </>),
+          }}
         />
         <KPICard
           icon={<Truck size={20} />}
@@ -219,6 +267,16 @@ export function DashboardPage() {
           value={formatNumber(transitSummary.total)}
           sublabel={transitSummary.overdue > 0 ? `เลยกำหนด ${transitSummary.overdue} รายการ` : 'Goods in Transit'}
           color={transitSummary.overdue > 0 ? '#E65100' : '#00897B'}
+          help={{
+            title: 'ระหว่างขนส่ง (Goods in Transit)',
+            body: (<>
+              <HelpSection title="คืออะไร">รายการสินค้าที่สั่งซื้อแล้วและยังไม่ถึง — มาจากใบสั่งซื้อ (Purchase Orders) สถานะ confirmed/shipped/in_transit/customs</HelpSection>
+              <HelpSection title="หมายเหตุ">
+                NSL Food Service ปัจจุบันไม่ได้ใช้โมดูลจัดซื้อ — ตัวเลขนี้จึงแสดงเป็น 0
+                หากเปิดใช้โมดูลจัดซื้อในอนาคต Super Admin สามารถเปิด Feature ที่หน้า Companies ได้
+              </HelpSection>
+            </>),
+          }}
         />
         <KPICard
           icon={<Clock size={20} />}
@@ -226,13 +284,44 @@ export function DashboardPage() {
           value={kpi?.lastSync ? new Date(kpi.lastSync).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '–'}
           sublabel={kpi?.lastSync ? new Date(kpi.lastSync).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : 'Last Sync'}
           color="#00897B"
+          help={{
+            title: 'อัปเดตล่าสุด (Last Sync)',
+            body: (<>
+              <HelpSection title="คืออะไร">วันเวลาที่ Import ข้อมูลครั้งล่าสุดเข้าระบบ — บอกว่าตัวเลขทุกตัวบน Dashboard เป็นปัจจุบันถึงเมื่อใด</HelpSection>
+              <HelpSection title="ทำไมสำคัญ">
+                หาก Last Sync ห่างจากปัจจุบันหลายวัน อาจหมายถึงข้อมูล stock ล้าสมัย
+                ควร Import ทุกสิ้นวันหรือทุกครั้งที่ปิดงวดเพื่อให้ตัวเลขแม่น
+              </HelpSection>
+              <HelpSection title="วิธี Import">เมนู Data Import (สำหรับ Admin / Supervisor)</HelpSection>
+            </>),
+          }}
         />
       </div>
 
       {/* ====== Section 3 + 4: Movement Trend + Donut ====== */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Movement Trend */}
-        <div className="lg:col-span-3 card">
+        <div className="lg:col-span-3 card relative">
+          <HelpButton
+            title="แนวโน้มการเคลื่อนไหวสินค้า (Movement Trend)"
+            body={(<>
+              <HelpSection title="กราฟอ่านยังไง">
+                <HelpLegend items={[
+                  { color: '#2E7D32', label: 'พื้นที่สีเขียว (รับเข้า)', meaning: 'จำนวนหน่วยที่รับเข้าคลังในแต่ละเดือน' },
+                  { color: '#C62828', label: 'พื้นที่สีแดง (จ่ายออก)',   meaning: 'จำนวนหน่วยที่จ่ายออกคลังในแต่ละเดือน' },
+                  { color: '#1F3864', label: 'เส้นประน้ำเงิน (Net)',     meaning: 'ผลต่าง รับเข้า − จ่ายออก = สต็อกเพิ่ม/ลดสุทธิ' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ช่วงเวลา">ย้อนหลัง 12 เดือนนับจากเดือนล่าสุดในข้อมูล (ไม่ใช่วันนี้)</HelpSection>
+              <HelpSection title="วิธีแปลผล">
+                <ul className="list-disc ml-5 space-y-1 text-xs">
+                  <li>เส้น Net เป็นบวก → คลังกำลังสะสมสินค้า</li>
+                  <li>เส้น Net เป็นลบ → คลังกำลังระบายสินค้า</li>
+                  <li>พื้นที่เขียว/แดงสูงขึ้นพร้อมกัน → ปริมาณงานในเดือนนั้นมาก</li>
+                </ul>
+              </HelpSection>
+            </>)}
+          />
           <div className="flex items-center justify-between mb-1">
             <div>
               <h3 className="font-semibold" style={{ color: 'var(--text)' }}>แนวโน้มการเคลื่อนไหวสินค้า</h3>
@@ -284,7 +373,28 @@ export function DashboardPage() {
         </div>
 
         {/* Stock Value Donut */}
-        <div className="lg:col-span-2 card">
+        <div className="lg:col-span-2 card relative">
+          <HelpButton
+            title="สัดส่วนมูลค่าสินค้าคงคลัง (Stock Value Distribution)"
+            body={(<>
+              <HelpSection title="กราฟอ่านยังไง">
+                <p>โดนัทแบ่งตาม <strong>กลุ่มสินค้า</strong> (Item Group) — ขนาดของแต่ละชิ้น = มูลค่ารวมของกลุ่มนั้น</p>
+                <p className="mt-1">ตรงกลางคือมูลค่ารวมทุกกลุ่ม</p>
+                <HelpLegend items={[
+                  { color: '#1F3864', label: 'FFG', meaning: 'Finish Goods — สินค้าสำเร็จรูป' },
+                  { color: '#2E75B6', label: 'FRM', meaning: 'Raw Materials — วัตถุดิบ' },
+                  { color: '#00897B', label: 'FBY', meaning: 'By Product — ผลพลอยได้' },
+                  { color: '#E65100', label: 'FPKG', meaning: 'Packaging — บรรจุภัณฑ์' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ใช้ทำอะไร">
+                <ul className="list-disc ml-5 space-y-1 text-xs">
+                  <li>ดูว่ากลุ่มไหนกินทุนมากที่สุด → focus จัดการที่กลุ่มนั้นก่อน</li>
+                  <li>ตรวจสัดส่วน RM vs FG ว่าเหมาะสมกับโมเดลธุรกิจไหม</li>
+                </ul>
+              </HelpSection>
+            </>)}
+          />
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สัดส่วนมูลค่าสินค้าคงคลัง</h3>
           <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Stock Value Distribution</p>
           <div className="h-56 relative">
@@ -338,7 +448,27 @@ export function DashboardPage() {
       {/* ====== Section 5 + 6: Warehouse + Stock Health ====== */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Warehouse Performance */}
-        <div className="lg:col-span-3 card">
+        <div className="lg:col-span-3 card relative">
+          <HelpButton
+            title="มูลค่าสินค้าแยกตามคลัง (Warehouse Stock Value)"
+            body={(<>
+              <HelpSection title="กราฟอ่านยังไง">
+                แท่งแนวนอน 10 อันดับคลังที่มีมูลค่าสต็อกสูงสุด — ความยาวแท่ง = มูลค่ารวมในคลังนั้น
+                <p className="mt-1 text-xs">เมาส์ hover เพื่อดูชื่อเต็มของคลัง + ตัวเลขที่แม่นยำ</p>
+              </HelpSection>
+              <HelpSection title="สีของแท่งบอกประเภทคลัง">
+                <HelpLegend items={[
+                  { color: '#1F3864', label: 'FG', meaning: 'Finished Goods — คลังสินค้าสำเร็จรูป' },
+                  { color: '#2E75B6', label: 'RM', meaning: 'Raw Materials — คลังวัตถุดิบ' },
+                  { color: '#00897B', label: 'PD', meaning: 'Production — คลังผลิต' },
+                  { color: '#E65100', label: 'PK', meaning: 'Packaging — คลังบรรจุภัณฑ์' },
+                  { color: '#7B1FA2', label: 'QC', meaning: 'Quality Control — คลัง QC' },
+                  { color: '#C62828', label: 'CL/CO', meaning: 'Claim Hold — คลังรอเคลม' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ใช้ทำอะไร">เปรียบเทียบ workload ระหว่างคลัง — คลังที่สต็อกค้างเยอะอาจต้องเร่งระบายหรือตรวจดูว่าเหมาะกับ capacity ไหม</HelpSection>
+            </>)}
+          />
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>มูลค่าสินค้าแยกตามคลัง</h3>
           <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Warehouse Stock Value — Top 10</p>
           <div className="h-80">
@@ -376,7 +506,27 @@ export function DashboardPage() {
         </div>
 
         {/* Stock Health Gauge */}
-        <div className="lg:col-span-2 card">
+        <div className="lg:col-span-2 card relative">
+          <HelpButton
+            title="สุขภาพสต๊อก (Stock Health Overview)"
+            body={(<>
+              <HelpSection title="กราฟอ่านยังไง">
+                แท่งเดียวที่แบ่งสัดส่วน 4 สถานะ + ตารางด้านล่าง — นับเฉพาะรายการ (สินค้า · คลัง) ที่ตั้งค่า Threshold ไว้
+              </HelpSection>
+              <HelpSection title="ความหมายของแต่ละสี">
+                <HelpLegend items={[
+                  { color: '#C62828', label: 'วิกฤต (Critical)',     meaning: 'จำนวนคงเหลือ < Min Level — ต้องเร่งสั่ง' },
+                  { color: '#E65100', label: 'เฝ้าระวัง (Warning)',  meaning: 'Min ≤ คงเหลือ < Reorder Point — เตรียมสั่ง' },
+                  { color: '#2E7D32', label: 'ปกติ (Normal)',         meaning: 'อยู่ในช่วง Reorder Point — Max Level' },
+                  { color: '#2E75B6', label: 'สต๊อกเกิน (Overstock)', meaning: 'คงเหลือ > Max Level — พิจารณาระบาย' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ตั้งค่า Threshold">
+                Settings → Stock Threshold Settings — กำหนด Min / Reorder Point / Max ต่อสินค้า · คลัง
+                <p className="mt-1 text-xs italic">ถ้ายังไม่ได้ตั้ง รายการนั้นจะไม่ถูกนับใน Health</p>
+              </HelpSection>
+            </>)}
+          />
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สุขภาพสต๊อก</h3>
           <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Stock Health Overview</p>
 
@@ -441,7 +591,28 @@ export function DashboardPage() {
       {/* ====== Section 7 + 8: Top Items + MoM ====== */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Top 10 Active Items */}
-        <div className="lg:col-span-3 card p-0">
+        <div className="lg:col-span-3 card p-0 relative">
+          <HelpButton
+            title="สินค้าเคลื่อนไหวสูงสุด 10 อันดับ (Top 10 Most Active)"
+            body={(<>
+              <HelpSection title="คืออะไร">
+                10 อันดับสินค้าที่มีการเคลื่อนไหวมากที่สุด (รับเข้า + จ่ายออก) จากชุด transactions ล่าสุด
+              </HelpSection>
+              <HelpSection title="คอลัมน์">
+                <HelpLegend items={[
+                  { color: '#16a34a', label: '+ สีเขียว', meaning: 'จำนวนรับเข้า (In)' },
+                  { color: '#dc2626', label: '− สีแดง',   meaning: 'จำนวนจ่ายออก (Out)' },
+                  { color: '#1F3864', label: 'รวม',        meaning: 'In + Out รวมกัน — ใช้จัดอันดับ' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="ใช้ทำอะไร">
+                <ul className="list-disc ml-5 space-y-1 text-xs">
+                  <li>เห็น "Hot Items" ที่หมุนเวียนเยอะ → focus จัดการ stock policy</li>
+                  <li>ตรวจว่าสินค้าหลักมี throughput ตามคาดไหม</li>
+                </ul>
+              </HelpSection>
+            </>)}
+          />
           <div className="px-5 pt-5 pb-3">
             <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สินค้าเคลื่อนไหวสูงสุด 10 อันดับ</h3>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Top 10 Most Active Items (recent transactions)</p>
@@ -503,7 +674,27 @@ export function DashboardPage() {
         </div>
 
         {/* Month-over-Month */}
-        <div className="lg:col-span-2 card">
+        <div className="lg:col-span-2 card relative">
+          <HelpButton
+            title="เปรียบเทียบรายเดือน (Month-over-Month)"
+            body={(<>
+              <HelpSection title="คืออะไร">
+                เปรียบเทียบเดือนปัจจุบัน (เดือนล่าสุดในข้อมูล) กับเดือนก่อนหน้า — ทั้งปริมาณและมูลค่า
+              </HelpSection>
+              <HelpSection title="แต่ละบรรทัด">
+                <HelpLegend items={[
+                  { color: '#2E7D32', label: 'รับเข้า (In)',           meaning: 'หน่วยรวมที่รับเข้าทุกคลัง' },
+                  { color: '#C62828', label: 'จ่ายออก (Out)',          meaning: 'หน่วยรวมที่จ่ายออกทุกคลัง' },
+                  { color: '#1F3864', label: 'Net Movement',           meaning: 'In − Out = สต็อกเปลี่ยนแปลงสุทธิ' },
+                  { color: '#E65100', label: 'มูลค่ารวม (Amount)',     meaning: 'มูลค่ารวมของ transaction ทั้งหมดในเดือน' },
+                ]} />
+              </HelpSection>
+              <HelpSection title="แท็ก %">
+                สีเขียว ↑ = เพิ่มจากเดือนก่อน, สีแดง ↓ = ลดลง
+                <p className="mt-1 text-xs italic">เลข prev: ด้านล่างคือค่าของเดือนก่อนหน้า ใช้ตีความบริบท</p>
+              </HelpSection>
+            </>)}
+          />
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>เปรียบเทียบรายเดือน</h3>
           <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
             {mom
@@ -541,7 +732,7 @@ export function DashboardPage() {
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 function KPICard({
-  icon, label, sublabel, value, color, trend,
+  icon, label, sublabel, value, color, trend, help,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -549,11 +740,13 @@ function KPICard({
   value: string;
   color: string;
   trend?: { pct: number };
+  help?: { title: string; body: React.ReactNode };
 }) {
   return (
     <div className="card flex flex-col gap-3 relative overflow-hidden">
       {/* Decorative top bar */}
       <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: color }} />
+      {help && <HelpButton title={help.title} body={help.body} />}
       <div className="flex items-center justify-between">
         <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}15` }}>
           <span style={{ color }}>{icon}</span>
