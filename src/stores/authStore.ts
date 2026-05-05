@@ -111,8 +111,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    await supabase.auth.signOut();
+    // Best-effort server-side sign-out. If the access token is already invalid
+    // (e.g. expired or revoked) Supabase throws AuthSessionMissingError — we
+    // still want to clear local state and bounce the user to /login.
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[auth] signOut server call failed, clearing local session anyway:', e);
+    }
+
+    // Clear in-memory state
     set({ user: null, session: null, profile: null, company: null, permissions: new Set() });
+
+    // Belt-and-braces: wipe any persisted Supabase auth tokens that might
+    // survive a failed signOut, then hard-redirect to /login.
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+        .forEach(k => localStorage.removeItem(k));
+    } catch { /* ignore storage errors (private mode etc.) */ }
+
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
   },
 
   initialize: async () => {
