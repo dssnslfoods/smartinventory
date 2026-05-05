@@ -19,6 +19,8 @@ import {
   UserCog,
   ExternalLink,
   Info,
+  BookOpen,
+  Download,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -36,6 +38,7 @@ type NavItem = {
   permission?: PermissionKey;
   badge?: 'critical' | 'transit';
   external?: boolean;  // link to /superadmin/* (different layout)
+  download?: boolean;  // render as <a> for static-file download
 };
 
 type MenuEntry = { type: 'divider' } | NavItem;
@@ -57,6 +60,8 @@ const mainMenu: MenuEntry[] = [
   { path: '/admin/import',   label: 'Data Import', icon: Upload,    permission: PERMISSIONS.MENU_IMPORT },
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },
   { path: '/admin/vv-guide', label: 'คู่มือ VV Matrix', icon: Info,      permission: PERMISSIONS.MENU_SETTINGS },
+  { type: 'divider' },
+  { path: '/SmartInventory_User_Manual_NSL.docx', label: 'คู่มือการใช้งาน', icon: BookOpen, download: true },
 ];
 
 // ── User management items per role ───────────────────────────────────────────
@@ -94,13 +99,16 @@ function NavLink({
       : 'text-white/70 hover:bg-white/5 hover:text-white'
   );
 
-  return (
-    <Link to={item.path} className={cls}>
+  const inner = (
+    <>
       <Icon size={18} className="shrink-0" />
       {sidebarOpen && (
         <>
           <span className="truncate flex-1">{item.label}</span>
-          {item.external && !isActive && (
+          {item.download && (
+            <Download size={12} className="shrink-0 opacity-40" />
+          )}
+          {item.external && !isActive && !item.download && (
             <ExternalLink size={12} className="shrink-0 opacity-40" />
           )}
           {showBadge && (
@@ -115,6 +123,19 @@ function NavLink({
           {badgeCount}
         </span>
       )}
+    </>
+  );
+
+  if (item.download) {
+    return (
+      <a href={item.path} download className={cls} title={item.label}>
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <Link to={item.path} className={cls}>
+      {inner}
     </Link>
   );
 }
