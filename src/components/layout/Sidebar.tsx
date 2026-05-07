@@ -61,7 +61,8 @@ const mainMenu: MenuEntry[] = [
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },
   { path: '/admin/vv-guide', label: 'คู่มือ VV Matrix', icon: Info,      permission: PERMISSIONS.MENU_SETTINGS },
   { type: 'divider' },
-  { path: '/SmartInventory_User_Manual_NSL.docx', label: 'คู่มือการใช้งาน', icon: BookOpen, download: true },
+  { path: '/SmartInventory_User_Manual_NSL.docx',     label: 'คู่มือการใช้งาน', icon: BookOpen, download: true },
+  { path: '/VV_Matrix_Calculation_Explained.docx',     label: 'อธิบาย VV Matrix', icon: BookOpen, download: true },
 ];
 
 // ── User management items per role ───────────────────────────────────────────
