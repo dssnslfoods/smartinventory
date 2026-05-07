@@ -142,35 +142,43 @@
   }
 
   .badge-critical {
-    background-color: #fee2e2;
-    color: var(--color-critical);
+    background-color: var(--color-critical);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(127, 29, 29, 0.3);
   }
   .dark .badge-critical {
-    background-color: #450a0a;
+    background-color: #ef4444;
   }
 
   .badge-warning {
-    background-color: #fff7ed;
-    color: var(--color-warning);
+    background-color: var(--color-warning);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(124, 45, 18, 0.3);
   }
   .dark .badge-warning {
-    background-color: #431407;
+    background-color: #f97316;
   }
 
   .badge-success {
-    background-color: #dcfce7;
-    color: var(--color-success);
+    background-color: var(--color-success);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(20, 83, 45, 0.3);
   }
   .dark .badge-success {
-    background-color: #052e16;
+    background-color: #22c55e;
   }
 
   .badge-info {
-    background-color: #dbeafe;
-    color: var(--color-primary-light);
+    background-color: var(--color-primary-light);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(30, 64, 175, 0.3);
   }
   .dark .badge-info {
-    background-color: #1e3a5f;
+    background-color: #3b82f6;
   }
 
   .table-container {

@@ -91,10 +91,10 @@ function UserRow({ user, onSaved }: { user: UserProfile; onSaved: () => void }) 
           </label>
         ) : (
           <span className={cn(
-            'px-2 py-0.5 rounded-full text-xs font-medium',
+            'px-2 py-0.5 rounded-full text-xs font-semibold ring-1',
             user.is_active
-              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+              ? 'bg-emerald-600 text-white ring-emerald-700/20 dark:bg-emerald-500'
+              : 'bg-slate-500 text-white ring-slate-700/20 dark:bg-slate-600'
           )}>
             {user.is_active ? 'Active' : 'Inactive'}
           </span>
