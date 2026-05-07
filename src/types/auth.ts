@@ -10,12 +10,15 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   staff:       'Staff',
 };
 
+// Filled, high-contrast role badges. Solid background + white text guarantees
+// readability across light/dark themes and prevents the washed-out look caused
+// by tinted text on tinted background.
 export const ROLE_COLORS: Record<UserRole, string> = {
-  super_admin: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
-  admin:       'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  executive:   'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-  supervisor:  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  staff:       'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-300',
+  super_admin: 'bg-purple-600 text-white font-semibold ring-1 ring-purple-700/20 dark:bg-purple-500',
+  admin:       'bg-blue-600   text-white font-semibold ring-1 ring-blue-700/20   dark:bg-blue-500',
+  executive:   'bg-amber-600  text-white font-semibold ring-1 ring-amber-700/20  dark:bg-amber-500',
+  supervisor:  'bg-emerald-600 text-white font-semibold ring-1 ring-emerald-700/20 dark:bg-emerald-500',
+  staff:       'bg-slate-600  text-white font-semibold ring-1 ring-slate-700/20  dark:bg-slate-500',
 };
 
 // ── Data models ───────────────────────────────────────────────────────────────
