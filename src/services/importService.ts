@@ -443,6 +443,45 @@ const batchInsert = async (table: string, data: any[], onProgress: (done: number
   }, onProgress, data.length);
 };
 
+/**
+ * Backfill transaction_types master with any unknown codes seen in the
+ * transactions data so the FK insert doesn't fail. Real SAP exports can
+ * contain codes outside our seed list (13, 14, 19, 202, ...); rather than
+ * failing the whole import we register them as placeholders and let the
+ * admin rename them later in Settings.
+ */
+async function ensureTransactionTypes(
+  transactions: any[],
+  onProgress: (step: string, detail: string, percent: number) => void,
+  pct: number,
+) {
+  const codes = Array.from(new Set(transactions.map(t => Number(t.trans_type)).filter(n => Number.isFinite(n))));
+  if (codes.length === 0) return;
+
+  const { data: existing, error: selErr } = await supabase
+    .from('transaction_types')
+    .select('trans_type')
+    .in('trans_type', codes);
+  if (selErr) throw new Error(`[transaction_types lookup] ${selErr.message}`);
+
+  const known = new Set((existing ?? []).map((r: any) => Number(r.trans_type)));
+  const missing = codes.filter(c => !known.has(c));
+  if (missing.length === 0) return;
+
+  console.warn(`[transactions] backfilling ${missing.length} unknown trans_types:`, missing);
+  onProgress('กำลังเพิ่ม trans_type ที่ขาด...', missing.join(', '), pct);
+
+  const rows = missing.map(c => ({
+    trans_type:  c,
+    trans_name:  `Unknown SAP type ${c}`,
+    direction:   'Cost' as const,  // safe default — admin can change in Settings
+  }));
+  const { error: insErr } = await supabase
+    .from('transaction_types')
+    .upsert(rows, { onConflict: 'trans_type' });
+  if (insErr) throw new Error(`[transaction_types backfill] ${insErr.message}`);
+}
+
 export const executeComprehensiveImport = async (
   data: ParsedData,
   includeSheets: Record<SheetConfigKey, boolean>,
@@ -472,6 +511,13 @@ export const executeComprehensiveImport = async (
             const { error: errClear } = await supabase.from('inventory_transactions').delete().gt('id', 0);
             if (errClear) throw errClear;
           }
+
+          // Self-heal: SAP exports can carry trans_type codes we haven't seen
+          // before (FK violation crashes the whole batch). Backfill any missing
+          // codes into transaction_types with a placeholder name + 'Cost'
+          // direction (admin can rename later in Settings).
+          await ensureTransactionTypes(data.inventory_transactions, onProgress, pct);
+
           await batchUpsert(table, data[key], 'trans_num,item_code,doc_line_num', (d, t) => {
             onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
           });
