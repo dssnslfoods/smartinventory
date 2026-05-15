@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
-  Target, RefreshCw, ShoppingCart, Download, Filter, Clock,
+  Target, RefreshCw, ShoppingCart, Download, Filter, Clock, Layers,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import {
   useStockOnHand, useSlowMoving, useInventoryTurnover, useReorderSuggestions,
-  useSystemConfig,
+  useSystemConfig, useLotDetail, useLatestLotSnapshot,
 } from '@/hooks/useSupabaseQuery';
 import { ITEM_GROUPS, WAREHOUSES } from '@/types/database';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
@@ -37,6 +37,7 @@ const TABS = [
   { id: 'slow',     label: 'Slow Moving',         icon: Clock },
   { id: 'turnover', label: 'Inventory Turnover',  icon: RefreshCw },
   { id: 'reorder',  label: 'Reorder Suggestions', icon: ShoppingCart },
+  { id: 'fefo',     label: 'FEFO Pick List',      icon: Layers },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -105,6 +106,7 @@ export function ReportsPage() {
       {activeTab === 'slow'     && <SlowMovingTab />}
       {activeTab === 'turnover' && <TurnoverTab />}
       {activeTab === 'reorder'  && <ReorderTab />}
+      {activeTab === 'fefo'     && <FEFOPickListTab />}
     </div>
   );
 }
@@ -133,6 +135,104 @@ interface VVItem {
   priority_rank: number;             // rank by exp_score desc
   recommendation: string;
   is_urgent: boolean;
+  // ── Lot-mode extras (undefined in item mode) ──
+  batch_num?: string;
+  warehouse?: string;
+  whs_name?: string;
+  qty?: number;
+}
+
+/** Generic record fed into the scoring engine. */
+interface VVInput {
+  item_code: string;
+  itemname: string;
+  group_name: string;
+  uom: string;
+  stock_value: number;
+  expire_date: string | null;
+  // optional pass-throughs
+  batch_num?: string;
+  warehouse?: string;
+  whs_name?: string;
+  qty?: number;
+}
+
+/** Core scoring — input list → VVItem list with all percentile / exp / class fields. */
+function computeVVScores(
+  inputs: VVInput[],
+  cfg: ReturnType<typeof parseVVConfig>,
+  alpha: number,
+): VVItem[] {
+  const sorted = [...inputs]
+    .filter(v => v.stock_value > 0)
+    .sort((a, b) => b.stock_value - a.stock_value);
+  const total = sorted.length;
+  if (total === 0) return [];
+
+  const computed = sorted.map((v, idx) => {
+    const pct = total > 1 ? idx / (total - 1) : 0;
+    const value_score =
+      pct < cfg.value_p5 ? 5 :
+      pct < cfg.value_p4 ? 4 :
+      pct < cfg.value_p3 ? 3 :
+      pct < cfg.value_p2 ? 2 : 1;
+
+    const remaining = getRemainingDays(v.expire_date);
+    const validity_score =
+      remaining === null            ? cfg.validity_no_expiry :
+      remaining > cfg.validity_v5  ? 5 :
+      remaining > cfg.validity_v4  ? 4 :
+      remaining > cfg.validity_v3  ? 3 :
+      remaining > cfg.validity_v2  ? 2 : 1;
+
+    const final_score = Math.round(
+      (value_score * cfg.weight_value + validity_score * cfg.weight_validity) * 10
+    ) / 10;
+    const vv_class: 'A' | 'B' | 'C' =
+      final_score >= cfg.class_a ? 'A' :
+      final_score >= cfg.class_b ? 'B' : 'C';
+
+    const normalized_validity = validity_score / 5;
+    const exp_factor = Math.pow(normalized_validity, alpha);
+    const exp_score  = Math.round(value_score * exp_factor * 100) / 100;
+    const exp_class: 'A' | 'B' | 'C' =
+      exp_score >= cfg.exp_class_a ? 'A' :
+      exp_score >= cfg.exp_class_b ? 'B' : 'C';
+
+    const risk_flag: VVItem['risk_flag'] =
+      value_score >= 4 && validity_score <= 2 ? 'critical' :
+      validity_score <= 2                      ? 'high_expiry' : null;
+
+    const recommendation =
+      risk_flag === 'critical'    ? RISK_RECOMMENDATIONS.critical :
+      risk_flag === 'high_expiry' ? RISK_RECOMMENDATIONS.high_expiry :
+      RECOMMENDATIONS[exp_class];
+
+    return {
+      item_code:     v.item_code,
+      itemname:      v.itemname,
+      group_name:    v.group_name,
+      uom:           v.uom,
+      stock_value:   v.stock_value,
+      expire_date:   v.expire_date,
+      remaining_days: remaining,
+      value_score, validity_score,
+      final_score, vv_class,
+      normalized_validity, exp_factor, exp_score, exp_class,
+      risk_flag, priority_rank: 0,
+      recommendation,
+      is_urgent: value_score >= cfg.urgent_value_min && validity_score <= cfg.urgent_validity_max,
+      batch_num:  v.batch_num,
+      warehouse:  v.warehouse,
+      whs_name:   v.whs_name,
+      qty:        v.qty,
+    } satisfies VVItem;
+  });
+
+  // Assign priority rank by exp_score desc
+  const byExpScore = [...computed].sort((a, b) => b.exp_score - a.exp_score);
+  byExpScore.forEach((item, i) => { item.priority_rank = i + 1; });
+  return computed;
 }
 
 function getRemainingDays(expireDate: string | null): number | null {
@@ -200,14 +300,22 @@ function parseVVConfig(config: Array<{ key: string; value: string }> | undefined
 function VVMatrixTab() {
   const [vvClass, setVvClass]     = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
+  const [mode, setMode]           = useState<'item' | 'lot'>('item');
 
-  const { data: stockData, isLoading } = useStockOnHand();
-  const { data: sysConfig }            = useSystemConfig();
+  const { data: stockData, isLoading: stockLoading } = useStockOnHand();
+  const { data: snap }                                = useLatestLotSnapshot();
+  const { data: lotResult, isLoading: lotLoading }    = useLotDetail({
+    snapshotDate: snap,
+    pageSize: 5000,
+    page: 0,
+  });
+  const { data: sysConfig }                           = useSystemConfig();
   const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
+
+  const isLoading = mode === 'item' ? stockLoading : lotLoading;
 
   // Alpha initialises from config (admin can still override in-page)
   const [alpha, setAlpha] = useState(2);
-  // Sync alpha from cfg once config loads (only on first load)
   const [alphaSynced, setAlphaSynced] = useState(false);
   if (!alphaSynced && cfg.vv_alpha !== VV_DEFAULTS.vv_alpha) {
     setAlpha(Math.round(cfg.vv_alpha) as 1 | 2 | 3);
@@ -215,97 +323,47 @@ function VVMatrixTab() {
   }
 
   const vvItems = useMemo<VVItem[]>(() => {
-    const all = stockData ?? [];
-    if (!all.length) return [];
-
-    // Aggregate stock_value per item across warehouses
-    const itemMap = new Map<string, {
-      itemname: string; group_name: string; uom: string;
-      stock_value: number; expire_date: string | null;
-    }>();
-
-    for (const s of all) {
-      const ex = itemMap.get(s.item_code);
-      if (ex) {
-        ex.stock_value += Number(s.stock_value);
-      } else {
-        itemMap.set(s.item_code, {
-          itemname:    s.itemname,
-          group_name:  s.group_name,
-          uom:         s.uom,
-          stock_value: Number(s.stock_value),
-          expire_date: s.expire_date ?? null,
-        });
+    if (mode === 'item') {
+      const all = stockData ?? [];
+      if (!all.length) return [];
+      // Aggregate stock_value per item across warehouses
+      const itemMap = new Map<string, VVInput>();
+      for (const s of all) {
+        const ex = itemMap.get(s.item_code);
+        if (ex) {
+          ex.stock_value += Number(s.stock_value);
+        } else {
+          itemMap.set(s.item_code, {
+            item_code:   s.item_code,
+            itemname:    s.itemname,
+            group_name:  s.group_name,
+            uom:         s.uom,
+            stock_value: Number(s.stock_value),
+            expire_date: s.expire_date ?? null,
+          });
+        }
       }
+      return computeVVScores(Array.from(itemMap.values()), cfg, alpha);
     }
 
-    // Sort desc by stock_value for percentile ranking
-    const sorted = Array.from(itemMap.entries())
-      .filter(([, v]) => v.stock_value > 0)
-      .sort((a, b) => b[1].stock_value - a[1].stock_value);
-
-    const total = sorted.length;
-
-    const computed = sorted.map(([item_code, v], idx) => {
-      const pct = total > 1 ? idx / (total - 1) : 0;
-      const value_score =
-        pct < cfg.value_p5 ? 5 :
-        pct < cfg.value_p4 ? 4 :
-        pct < cfg.value_p3 ? 3 :
-        pct < cfg.value_p2 ? 2 : 1;
-
-      const remaining = getRemainingDays(v.expire_date);
-      const validity_score =
-        remaining === null            ? cfg.validity_no_expiry :
-        remaining > cfg.validity_v5  ? 5 :
-        remaining > cfg.validity_v4  ? 4 :
-        remaining > cfg.validity_v3  ? 3 :
-        remaining > cfg.validity_v2  ? 2 : 1;
-
-      // ── Simple (weighted-average) model ──
-      const final_score = Math.round(
-        (value_score * cfg.weight_value + validity_score * cfg.weight_validity) * 10
-      ) / 10;
-      const vv_class: 'A' | 'B' | 'C' =
-        final_score >= cfg.class_a ? 'A' :
-        final_score >= cfg.class_b ? 'B' : 'C';
-
-      // ── Exponential model ──
-      const normalized_validity = validity_score / 5;
-      const exp_factor = Math.pow(normalized_validity, alpha);
-      const exp_score  = Math.round(value_score * exp_factor * 100) / 100;
-      const exp_class: 'A' | 'B' | 'C' =
-        exp_score >= cfg.exp_class_a ? 'A' :
-        exp_score >= cfg.exp_class_b ? 'B' : 'C';
-
-      // ── Risk flagging ──
-      const risk_flag: VVItem['risk_flag'] =
-        value_score >= 4 && validity_score <= 2 ? 'critical' :
-        validity_score <= 2                      ? 'high_expiry' : null;
-
-      const recommendation =
-        risk_flag === 'critical'    ? RISK_RECOMMENDATIONS.critical :
-        risk_flag === 'high_expiry' ? RISK_RECOMMENDATIONS.high_expiry :
-        RECOMMENDATIONS[exp_class];
-
-      return {
-        item_code, ...v,
-        remaining_days: remaining,
-        value_score, validity_score,
-        final_score, vv_class,
-        normalized_validity, exp_factor, exp_score, exp_class,
-        risk_flag, priority_rank: 0,
-        recommendation,
-        is_urgent: value_score >= cfg.urgent_value_min && validity_score <= cfg.urgent_validity_max,
-      } satisfies VVItem;
-    });
-
-    // Assign priority rank by exp_score desc
-    const byExpScore = [...computed].sort((a, b) => b.exp_score - a.exp_score);
-    byExpScore.forEach((item, i) => { item.priority_rank = i + 1; });
-
-    return computed;
-  }, [stockData, cfg, alpha]);
+    // ── Lot mode: each lot scored independently ──
+    const lots = lotResult?.data ?? [];
+    const inputs: VVInput[] = lots
+      .filter(l => Number(l.qty) > 0)
+      .map(l => ({
+        item_code:   l.item_code,
+        itemname:    l.itemname,
+        group_name:  l.group_name,
+        uom:         l.uom,
+        stock_value: Number(l.amount),
+        expire_date: l.expire_date,
+        batch_num:   l.batch_num,
+        warehouse:   l.warehouse,
+        whs_name:    l.whs_name,
+        qty:         Number(l.qty),
+      }));
+    return computeVVScores(inputs, cfg, alpha);
+  }, [mode, stockData, lotResult, cfg, alpha]);
 
   const filtered = useMemo(() =>
     vvItems
@@ -344,6 +402,11 @@ function VVMatrixTab() {
     exportToExcel(filtered.map(r => ({
       'Priority Rank':             r.priority_rank,
       'Item Code':                 r.item_code,
+      ...(mode === 'lot' ? {
+        'Batch / Lot':             r.batch_num ?? '',
+        'Warehouse':               r.warehouse ?? '',
+        'Lot Qty':                 r.qty ?? '',
+      } : {}),
       'Item Name':                 r.itemname,
       'Group':                     r.group_name,
       'Stock Value (฿)':           r.stock_value,
@@ -359,7 +422,7 @@ function VVMatrixTab() {
       'Exponential Class':         r.exp_class,
       'Risk Flag':                 r.risk_flag ?? '',
       'Recommendation':            r.recommendation,
-    })), 'VV_Matrix_Exponential');
+    })), mode === 'lot' ? 'VV_Matrix_By_Lot' : 'VV_Matrix_By_Item');
   };
 
   const alphaInfo = {
@@ -370,6 +433,43 @@ function VVMatrixTab() {
 
   return (
     <div className="space-y-6">
+
+      {/* ── Mode Toggle: By Item / By Lot */}
+      <div className="card py-3 px-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>เลือกระดับการวิเคราะห์ — ระดับสินค้ารวม หรือเจาะแต่ละ lot</p>
+          </div>
+          <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={() => setMode('item')}
+              className="px-4 py-1.5 text-sm font-medium transition-colors"
+              style={mode === 'item'
+                ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                : { color: 'var(--text-muted)' }}
+            >
+              📦 By Item
+            </button>
+            <button
+              onClick={() => setMode('lot')}
+              disabled={!snap}
+              className="px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              style={mode === 'lot'
+                ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                : { color: 'var(--text-muted)' }}
+              title={!snap ? 'ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อน' : ''}
+            >
+              🧾 By Lot
+            </button>
+          </div>
+          <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+            {mode === 'item'
+              ? 'รวม stock ของแต่ละสินค้าจากทุกคลัง — เหมือนเดิม'
+              : `แต่ละ lot คำนวณคะแนนตาม expire date ของตัวเอง · snapshot ${snap ?? '—'}`}
+          </p>
+        </div>
+      </div>
 
       {/* ── Alpha Selector Bar */}
       <div className="card py-3 px-4">
@@ -662,6 +762,7 @@ function VVMatrixTab() {
                   <th className="text-center">#</th>
                   <th>Class</th>
                   <th>Item Code</th>
+                  {mode === 'lot' && <th>Batch / Whs</th>}
                   <th>Item Name</th>
                   <th>Grp</th>
                   <th className="text-right">Stock Value</th>
@@ -677,7 +778,7 @@ function VVMatrixTab() {
               </thead>
               <tbody>
                 {filtered.map(row => (
-                  <tr key={row.item_code}
+                  <tr key={mode === 'lot' ? `${row.item_code}|${row.warehouse}|${row.batch_num}` : row.item_code}
                     style={row.risk_flag === 'critical'    ? { backgroundColor: 'rgba(220,38,38,0.05)' } :
                            row.risk_flag === 'high_expiry' ? { backgroundColor: 'rgba(234,88,12,0.04)'  } : {}}>
                     <td className="text-center text-xs tabular-nums font-semibold" style={{ color: 'var(--text-muted)' }}>
@@ -700,6 +801,12 @@ function VVMatrixTab() {
                     <td className="font-mono text-xs font-medium whitespace-nowrap" style={{ color: 'var(--color-primary-light)' }}>
                       {row.item_code}
                     </td>
+                    {mode === 'lot' && (
+                      <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
+                        <div className="font-mono text-[11px] truncate" style={{ maxWidth: 140 }} title={row.batch_num}>{row.batch_num}</div>
+                        <div className="text-[10px]">{row.warehouse}</div>
+                      </td>
+                    )}
                     <td className="text-xs" style={{ overflow: 'hidden' }}>
                       <span className="block truncate" style={{ maxWidth: 180 }} title={row.itemname}>{row.itemname}</span>
                     </td>
@@ -1271,6 +1378,178 @@ function ReorderTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── FEFO Pick List Tab ─────────────────────────────────────────────────────
+function FEFOPickListTab() {
+  const { data: snap } = useLatestLotSnapshot();
+  const [warehouse, setWarehouse] = useState('');
+  const [groupCode, setGroupCode] = useState<number | undefined>();
+  const { data: lotResult, isLoading } = useLotDetail({
+    snapshotDate: snap,
+    warehouse: warehouse || undefined,
+    groupCode,
+    pageSize: 5000,
+    page: 0,
+  });
+  const lots = lotResult?.data ?? [];
+
+  // Group lots by item × warehouse, then sort lots within each group by expire_date asc (FEFO)
+  const grouped = useMemo(() => {
+    const map = new Map<string, { item_code: string; itemname: string; group_name: string; uom: string; warehouse: string; whs_name: string; lots: typeof lots; total_qty: number; total_value: number }>();
+    for (const l of lots) {
+      if (Number(l.qty) <= 0) continue;
+      const key = `${l.item_code}|${l.warehouse}`;
+      const entry = map.get(key);
+      if (entry) {
+        entry.lots.push(l);
+        entry.total_qty   += Number(l.qty);
+        entry.total_value += Number(l.amount);
+      } else {
+        map.set(key, {
+          item_code: l.item_code, itemname: l.itemname, group_name: l.group_name, uom: l.uom,
+          warehouse: l.warehouse, whs_name: l.whs_name,
+          lots: [l],
+          total_qty: Number(l.qty), total_value: Number(l.amount),
+        });
+      }
+    }
+    // sort lots within each group by expire ascending (NULLs last)
+    for (const g of map.values()) {
+      g.lots.sort((a, b) => {
+        if (!a.expire_date && !b.expire_date) return 0;
+        if (!a.expire_date) return 1;
+        if (!b.expire_date) return -1;
+        return new Date(a.expire_date).getTime() - new Date(b.expire_date).getTime();
+      });
+    }
+    // sort groups by earliest-expiring lot first, NULLs last
+    return Array.from(map.values()).sort((a, b) => {
+      const ax = a.lots[0]?.expire_date, bx = b.lots[0]?.expire_date;
+      if (!ax && !bx) return 0;
+      if (!ax) return 1;
+      if (!bx) return -1;
+      return new Date(ax).getTime() - new Date(bx).getTime();
+    });
+  }, [lots]);
+
+  const handleExport = () => {
+    const rows: any[] = [];
+    for (const g of grouped) {
+      g.lots.forEach((l, idx) => rows.push({
+        'Pick #':       idx + 1,
+        'Item Code':    g.item_code,
+        'Item Name':    g.itemname,
+        'Group':        g.group_name,
+        'Warehouse':    g.warehouse,
+        'Batch / Lot':  l.batch_num,
+        'Qty':          Number(l.qty),
+        'UOM':          g.uom,
+        'Exp Date':     l.expire_date,
+        'Days Left':    l.days_remaining,
+        'Unit Cost':    Number(l.unit_cost),
+        'Value':        Number(l.amount),
+      }));
+    }
+    exportToExcel(rows, 'FEFO_Pick_List');
+  };
+
+  if (!snap) {
+    return (
+      <div className="card text-center py-12" style={{ color: 'var(--text-muted)' }}>
+        <Layers size={32} className="mx-auto mb-3 opacity-40" />
+        <p>ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อนที่ Data Import</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="flex flex-wrap items-center gap-4">
+          <Filter size={18} style={{ color: 'var(--text-muted)' }} />
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>FEFO — First Expired, First Out</span>
+          <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+            แสดง lot ทั้งหมดเรียงตามวันหมดอายุของ lot — บอกได้ทันทีว่าควรหยิบ lot ไหนก่อน · snapshot {formatDate(snap)}
+          </span>
+          <select className="select ml-auto" value={warehouse} onChange={e => setWarehouse(e.target.value)}>
+            <option value="">All Warehouses</option>
+            {WAREHOUSES.map(w => <option key={w.code} value={w.code}>{w.code}</option>)}
+          </select>
+          <select className="select" value={groupCode ?? ''} onChange={e => setGroupCode(e.target.value ? Number(e.target.value) : undefined)}>
+            <option value="">All Groups</option>
+            {Object.entries(ITEM_GROUPS).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+          </select>
+          <button onClick={handleExport} className="btn btn-secondary" disabled={grouped.length === 0}>
+            <Download size={16} /> Export
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="card text-center py-12" style={{ color: 'var(--text-muted)' }}>กำลังโหลด...</div>
+      ) : grouped.length === 0 ? (
+        <div className="card text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่พบข้อมูล lot</div>
+      ) : (
+        <div className="space-y-3">
+          {grouped.map(g => (
+            <div key={`${g.item_code}|${g.warehouse}`} className="card p-0 overflow-hidden">
+              <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b" style={{ backgroundColor: 'var(--bg-alt)', borderColor: 'var(--border)' }}>
+                <span className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>{g.item_code}</span>
+                <span className="text-sm" style={{ color: 'var(--text)' }}>{g.itemname}</span>
+                <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+                  {g.warehouse} · {g.whs_name}
+                </span>
+                <span className="ml-auto text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {g.lots.length} lots · {formatNumber(g.total_qty, 2)} {g.uom} · ฿{formatCompact(g.total_value)}
+                </span>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)' }}>
+                    <th className="px-4 py-2 text-center text-xs font-semibold" style={{ width: 60 }}>Pick #</th>
+                    <th className="px-4 py-2 text-left  text-xs font-semibold">Batch / Lot</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold">Qty</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold">Value</th>
+                    <th className="px-4 py-2 text-left  text-xs font-semibold">Exp Date</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold">Days Left</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.lots.map((l, idx) => {
+                    const dr = l.days_remaining;
+                    const color =
+                      dr == null     ? '#94a3b8' :
+                      dr < 0         ? '#7f1d1d' :
+                      dr <= 30       ? '#dc2626' :
+                      dr <= 60       ? '#ea580c' :
+                      dr <= 90       ? '#d97706' :
+                      dr <= 180      ? '#65a30d' : '#16a34a';
+                    return (
+                      <tr key={l.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                        <td className="px-4 py-2 text-center text-xs font-bold" style={{ color: idx === 0 ? '#dc2626' : 'var(--text-muted)' }}>
+                          {idx + 1}{idx === 0 ? ' ↓' : ''}
+                        </td>
+                        <td className="px-4 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{l.batch_num}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">{formatNumber(Number(l.qty), 2)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">฿{formatNumber(Number(l.amount), 2)}</td>
+                        <td className="px-4 py-2 text-xs">{l.expire_date ? formatDate(l.expire_date) : '—'}</td>
+                        <td className="px-4 py-2 text-right">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ backgroundColor: color }}>
+                            {dr == null ? '—' : dr < 0 ? `เกิน ${-dr}d` : `${dr}d`}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

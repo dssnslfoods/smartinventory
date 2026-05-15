@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { AlertTriangle, Bell, Download, Plus, Trash2, Save, Package } from 'lucide-react';
-import { useStockAlerts, useThresholds } from '@/hooks/useSupabaseQuery';
+import { AlertTriangle, Bell, Download, Plus, Trash2, Save, Package, Layers, Clock } from 'lucide-react';
+import { useStockAlerts, useThresholds, useLotDetail, useLatestLotSnapshot } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
-import { formatNumber, formatCompact, getStockStatusColor, getStockStatusLabel } from '@/utils/format';
+import { formatNumber, formatCompact, formatDate, getStockStatusColor, getStockStatusLabel } from '@/utils/format';
 import { WAREHOUSES } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 import { useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
+
+type AlertTab = 'low_stock' | 'expiring_lots';
 
 export function AlertsPage() {
   const { data: alerts, isLoading } = useStockAlerts();
@@ -15,6 +17,36 @@ export function AlertsPage() {
   const queryClient = useQueryClient();
   const [showThresholdForm, setShowThresholdForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
+  const [tab, setTab] = useState<AlertTab>('low_stock');
+
+  // ── Expiring Lots tab ──
+  const [expWarehouse, setExpWarehouse] = useState('');
+  const [expDaysMax, setExpDaysMax]     = useState<number>(90); // default: show lots with ≤ 90 days
+  const { data: lotSnap } = useLatestLotSnapshot();
+  const { data: expLotsResult, isLoading: expLoading } = useLotDetail({
+    snapshotDate: lotSnap,
+    daysRemainingMax: expDaysMax,
+    warehouse: expWarehouse || undefined,
+    pageSize: 1000,
+    page: 0,
+  });
+  const expLots = expLotsResult?.data ?? [];
+
+  const handleExportLots = () => {
+    exportToExcel(expLots.map(l => ({
+      'Item Code':   l.item_code,
+      'Item Name':   l.itemname,
+      'Group':       l.group_name,
+      'Warehouse':   l.warehouse,
+      'Batch / Lot': l.batch_num,
+      'Qty':         Number(l.qty),
+      'UOM':         l.uom,
+      'Unit Cost':   Number(l.unit_cost),
+      'Value':       Number(l.amount),
+      'Exp Date':    l.expire_date,
+      'Days Left':   l.days_remaining,
+    })), 'Expiring_Lots');
+  };
 
   // Threshold form state
   const [newItemCode, setNewItemCode] = useState('');
@@ -119,6 +151,45 @@ export function AlertsPage() {
           </HelpSection>
         </>)}
       />
+
+      {/* Tab bar */}
+      <div className="card p-1.5">
+        <div className="flex flex-wrap gap-1">
+          <button
+            onClick={() => setTab('low_stock')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={tab === 'low_stock'
+              ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+              : { color: 'var(--text-muted)' }}
+          >
+            <AlertTriangle size={15} /> Low Stock
+          </button>
+          <button
+            onClick={() => setTab('expiring_lots')}
+            disabled={!lotSnap}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            style={tab === 'expiring_lots'
+              ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+              : { color: 'var(--text-muted)' }}
+            title={!lotSnap ? 'ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อน' : ''}
+          >
+            <Layers size={15} /> Expiring Lots
+          </button>
+        </div>
+      </div>
+
+      {tab === 'expiring_lots' ? (
+        <ExpiringLotsView
+          lots={expLots}
+          loading={expLoading}
+          daysMax={expDaysMax}
+          onDaysMaxChange={setExpDaysMax}
+          warehouse={expWarehouse}
+          onWarehouseChange={setExpWarehouse}
+          onExport={handleExportLots}
+          snapshotDate={lotSnap}
+        />
+      ) : (<>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -291,6 +362,150 @@ export function AlertsPage() {
           </div>
         )}
       </div>
+      </>)}
     </div>
+  );
+}
+
+// ── Expiring Lots view ──────────────────────────────────────────────────────
+function ExpiringLotsView({
+  lots, loading, daysMax, onDaysMaxChange, warehouse, onWarehouseChange, onExport, snapshotDate,
+}: {
+  lots: Array<{ id: number; item_code: string; itemname: string; group_name: string; warehouse: string; whs_name: string; batch_num: string; qty: number; uom: string; unit_cost: number; amount: number; expire_date: string | null; days_remaining: number | null }>;
+  loading: boolean;
+  daysMax: number;
+  onDaysMaxChange: (n: number) => void;
+  warehouse: string;
+  onWarehouseChange: (s: string) => void;
+  onExport: () => void;
+  snapshotDate?: string;
+}) {
+  const bucketColor = (d: number | null) =>
+    d == null     ? '#94a3b8' :
+    d < 0         ? '#7f1d1d' :
+    d <= 30       ? '#dc2626' :
+    d <= 60       ? '#ea580c' :
+    d <= 90       ? '#d97706' :
+    d <= 180      ? '#65a30d' : '#16a34a';
+
+  const summary = {
+    expired:    lots.filter(l => l.days_remaining != null && l.days_remaining < 0).length,
+    soon:       lots.filter(l => l.days_remaining != null && l.days_remaining >= 0 && l.days_remaining <= 30).length,
+    mid:        lots.filter(l => l.days_remaining != null && l.days_remaining > 30 && l.days_remaining <= 60).length,
+    far:        lots.filter(l => l.days_remaining != null && l.days_remaining > 60 && l.days_remaining <= 90).length,
+    valueRisk:  lots.filter(l => l.days_remaining != null && l.days_remaining <= 30).reduce((s, l) => s + Number(l.amount), 0),
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="card border-l-4" style={{ borderLeftColor: '#7f1d1d' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>หมดอายุแล้ว</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: '#7f1d1d' }}>{formatNumber(summary.expired)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>lots</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: '#dc2626' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>≤ 30 วัน</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: '#dc2626' }}>{formatNumber(summary.soon)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>lots — เร่งระบาย</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: '#ea580c' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>31 – 60 วัน</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: '#ea580c' }}>{formatNumber(summary.mid)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>lots</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: '#d97706' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>61 – 90 วัน</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: '#d97706' }}>{formatNumber(summary.far)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>lots</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: 'var(--color-critical)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>มูลค่า ≤ 30 วัน</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-critical)' }}>฿{formatCompact(summary.valueRisk)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>at-risk</p>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex flex-wrap items-center gap-4">
+          <Clock size={18} style={{ color: 'var(--text-muted)' }} />
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>กรองตามจำนวนวันเหลือ:</span>
+          <div className="flex gap-2">
+            {[7, 30, 60, 90, 180].map(d => (
+              <button
+                key={d}
+                onClick={() => onDaysMaxChange(d)}
+                className="px-3 py-1 rounded text-xs font-medium border transition-colors"
+                style={daysMax === d
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff', borderColor: 'var(--color-primary)' }
+                  : { borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                ≤ {d} วัน
+              </button>
+            ))}
+          </div>
+          <select className="select" value={warehouse} onChange={e => onWarehouseChange(e.target.value)}>
+            <option value="">All Warehouses</option>
+            {WAREHOUSES.map(w => <option key={w.code} value={w.code}>{w.code}</option>)}
+          </select>
+          <button onClick={onExport} className="btn btn-secondary ml-auto" disabled={lots.length === 0}>
+            <Download size={16} /> Export
+          </button>
+          {snapshotDate && (
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>snapshot {formatDate(snapshotDate)}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Item Code</th>
+              <th>Item Name</th>
+              <th>Grp</th>
+              <th>Whs</th>
+              <th>Batch / Lot</th>
+              <th className="text-right">Qty</th>
+              <th className="text-right">Value</th>
+              <th>Exp Date</th>
+              <th className="text-right">Days Left</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>กำลังโหลด...</td></tr>
+            ) : lots.length === 0 ? (
+              <tr><td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่มี lot ใกล้หมดอายุในเกณฑ์ที่เลือก 🎉</td></tr>
+            ) : (
+              lots.map(l => (
+                <tr key={l.id}>
+                  <td className="font-mono text-xs" style={{ color: 'var(--color-primary-light)' }}>{l.item_code}</td>
+                  <td className="text-xs max-w-[260px] truncate" title={l.itemname}>{l.itemname}</td>
+                  <td className="text-xs" style={{ color: 'var(--text-muted)' }}>{(l.group_name ?? '').split('-')[0]}</td>
+                  <td className="text-xs">{l.warehouse}</td>
+                  <td className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{l.batch_num}</td>
+                  <td className="text-right tabular-nums">{formatNumber(Number(l.qty), 2)} <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{l.uom}</span></td>
+                  <td className="text-right tabular-nums font-medium">฿{formatNumber(Number(l.amount), 2)}</td>
+                  <td className="text-xs">{l.expire_date ? formatDate(l.expire_date) : '—'}</td>
+                  <td className="text-right">
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-semibold text-white"
+                      style={{ backgroundColor: bucketColor(l.days_remaining) }}
+                    >
+                      {l.days_remaining == null
+                        ? '—'
+                        : l.days_remaining < 0
+                          ? `เกิน ${-l.days_remaining}d`
+                          : `${l.days_remaining}d`}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
