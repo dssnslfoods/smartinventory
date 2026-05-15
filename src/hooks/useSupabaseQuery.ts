@@ -763,6 +763,75 @@ export function useLotAging(snapshotDate?: string, filters?: { warehouse?: strin
   });
 }
 
+// ============ Monthly Trends (for MoM / QoQ / YoY analysis) ============
+
+export interface MonthlySummaryRow {
+  month: string;          // YYYY-MM-DD (first day of month)
+  group_code: number;
+  group_name: string;
+  in_value: number;
+  out_value: number;
+  in_qty: number;
+  out_qty: number;
+  transfer_value: number;
+  tx_count: number;
+  unique_items: number;
+}
+
+export interface MonthlyTotalRow {
+  month: string;
+  in_value: number;
+  out_value: number;
+  in_qty: number;
+  out_qty: number;
+  transfer_value: number;
+  tx_count: number;
+}
+
+/** Group-level monthly summary, oldest → newest. Used by the Trends tab. */
+export function useMonthlySummary(monthsBack: number = 36) {
+  return useQuery({
+    queryKey: ['monthlySummary', monthsBack],
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - monthsBack);
+      cutoff.setDate(1);
+      const cutoffStr = cutoff.toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('v_monthly_summary')
+        .select('*')
+        .gte('month', cutoffStr)
+        .order('month', { ascending: true })
+        .limit(50_000);
+      if (error) throw error;
+      return (data ?? []) as MonthlySummaryRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Whole-business monthly totals (no group breakdown). */
+export function useMonthlyTotal(monthsBack: number = 36) {
+  return useQuery({
+    queryKey: ['monthlyTotal', monthsBack],
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - monthsBack);
+      cutoff.setDate(1);
+      const cutoffStr = cutoff.toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('v_monthly_total')
+        .select('*')
+        .gte('month', cutoffStr)
+        .order('month', { ascending: true })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as MonthlyTotalRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ============ System Config ============
 export function useSystemConfig() {
   return useQuery({
