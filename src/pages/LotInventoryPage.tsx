@@ -192,28 +192,35 @@ export function LotInventoryPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="table-container">
-        <table>
+      {/* Table — fits page width without horizontal scroll.
+          Columns combine related fields so we stay at 7 columns total. */}
+      <div className="rounded-xl border overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col style={{ width: '24%' }} />{/* Item (code + name) */}
+            <col style={{ width: '10%' }} />{/* Whs / Grp */}
+            <col style={{ width: '17%' }} />{/* Batch / Lot */}
+            <col style={{ width: '10%' }} />{/* Qty */}
+            <col style={{ width: '10%' }} />{/* Unit Cost */}
+            <col style={{ width: '13%' }} />{/* Total Value */}
+            <col style={{ width: '16%' }} />{/* Exp Date + Days Left */}
+          </colgroup>
           <thead>
-            <tr>
-              <th>Item Code</th>
-              <th>Item Name</th>
-              <th>Group</th>
-              <th>Warehouse</th>
-              <th>Batch / Lot</th>
-              <th className="text-right">Qty</th>
-              <th className="text-right">Unit Cost</th>
-              <th className="text-right">Total Value</th>
-              <th>Exp Date</th>
-              <th className="text-right">Days Left</th>
+            <tr style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+              <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider">Item</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider">Whs / Grp</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider">Batch / Lot</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider">Qty</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider">Unit ฿</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider">Value ฿</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider">Exp · Days</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={10} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={7} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>กำลังโหลด...</td></tr>
             ) : lots.length === 0 ? (
-              <tr><td colSpan={10} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่มีข้อมูล lot</td></tr>
+              <tr><td colSpan={7} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่มีข้อมูล lot</td></tr>
             ) : (
               lots.map((l) => {
                 const dr = l.days_remaining;
@@ -225,27 +232,57 @@ export function LotInventoryPage() {
                   dr <= 90           ? '61-90'   :
                   dr <= 180          ? '91-180'  : '180+';
                 return (
-                  <tr key={l.id}>
-                    <td className="font-mono text-xs" style={{ color: 'var(--color-primary-light)' }}>{l.item_code}</td>
-                    <td className="text-xs max-w-[260px] truncate" title={l.itemname}>{l.itemname}</td>
-                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>{(l.group_name ?? '').split('-')[0]}</td>
-                    <td className="text-xs">{l.warehouse}</td>
-                    <td className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{l.batch_num}</td>
-                    <td className="text-right tabular-nums">{formatNumber(Number(l.qty), 2)}</td>
-                    <td className="text-right tabular-nums">฿{formatNumber(Number(l.unit_cost), 2)}</td>
-                    <td className="text-right tabular-nums font-medium">฿{formatNumber(Number(l.amount), 2)}</td>
-                    <td className="text-xs">{l.expire_date ? formatDate(l.expire_date) : '—'}</td>
-                    <td className="text-right">
-                      {dr == null ? (
-                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
-                      ) : (
-                        <span
-                          className="px-2 py-0.5 rounded-full text-xs font-semibold text-white"
-                          style={{ backgroundColor: BUCKET_COLORS[bucket] }}
-                        >
-                          {dr < 0 ? `เกิน ${-dr}d` : `${dr}d`}
+                  <tr key={l.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    {/* Item: code on top (mono, blue), name below (truncated) */}
+                    <td className="px-3 py-2 align-top">
+                      <div className="font-mono text-xs font-medium truncate" style={{ color: 'var(--color-primary-light)' }} title={l.item_code}>
+                        {l.item_code}
+                      </div>
+                      <div className="text-xs truncate" title={l.itemname} style={{ color: 'var(--text)' }}>
+                        {l.itemname}
+                      </div>
+                    </td>
+                    {/* Whs / Grp stacked */}
+                    <td className="px-3 py-2 align-top">
+                      <div className="text-xs font-medium truncate" style={{ color: 'var(--text)' }} title={l.warehouse}>
+                        {l.warehouse}
+                      </div>
+                      <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }} title={l.group_name ?? ''}>
+                        {(l.group_name ?? '').split('-')[0]}
+                      </div>
+                    </td>
+                    {/* Batch */}
+                    <td className="px-3 py-2 font-mono text-[11px] align-top truncate" style={{ color: 'var(--text-muted)' }} title={l.batch_num}>
+                      {l.batch_num}
+                    </td>
+                    {/* Qty + UOM */}
+                    <td className="px-3 py-2 text-right tabular-nums align-top">
+                      <div className="text-xs font-medium">{formatNumber(Number(l.qty), 2)}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{l.uom}</div>
+                    </td>
+                    {/* Unit Cost */}
+                    <td className="px-3 py-2 text-right tabular-nums text-xs align-top" style={{ color: 'var(--text-muted)' }}>
+                      ฿{formatNumber(Number(l.unit_cost), 2)}
+                    </td>
+                    {/* Total Value (compact thousands for large) */}
+                    <td className="px-3 py-2 text-right tabular-nums text-xs font-semibold align-top" style={{ color: 'var(--text)' }}>
+                      ฿{formatNumber(Number(l.amount), 2)}
+                    </td>
+                    {/* Exp + Days badge */}
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                          {l.expire_date ? formatDate(l.expire_date) : '—'}
                         </span>
-                      )}
+                        {dr != null && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-white whitespace-nowrap"
+                            style={{ backgroundColor: BUCKET_COLORS[bucket] }}
+                          >
+                            {dr < 0 ? `+${-dr}d` : `${dr}d`}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
