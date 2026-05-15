@@ -463,11 +463,47 @@ function VVMatrixTab() {
     return { countA, countB, countC, total: all.length, totalVal, valA, valB, valC, avgExpScore, avgSimScore, criticalCount, highRiskCount };
   }, [vvItems]);
 
-  const scatterData = useMemo(() => ({
-    A: vvItems.filter(i => i.exp_class === 'A').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
-    B: vvItems.filter(i => i.exp_class === 'B').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
-    C: vvItems.filter(i => i.exp_class === 'C').map(i => ({ x: i.value_score, y: i.validity_score, name: i.item_code, itemname: i.itemname, exp_score: i.exp_score, risk_flag: i.risk_flag })),
-  }), [vvItems]);
+  // Bin items by integer (value_score, validity_score) cell — many items collapse
+  // onto the same grid position because both axes are 1-5 integers. We aggregate
+  // and size each dot by item count so the user actually sees the density.
+  const scatterData = useMemo(() => {
+    type Bin = {
+      x: number; y: number;
+      count: number;
+      items: VVItem[];
+      avg_exp_score: number;
+    };
+    const bin = (cls: 'A' | 'B' | 'C') => {
+      const map = new Map<string, Bin>();
+      for (const it of vvItems) {
+        if (it.exp_class !== cls) continue;
+        const key = `${it.value_score}|${it.validity_score}`;
+        const ex = map.get(key);
+        if (ex) {
+          ex.count += 1;
+          ex.items.push(it);
+          ex.avg_exp_score = (ex.avg_exp_score * (ex.count - 1) + it.exp_score) / ex.count;
+        } else {
+          map.set(key, {
+            x: it.value_score, y: it.validity_score,
+            count: 1, items: [it], avg_exp_score: it.exp_score,
+          });
+        }
+      }
+      return Array.from(map.values());
+    };
+    return { A: bin('A'), B: bin('B'), C: bin('C') };
+  }, [vvItems]);
+
+  // Max bin count — used to scale dot radius logarithmically so a 200-item bin
+  // doesn't visually drown a 5-item bin.
+  const maxBinCount = useMemo(() => {
+    let m = 1;
+    for (const bins of Object.values(scatterData)) {
+      for (const b of bins) if (b.count > m) m = b.count;
+    }
+    return m;
+  }, [scatterData]);
 
   const handleExport = () => {
     exportToExcel(filtered.map(r => ({
@@ -654,7 +690,7 @@ function VVMatrixTab() {
             </span>
           </div>
           <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-            Each dot = 1 product · X = Value Score · Y = Validity Score · Penalty zone: high X, low Y (bottom-right)
+            จุด 1 จุด = สินค้าหลายตัวที่มีคะแนนตำแหน่งเดียวกัน · <strong>ขนาด=จำนวน</strong> · X = Value, Y = Validity · โซนเสี่ยง: ขวาล่าง
           </p>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -677,24 +713,75 @@ function VVMatrixTab() {
                   cursor={{ strokeDasharray: '3 3' }}
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null;
-                    const d = payload[0]?.payload as { x: number; y: number; name: string; itemname: string; exp_score: number; risk_flag: string | null };
+                    const d = payload[0]?.payload as { x: number; y: number; count: number; items: VVItem[]; avg_exp_score: number };
+                    const critCount = d.items.filter(i => i.risk_flag === 'critical').length;
+                    const highExpCount = d.items.filter(i => i.risk_flag === 'high_expiry').length;
+                    const preview = d.items.slice(0, 5);
                     return (
-                      <div style={{ ...tooltipStyle.contentStyle, padding: '8px 12px', minWidth: 200 }}>
-                        <p className="font-semibold text-xs mb-0.5">{d.name}</p>
-                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{d.itemname}</p>
-                        <p className="text-xs">Value: <strong>{d.x}</strong> · Validity: <strong>{d.y}</strong></p>
-                        <p className="text-xs">Exp Score: <strong>{d.exp_score.toFixed(2)}</strong> (α={alpha})</p>
-                        {d.risk_flag && (
-                          <p className="text-xs font-semibold mt-1" style={{ color: '#dc2626' }}>
-                            {d.risk_flag === 'critical' ? '🔴 CRITICAL' : '🟠 HIGH EXPIRY RISK'}
-                          </p>
+                      <div style={{ ...tooltipStyle.contentStyle, padding: '10px 12px', minWidth: 260, maxWidth: 340 }}>
+                        <p className="font-semibold text-sm mb-1">
+                          {d.count} {d.count === 1 ? 'รายการ' : 'รายการ'} • Value {d.x} / Validity {d.y}
+                        </p>
+                        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                          Exp Score เฉลี่ย: <strong>{d.avg_exp_score.toFixed(2)}</strong> (α={alpha})
+                        </p>
+                        {(critCount > 0 || highExpCount > 0) && (
+                          <div className="flex gap-2 mb-2 text-[11px] font-semibold">
+                            {critCount > 0 && <span style={{ color: '#dc2626' }}>🔴 Critical: {critCount}</span>}
+                            {highExpCount > 0 && <span style={{ color: '#ea580c' }}>🟠 High Expiry: {highExpCount}</span>}
+                          </div>
                         )}
+                        <div className="border-t pt-1.5" style={{ borderColor: 'var(--border)' }}>
+                          <p className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>ตัวอย่าง:</p>
+                          {preview.map(it => (
+                            <div key={it.item_code} className="text-[11px] truncate">
+                              <span className="font-mono" style={{ color: 'var(--color-primary-light)' }}>{it.item_code}</span>{' '}
+                              <span style={{ color: 'var(--text-muted)' }}>{it.itemname}</span>
+                            </div>
+                          ))}
+                          {d.count > preview.length && (
+                            <p className="text-[10px] mt-1 italic" style={{ color: 'var(--text-muted)' }}>
+                              + อีก {d.count - preview.length} รายการ — ดูในตารางด้านล่าง
+                            </p>
+                          )}
+                        </div>
                       </div>
                     );
                   }}
                 />
                 {(['A', 'B', 'C'] as const).map(cls => (
-                  <Scatter key={cls} name={`Class ${cls}`} data={scatterData[cls]} fill={VV_COLORS[cls]} fillOpacity={0.8} r={5} />
+                  <Scatter
+                    key={cls}
+                    name={`Class ${cls}`}
+                    data={scatterData[cls]}
+                    fill={VV_COLORS[cls]}
+                    fillOpacity={0.75}
+                    stroke="#fff"
+                    strokeWidth={1.5}
+                    shape={(props: any) => {
+                      // Scale radius by item count — sqrt scale so big bins don't dwarf small ones.
+                      // r range: 6 (count=1) → 26 (count=maxBin)
+                      const count = props.payload?.count ?? 1;
+                      const r = 6 + 20 * Math.sqrt((count - 1) / Math.max(1, maxBinCount - 1));
+                      return (
+                        <g>
+                          <circle cx={props.cx} cy={props.cy} r={r} fill={props.fill} fillOpacity={0.75} stroke="#fff" strokeWidth={1.5} />
+                          {count > 1 && (
+                            <text
+                              x={props.cx} y={props.cy} dy={4}
+                              textAnchor="middle"
+                              fontSize={r >= 14 ? 12 : 10}
+                              fontWeight={700}
+                              fill="#fff"
+                              style={{ pointerEvents: 'none' }}
+                            >
+                              {count}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    }}
+                  />
                 ))}
               </ScatterChart>
             </ResponsiveContainer>
