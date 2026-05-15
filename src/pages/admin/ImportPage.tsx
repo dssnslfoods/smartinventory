@@ -30,7 +30,7 @@ interface ProgressState {
 const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any; cols: string[]; headers: string[] }[] = [
   { key: 'warehouses', label: 'Warehouses', sub: 'คลังสินค้า', icon: <Archive size={20}/>, cols: ['code', 'whs_name', 'whs_type'], headers: ['Code', 'Name', 'Type'] },
   { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'] },
-  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'expire_date'], headers: ['Code', 'Name', 'UOM', 'Expire Date'] },
+  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'fs_category'], headers: ['Code', 'Name', 'UOM', 'FS Category'] },
   { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'] },
   { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'] },
   { key: 'inventory_lots', label: 'Lot Inventory', sub: 'สต็อกต่อ lot', icon: <Layers size={20}/>, cols: ['item_code', 'warehouse', 'batch_num', 'qty', 'expire_date'], headers: ['Item', 'Whs', 'Batch', 'Qty', 'Expire'] },

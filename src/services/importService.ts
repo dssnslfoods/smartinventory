@@ -37,6 +37,100 @@ const getVal = (row: Record<string, unknown>, keys: string[]): unknown => {
   return undefined;
 };
 
+/**
+ * Parse a worksheet that uses the SmartInventory styled-template layout
+ * (banner on rows 1-2, blank row 3, header on row 4, description on row 5,
+ * data from row 6 onwards) OR a raw layout where the header is on row 1.
+ *
+ * - Auto-detects which layout by scanning the first ~8 rows for any of
+ *   `headerSignals` (e.g. ['Item Code', 'Code']).
+ * - Strips the trailing '*' from header cells (required-field marker).
+ * - For styled sheets, skips the description row that sits directly under
+ *   the header.
+ *
+ * Returns an array of records keyed by the cleaned header text. Records
+ * whose first column is empty are skipped (defensive — trailing blank rows).
+ */
+function parseSheet(
+  wb: XLSX.WorkBook,
+  sheetNames: string[],
+  headerSignals: string[],
+): Record<string, unknown>[] {
+  const name = wb.SheetNames.find(n =>
+    sheetNames.some(sn => n.toLowerCase().includes(sn.toLowerCase()))
+  );
+  if (!name) return [];
+  const sheet = wb.Sheets[name];
+
+  // Read everything as arrays so we can locate the header ourselves
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    raw: true,
+    defval: null,
+  });
+  if (!rows.length) return [];
+
+  // Locate the header row: first row in which one of the signals appears
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 12); i++) {
+    const cells = (rows[i] ?? []).map(c => (c == null ? '' : String(c).replace(/\s*\*\s*$/, '').trim()));
+    if (cells.some(c => headerSignals.some(sig => c === sig || c.toLowerCase() === sig.toLowerCase()))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx === -1) return [];
+
+  const rawHeaders = rows[headerIdx] ?? [];
+  const headers: string[] = rawHeaders.map((h, idx) =>
+    h == null ? `__col_${idx + 1}` : String(h).replace(/\s*\*\s*$/, '').trim()
+  );
+
+  // Detect "styled" layout: row right after header is the description row
+  // (entirely text describing each column, no IDs / numbers / dates).
+  const next = rows[headerIdx + 1] ?? [];
+  // Heuristic: if at least 2 cells of next row contain Thai text and
+  // 0 of them look like an ID / number, treat as description row.
+  const looksLikeDescription = (() => {
+    if (!next || !next.length) return false;
+    let textyCount = 0;
+    let idLikeCount = 0;
+    for (const c of next) {
+      if (c == null || c === '') continue;
+      const s = String(c).trim();
+      // ID-looking: alphanumeric short code or pure number
+      if (/^[A-Z]{1,4}-?\w{0,12}$/.test(s) || /^\d+(\.\d+)?$/.test(s)) idLikeCount++;
+      else if (s.length > 2) textyCount++;
+    }
+    return textyCount >= 2 && idLikeCount === 0;
+  })();
+
+  const dataStart = headerIdx + (looksLikeDescription ? 2 : 1);
+  const out: Record<string, unknown>[] = [];
+  for (let r = dataStart; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row) continue;
+    // skip rows where the first column is empty (trailing junk)
+    if (row[0] == null || String(row[0]).trim() === '') continue;
+    const obj: Record<string, unknown> = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c];
+    }
+    // Also expose positional accessors so consumers can fall back to col index
+    // when a header is missing (e.g. the user's file leaves col 8/9 unlabeled).
+    obj.__row = row;
+    out.push(obj);
+  }
+  return out;
+}
+
+/** Helper: read a value at column index N (1-based) from the __row positional cache. */
+function getPositional(row: Record<string, unknown>, idx1Based: number): unknown {
+  const arr = row.__row as unknown[] | undefined;
+  if (!arr) return undefined;
+  return arr[idx1Based - 1];
+}
+
 // ── 1. Parse Excel into Structured Data ──────────────────────────────────────
 export const parseComprehensiveExcel = async (
   file: File,
@@ -50,35 +144,6 @@ export const parseComprehensiveExcel = async (
       try {
         const wb = XLSX.read(e.target?.result, { type: 'binary', cellDates: true });
 
-        const extract = (sheetNames: string[], transform: (row: any) => any) => {
-          const name = wb.SheetNames.find(n => sheetNames.some(sn => n.toLowerCase().includes(sn.toLowerCase())));
-          if (!name) return [];
-          const sheet = wb.Sheets[name];
-          const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
-          return raw.map(transform).filter(Boolean);
-        };
-
-        const warehouses = extract(['Warehouses', 'คลังสินค้า'], row => {
-           const code = getVal(row, ['Warehouse Code', 'Code']);
-           return code ? {
-             code: String(code).trim(),
-             whs_name: String(getVal(row, ['Warehouse Name', 'Name']) ?? code).trim(),
-             whs_type: String(getVal(row, ['Type', 'Group']) ?? 'General').trim(),
-             is_active: String(getVal(row, ['Status', 'Active']) ?? '') !== 'In',
-             sort_order: Number(getVal(row, ['Sort Order', 'Order']) ?? 99)
-           } : null;
-        });
-
-        const item_groups = extract(['Item Groups', 'กลุ่มสินค้า'], row => {
-           const code = getVal(row, ['Group Code', 'Code']);
-           return code ? {
-             group_code: Number(code),
-             group_name: String(getVal(row, ['Group Name', 'Name']) ?? code).trim(),
-             description: getVal(row, ['Description', 'Desc']) ? String(getVal(row, ['Description', 'Desc'])) : null,
-             shelf_life_days: getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life']) ? Number(getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life'])) : null
-           } : null;
-        });
-
         const parseExcelDate = (val: unknown): string | null => {
           if (!val) return null;
           if (val instanceof Date) return val.toISOString().split('T')[0];
@@ -91,56 +156,116 @@ export const parseComprehensiveExcel = async (
           return s.split('T')[0].split(' ')[0] || null;
         };
 
-        const items = extract(['Items', 'สินค้า', 'dbo_OITM'], row => {
-           const code = getVal(row, ['Item Code', 'ItemCode']);
-           return code ? {
-             item_code: String(code).trim(),
-             itemname: String(getVal(row, ['Item Name', 'ItemName']) ?? '').trim(),
-             uom: String(getVal(row, ['UOM', 'InvntryUom']) ?? 'KG'),
-             std_cost: Number(getVal(row, ['Std Cost', 'STD COST']) ?? 0),
-             moving_avg: Number(getVal(row, ['Moving Avg', 'Moving Average']) ?? 0),
-             group_code: Number(getVal(row, ['Group Code', 'ItmsGrpCod']) ?? 0),
-             is_active: String(getVal(row, ['Status', 'frozenFor']) ?? '') !== 'Y' && String(getVal(row, ['Status']) ?? '') !== 'In',
-             expire_date: parseExcelDate(getVal(row, ['Expire Date', 'ExpireDate', 'Expiry Date', 'ExpiryDate', 'Expiration Date']))
-           } : null;
-        });
+        const warehouses = parseSheet(wb,
+          ['Warehouses', 'คลังสินค้า'],
+          ['Warehouse Code', 'Code'],
+        ).map(row => {
+          const code = getVal(row, ['Warehouse Code', 'Code']);
+          if (!code) return null;
+          return {
+            code: String(code).trim(),
+            whs_name: String(getVal(row, ['Warehouse Name', 'Name']) ?? code).trim(),
+            whs_type: String(getVal(row, ['Type', 'Group']) ?? 'General').trim(),
+            is_active: String(getVal(row, ['Active', 'Status']) ?? '') !== 'In',
+            sort_order: Number(getVal(row, ['Sort Order', 'Order']) ?? 99),
+          };
+        }).filter(Boolean) as any[];
 
-        const stock_thresholds = extract(['Thresholds', 'จุดสั่งซื้อ', 'Min Max'], row => {
-           const item_code = getVal(row, ['Item Code']);
-           const warehouse = getVal(row, ['Warehouse Code', 'Warehouse']);
-           return (item_code && warehouse) ? {
-             item_code: String(item_code).trim(),
-             warehouse: String(warehouse).trim(),
-             min_level: Number(getVal(row, ['Min Level', 'Min']) ?? 0),
-             reorder_point: Number(getVal(row, ['Reorder Point', 'ROP']) ?? 0),
-             max_level: getVal(row, ['Max Level', 'Max']) ? Number(getVal(row, ['Max Level', 'Max'])) : null
-           } : null;
-        });
+        const item_groups = parseSheet(wb,
+          ['Item Groups', 'กลุ่มสินค้า'],
+          ['Group Code', 'Code'],
+        ).map(row => {
+          const code = getVal(row, ['Group Code', 'Code']);
+          if (!code) return null;
+          return {
+            group_code: Number(code),
+            group_name: String(getVal(row, ['Group Name', 'Name']) ?? code).trim(),
+            description: getVal(row, ['Description', 'Desc']) ? String(getVal(row, ['Description', 'Desc'])) : null,
+            shelf_life_days: getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life'])
+              ? Number(getVal(row, ['Shelf Life Days', 'ShelfLifeDays', 'Shelf Life']))
+              : null,
+          };
+        }).filter(Boolean) as any[];
 
-        const inventory_transactions = extract(['Transactions', 'Movement', 'dbo_OIMN'], row => {
-           const transNum = getVal(row, ['Transaction No', 'TransNum']);
-           const itemCode = getVal(row, ['Item Code', 'ItemCode']);
-           return (transNum && itemCode) ? {
-              trans_num: Number(transNum),
-              doc_date: (() => {
-                let d = getVal(row, ['Date', 'DocDate']);
-                if (d instanceof Date) return d.toISOString().split('T')[0];
-                return String(d ?? '').split('T')[0].split(' ')[0];
-              })(),
-              trans_type: Number(getVal(row, ['Tx Type', 'TransType']) ?? 0),
-              warehouse: String(getVal(row, ['Warehouse Code', 'Warehouse']) ?? '').trim(),
-              doc_line_num: Number(getVal(row, ['Line Num', 'DocLineNum']) ?? -1),
-              item_code: String(itemCode).trim(),
-              in_qty: Number(getVal(row, ['In Qty', 'InQuantity']) ?? 0),
-              out_qty: Number(getVal(row, ['Out Qty', 'OutQuantity']) ?? 0),
-              amount: Number(getVal(row, ['Total Amount', 'Amount']) ?? 0),
-              direction: String(getVal(row, ['Direction', 'Transection']) ?? '').trim() || (Number(getVal(row, ['In Qty', 'InQuantity'])) > 0 ? 'In' : 'Out')
-           } : null;
-        });
+        const items = parseSheet(wb,
+          ['Items', 'สินค้า', 'dbo_OITM'],
+          ['Item Code', 'ItemCode'],
+        ).map(row => {
+          const code = getVal(row, ['Item Code', 'ItemCode']);
+          if (!code) return null;
+          // FS Category lives at named column "Category" / "FS Category" if present,
+          // otherwise in the original NSL file at the 9th column (col 8 is intentionally blank).
+          const fsCatNamed = getVal(row, ['FS Category', 'Category', 'fs_category']);
+          const fsCatPositional = fsCatNamed == null ? getPositional(row, 9) : null;
+          const fsCategory = (fsCatNamed ?? fsCatPositional);
+          return {
+            item_code:   String(code).trim(),
+            itemname:    String(getVal(row, ['Item Name', 'ItemName']) ?? '').trim(),
+            uom:         String(getVal(row, ['UOM', 'InvntryUom']) ?? 'KG'),
+            std_cost:    Number(getVal(row, ['Std Cost', 'STD COST']) ?? 0),
+            moving_avg:  Number(getVal(row, ['Moving Avg', 'Moving Average']) ?? 0),
+            group_code:  Number(getVal(row, ['Group Code', 'ItmsGrpCod']) ?? 0),
+            is_active:   String(getVal(row, ['Status', 'frozenFor']) ?? '') !== 'Y'
+                        && String(getVal(row, ['Status']) ?? '') !== 'In',
+            expire_date: parseExcelDate(getVal(row, ['Expire Date', 'ExpireDate', 'Expiry Date', 'ExpiryDate', 'Expiration Date'])),
+            fs_category: fsCategory ? String(fsCategory).trim() : null,
+          };
+        }).filter(Boolean) as any[];
+
+        const stock_thresholds = parseSheet(wb,
+          ['Thresholds', 'จุดสั่งซื้อ', 'Min Max'],
+          ['Item Code'],
+        ).map(row => {
+          const item_code = getVal(row, ['Item Code']);
+          const warehouse = getVal(row, ['Warehouse Code', 'Warehouse']);
+          if (!item_code || !warehouse) return null;
+          // Skip rows with no thresholds set at all
+          const min = getVal(row, ['Min Level', 'Min']);
+          const rop = getVal(row, ['Reorder Point', 'ROP']);
+          const max = getVal(row, ['Max Level', 'Max']);
+          if (min == null && rop == null && max == null) return null;
+          return {
+            item_code:     String(item_code).trim(),
+            warehouse:     String(warehouse).trim(),
+            min_level:     Number(min ?? 0),
+            reorder_point: Number(rop ?? 0),
+            max_level:     max != null ? Number(max) : null,
+          };
+        }).filter(Boolean) as any[];
+
+        const inventory_transactions = parseSheet(wb,
+          ['Transactions', 'Movement', 'dbo_OIMN'],
+          ['Transaction No', 'TransNum', 'Date'],
+        ).map(row => {
+          const transNum = getVal(row, ['Transaction No', 'TransNum']);
+          const itemCode = getVal(row, ['Item Code', 'ItemCode']);
+          if (!transNum || !itemCode) return null;
+          return {
+            trans_num: Number(transNum),
+            doc_date: (() => {
+              const d = getVal(row, ['Date', 'DocDate']);
+              if (d instanceof Date) return d.toISOString().split('T')[0];
+              return String(d ?? '').split('T')[0].split(' ')[0];
+            })(),
+            trans_type:   Number(getVal(row, ['Tx Type', 'TransType']) ?? 0),
+            warehouse:    String(getVal(row, ['Warehouse', 'Warehouse Code']) ?? '').trim(),
+            doc_line_num: Number(getVal(row, ['Line Num', 'DocLineNum']) ?? -1),
+            item_code:    String(itemCode).trim(),
+            in_qty:       Number(getVal(row, ['In Qty', 'InQuantity']) ?? 0),
+            out_qty:      Number(getVal(row, ['Out Qty', 'OutQuantity']) ?? 0),
+            amount:       Number(getVal(row, ['Total Amount', 'Amount']) ?? 0),
+            direction:    String(getVal(row, ['Direction', 'Transection']) ?? '').trim()
+                          || (Number(getVal(row, ['In Qty', 'InQuantity'])) > 0 ? 'In' : 'Out'),
+          };
+        }).filter(Boolean) as any[];
 
         // ── Inventory Lots ──
-        // Match sheets named "Lot", "Lots", or "lot_คงเหลือ" (case-insensitive substring)
-        const inventory_lots = extract(['Lot Inventory', 'Lots', 'lot_คงเหลือ', 'lot คงเหลือ', 'Lot'], row => {
+        // Match sheets named "Lot", "Lots", or "lot_คงเหลือ" (case-insensitive substring).
+        // The NSL lot sheet has the header on row 1 directly, no banner/description rows.
+        const inventory_lots = parseSheet(wb,
+          ['Lot Inventory', 'Lots', 'lot_คงเหลือ', 'lot คงเหลือ', 'Lot'],
+          ['BatchNum Lot', 'BatchNum', 'Batch', 'Lot'],
+        ).map(row => {
           const itemCode = getVal(row, ['Item Code', 'ItemCode']);
           const warehouse = getVal(row, ['Warehouse', 'Warehouse Code', 'WhsCode']);
           if (!itemCode || !warehouse) return null;
@@ -177,7 +302,7 @@ export const parseComprehensiveExcel = async (
             expire_date:     dateLike(getVal(row, ['ExpDate', 'Expire Date', 'ExpiryDate', 'Expiration Date'])),
             snapshot_date:   dateLike(getVal(row, ['ToDate', 'Snapshot Date', 'AsOf'])) ?? new Date().toISOString().split('T')[0],
           };
-        });
+        }).filter(Boolean) as any[];
 
         let txDateMin = '';
         let txDateMax = '';

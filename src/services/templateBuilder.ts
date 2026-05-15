@@ -414,7 +414,7 @@ export async function buildBeautifulTemplate(): Promise<void> {
     { key: 'code',     header: 'Item Code',      width: 16, required: true, desc: 'รหัสสินค้า', alignment: { horizontal: 'left' } },
     { key: 'name',     header: 'Item Name',      width: 36, required: true, desc: 'ชื่อสินค้า' },
     { key: 'group',    header: 'Group Code',     width: 12, required: true, desc: 'รหัสกลุ่ม (อ้างอิง Item Groups)',
-      validation: { type: 'list', values: ['123', '125', '126', '127'], label: 'เลือกจาก Group Code ที่มีใน Item Groups' },
+      validation: { type: 'list', values: ['123', '124', '125', '126', '127'], label: 'เลือกจาก Group Code ที่มีใน Item Groups' },
       numFmt: '0', alignment: { horizontal: 'center' } },
     { key: 'uom',      header: 'UOM',            width: 10, desc: 'หน่วยนับ',
       validation: { type: 'list', values: ['KG', 'PCS', 'BAG', 'BOX', 'L', 'ML', 'PACK'] },
@@ -423,15 +423,15 @@ export async function buildBeautifulTemplate(): Promise<void> {
     { key: 'mavg',     header: 'Moving Avg',     width: 14, desc: 'ต้นทุนเฉลี่ย',     numFmt: '#,##0.00', alignment: { horizontal: 'right' } },
     { key: 'status',   header: 'Status',         width: 10, desc: 'A = Active, In = Inactive',
       validation: { type: 'list', values: ['A', 'In'] }, alignment: { horizontal: 'center' } },
-    { key: 'expire',   header: 'Expire Date',    width: 14, desc: 'YYYY-MM-DD (ปล่อยว่างได้ ระบบจะคำนวณจาก Shelf Life)',
-      numFmt: 'yyyy-mm-dd', alignment: { horizontal: 'center' } },
+    { key: 'fs',       header: 'FS Category',    width: 26, desc: 'กลุ่มสินค้าที่ FS จัดไว้ — ละเอียดกว่า Group Code',
+      validation: { type: 'list', values: ['Fish-Salmon', 'Fish-NZ', 'Fish-Tuna', 'Fish-Pangasius Dory', 'Fish-Other', 'Beef', 'Pork', 'Lamb', 'Poultry-Turkey', 'Poultry-Other', 'Seafood-Mussel', 'Processed Foods-Crab Stick', 'Processed Foods-Ebiko', 'Processed Foods-Ikura', 'Processed Foods-Smoked Salmon', 'Processed Foods-Other', 'Frozen Cake', 'Crossiant', 'Ready to Cook', 'French Fries', 'Daily Goods', 'Production FG', 'By Product', 'Other-Ingredient', 'Other'] } },
   ];
   const itemSamples: any[][] = [
-    ['RM-10001', 'แป้งสาลีอเนกประสงค์',     125, 'KG',   15.50, 16.00, 'A', new Date('2026-12-31')],
-    ['RM-10002', 'น้ำตาลทรายขาว',           125, 'KG',   22.00, 23.50, 'A', new Date('2027-06-30')],
-    ['RM-10003', 'นมข้นจืด',                125, 'KG',   38.00, 39.20, 'A', new Date('2026-09-15')],
-    ['FG-50001', 'ขนมปังโฮลวีท แพ็ค 6 ชิ้น',123, 'PACK', 45.00, 46.50, 'A', new Date('2026-06-10')],
-    ['PK-70001', 'กล่องบรรจุ FG ขนาด M',    127, 'PCS',  4.20,  4.30,  'A', null],
+    ['F10100002', 'Fresh Salmon WH/HeadOn/Gutted 4-5 Kg (NOR)',  125, 'KG',   350.00, 342.01, 'A', 'Fish-Salmon'],
+    ['F10100003', 'Fresh Salmon WH/HeadOn/Gutted 5-6 Kg (NOR)',  125, 'KG',   350.00, 383.90, 'A', 'Fish-Salmon'],
+    ['F10400273', 'Froz. Aus GF Trimming 65cl',                  125, 'KG',   320.00, 318.50, 'A', 'Beef'],
+    ['F7000400100', 'Smoked Salmon Sliced 100g',                 123, 'PACK',  58.13,  58.13, 'A', 'Processed Foods-Smoked Salmon'],
+    ['F21400021', 'Packing Material — Bag M',                    124, 'PCS',   1.72,   1.72, 'A', 'Other'],
   ];
   buildDataSheet(
     wb.addWorksheet('Items'),
