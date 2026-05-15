@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Target, RefreshCw, Download, Filter, Clock, Layers, Search, X,
-  TrendingUp, TrendingDown, Minus,
+  TrendingUp, TrendingDown, Minus, FolderTree,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend,
@@ -37,6 +37,7 @@ const tooltipStyle = {
 // ── Tab definitions ────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'vv',       label: 'VV Matrix',          icon: Target },
+  { id: 'groups',   label: 'Group Analysis',      icon: FolderTree },
   { id: 'trends',   label: 'Trends & Compare',    icon: TrendingUp },
   { id: 'slow',     label: 'Slow Moving',         icon: Clock },
   { id: 'turnover', label: 'Inventory Turnover',  icon: RefreshCw },
@@ -68,6 +69,10 @@ export function ReportsPage() {
               { color: '#dc2626', label: 'Class C', meaning: 'Score ต่ำ — ต้องเร่งระบาย' },
             ]} />
             <p className="text-xs mt-2 italic">ปรับเกณฑ์ A/B และค่า α ได้ที่ Settings → VV Matrix Configuration</p>
+          </HelpSection>
+          <HelpSection title="แท็บ Group Analysis">
+            วิเคราะห์ตามกลุ่มสินค้า — แต่ละกลุ่มมีของ Class A/B/C อย่างละกี่ตัว,
+            กลุ่มไหน Move เยอะ/น้อย, กลุ่มไหนของแพงสะสมเยอะ
           </HelpSection>
           <HelpSection title="แท็บ Slow Moving">
             <HelpLegend items={[
@@ -106,6 +111,7 @@ export function ReportsPage() {
       </div>
 
       {activeTab === 'vv'       && <VVMatrixTab />}
+      {activeTab === 'groups'   && <GroupAnalysisTab />}
       {activeTab === 'trends'   && <TrendsTab />}
       {activeTab === 'slow'     && <SlowMovingTab />}
       {activeTab === 'turnover' && <TurnoverTab />}
@@ -2389,5 +2395,517 @@ function DeltaPill({ pct }: { pct: number }) {
       {flat ? '—' : positive ? '↑' : '↓'}
       {flat ? '' : `${positive ? '+' : ''}${pct.toFixed(1)}%`}
     </span>
+  );
+}
+
+
+// ── Group Analysis Tab ──────────────────────────────────────────────────────
+// Cross-cuts the VV Matrix scoring with movement data per item group.
+// Answers exec questions like:
+//   • Which groups have the most A-class items? (high-value & fresh)
+//   • Which groups have the most C-class items? (clear-out targets)
+//   • Which groups move the most volume / fastest?
+//   • Which groups are big in $ but slow to move? (cash trapped)
+//
+// Data sources:
+//   useStockOnHand()      → aggregate to item-level for VV scoring
+//   useMonthlySummary(n)  → group × month movement for the period selector
+//   useSystemConfig()     → VV thresholds + alpha
+type GroupRow = {
+  group_name: string;
+  group_code: number | null;
+  items_total: number;
+  items_a: number;
+  items_b: number;
+  items_c: number;
+  stock_value: number;
+  in_value: number;
+  out_value: number;
+  net_value: number;
+  tx_count: number;
+  turnover_ratio: number;   // out_value / avg_stock_value (period-annualized)
+  movement_share: number;   // group out / total out
+};
+
+function GroupAnalysisTab() {
+  const [monthsBack, setMonthsBack] = useState<6 | 12 | 24>(12);
+  const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'c'>('out');
+  const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_c'>('all');
+
+  const { data: stockData,      isLoading: stockLoading }   = useStockOnHand();
+  const { data: monthlyData,    isLoading: monthlyLoading } = useMonthlySummary(monthsBack);
+  const { data: sysConfig }                                 = useSystemConfig();
+  const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
+  const alpha = Math.round(cfg.vv_alpha) as 1 | 2 | 3;
+
+  const isLoading = stockLoading || monthlyLoading;
+
+  // Score items (item-mode VV — aggregate stock_value across warehouses per item)
+  const vvItems = useMemo<VVItem[]>(() => {
+    const all = stockData ?? [];
+    if (!all.length) return [];
+    const itemMap = new Map<string, VVInput>();
+    for (const s of all) {
+      const ex = itemMap.get(s.item_code);
+      if (ex) {
+        ex.stock_value += Number(s.stock_value);
+      } else {
+        itemMap.set(s.item_code, {
+          item_code:   s.item_code,
+          itemname:    s.itemname,
+          group_name:  s.group_name,
+          uom:         s.uom,
+          stock_value: Number(s.stock_value),
+          expire_date: s.expire_date ?? null,
+          fs_category: (s as any).fs_category ?? null,
+        });
+      }
+    }
+    return computeVVScores(Array.from(itemMap.values()), cfg, alpha);
+  }, [stockData, cfg, alpha]);
+
+  // Build group rollup
+  const groupRows: GroupRow[] = useMemo(() => {
+    // 1. VV class counts + stock value per group
+    type Acc = Omit<GroupRow, 'turnover_ratio' | 'movement_share'> & { _filled: boolean };
+    const map = new Map<string, Acc>();
+
+    const ensure = (group_name: string, group_code: number | null): Acc => {
+      const ex = map.get(group_name);
+      if (ex) return ex;
+      const fresh: Acc = {
+        group_name, group_code,
+        items_total: 0, items_a: 0, items_b: 0, items_c: 0,
+        stock_value: 0, in_value: 0, out_value: 0, net_value: 0, tx_count: 0,
+        _filled: false,
+      };
+      map.set(group_name, fresh);
+      return fresh;
+    };
+
+    for (const it of vvItems) {
+      const row = ensure(it.group_name, null);
+      row.items_total += 1;
+      if (it.exp_class === 'A') row.items_a += 1;
+      else if (it.exp_class === 'B') row.items_b += 1;
+      else row.items_c += 1;
+      row.stock_value += it.stock_value;
+    }
+
+    // 2. Movement aggregation across selected period
+    for (const m of (monthlyData ?? []) as MonthlySummaryRow[]) {
+      const row = ensure(m.group_name, m.group_code);
+      row.in_value  += Number(m.in_value);
+      row.out_value += Number(m.out_value);
+      row.net_value  = row.in_value - row.out_value;
+      row.tx_count  += Number(m.tx_count);
+      if (m.group_code != null && row.group_code == null) row.group_code = m.group_code;
+    }
+
+    // 3. Compute turnover (annualized) + movement share
+    const totalOut = Array.from(map.values()).reduce((s, r) => s + r.out_value, 0) || 1;
+    const yearsFactor = 12 / monthsBack;  // scale period-out to annual rate
+    return Array.from(map.values()).map(r => ({
+      group_name: r.group_name,
+      group_code: r.group_code,
+      items_total: r.items_total,
+      items_a: r.items_a,
+      items_b: r.items_b,
+      items_c: r.items_c,
+      stock_value: r.stock_value,
+      in_value:   r.in_value,
+      out_value:  r.out_value,
+      net_value:  r.net_value,
+      tx_count:   r.tx_count,
+      turnover_ratio: r.stock_value > 0 ? (r.out_value * yearsFactor) / r.stock_value : 0,
+      movement_share: (r.out_value / totalOut) * 100,
+    }));
+  }, [vvItems, monthlyData, monthsBack]);
+
+  // Filter + sort
+  const filtered = useMemo(() => {
+    let rows = groupRows;
+    if (showOnly === 'has_a') rows = rows.filter(r => r.items_a > 0);
+    else if (showOnly === 'has_c') rows = rows.filter(r => r.items_c > 0);
+    return [...rows].sort((a, b) => {
+      switch (sortKey) {
+        case 'out':      return b.out_value - a.out_value;
+        case 'in':       return b.in_value - a.in_value;
+        case 'stock':    return b.stock_value - a.stock_value;
+        case 'turnover': return b.turnover_ratio - a.turnover_ratio;
+        case 'a':        return b.items_a - a.items_a;
+        case 'c':        return b.items_c - a.items_c;
+      }
+    });
+  }, [groupRows, sortKey, showOnly]);
+
+  // Totals for the summary strip
+  const totals = useMemo(() => {
+    const t = filtered.reduce((acc, r) => ({
+      groups: acc.groups + 1,
+      items_total: acc.items_total + r.items_total,
+      items_a: acc.items_a + r.items_a,
+      items_b: acc.items_b + r.items_b,
+      items_c: acc.items_c + r.items_c,
+      stock_value: acc.stock_value + r.stock_value,
+      out_value: acc.out_value + r.out_value,
+      in_value: acc.in_value + r.in_value,
+    }), { groups: 0, items_total: 0, items_a: 0, items_b: 0, items_c: 0, stock_value: 0, out_value: 0, in_value: 0 });
+
+    const topMover  = [...filtered].sort((a, b) => b.out_value - a.out_value)[0];
+    const topValue  = [...filtered].sort((a, b) => b.stock_value - a.stock_value)[0];
+    const fastest   = [...filtered].filter(r => r.stock_value > 0).sort((a, b) => b.turnover_ratio - a.turnover_ratio)[0];
+    const slowest   = [...filtered].filter(r => r.stock_value > 0 && r.out_value > 0).sort((a, b) => a.turnover_ratio - b.turnover_ratio)[0];
+    const mostA     = [...filtered].sort((a, b) => b.items_a - a.items_a)[0];
+    const mostC     = [...filtered].sort((a, b) => b.items_c - a.items_c)[0];
+
+    return { ...t, topMover, topValue, fastest, slowest, mostA, mostC };
+  }, [filtered]);
+
+  // Chart data
+  // Top-N by out_value for clarity (lots of small groups make a stacked chart unreadable)
+  const TOP_N = 12;
+  const chartData = useMemo(() => {
+    const top = [...filtered].sort((a, b) => b.out_value - a.out_value).slice(0, TOP_N);
+    // Shorten group names for x-axis (cut at '-' or 20 chars)
+    return top.map(r => ({
+      ...r,
+      short_name: r.group_name.split('-')[0].trim().slice(0, 18),
+    }));
+  }, [filtered]);
+
+  const handleExport = () => {
+    exportToExcel(filtered.map(r => ({
+      'Group':               r.group_name,
+      'Group Code':          r.group_code ?? '',
+      'Items Total':         r.items_total,
+      'VV Class A':          r.items_a,
+      'VV Class B':          r.items_b,
+      'VV Class C':          r.items_c,
+      'Stock Value (฿)':         r.stock_value,
+      [`In ${monthsBack}mo`]:    r.in_value,
+      [`Out ${monthsBack}mo`]:   r.out_value,
+      'Net':                     r.net_value,
+      'Tx Count':            r.tx_count,
+      'Turnover (Annual)':   Number(r.turnover_ratio.toFixed(2)),
+      'Movement Share %':    Number(r.movement_share.toFixed(2)),
+    })), `Group_Analysis_${monthsBack}mo`);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="card text-center py-20" style={{ color: 'var(--text-muted)' }}>
+        <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        กำลังโหลด...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="card">
+        <div className="flex flex-wrap items-center gap-4">
+          <Filter size={18} style={{ color: 'var(--text-muted)' }} />
+
+          <div className="flex items-center gap-1 border rounded-lg p-0.5" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-xs px-2" style={{ color: 'var(--text-muted)' }}>ช่วง:</span>
+            {([6, 12, 24] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setMonthsBack(m)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                style={monthsBack === m
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                  : { color: 'var(--text-muted)' }
+                }
+              >
+                {m}mo
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 border rounded-lg p-0.5" style={{ borderColor: 'var(--border)' }}>
+            {([
+              { key: 'all',   label: 'ทั้งหมด' },
+              { key: 'has_a', label: 'มี Class A' },
+              { key: 'has_c', label: 'มี Class C' },
+            ] as const).map(o => (
+              <button
+                key={o.key}
+                onClick={() => setShowOnly(o.key)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                style={showOnly === o.key
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                  : { color: 'var(--text-muted)' }
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          <select className="select" value={sortKey} onChange={e => setSortKey(e.target.value as typeof sortKey)}>
+            <option value="out">เรียง: Out (มาก→น้อย)</option>
+            <option value="in">เรียง: In (มาก→น้อย)</option>
+            <option value="stock">เรียง: Stock Value</option>
+            <option value="turnover">เรียง: Turnover (เร็ว→ช้า)</option>
+            <option value="a">เรียง: Class A</option>
+            <option value="c">เรียง: Class C</option>
+          </select>
+
+          <button onClick={handleExport} className="btn btn-secondary ml-auto" disabled={filtered.length === 0}>
+            <Download size={16} /> Export Excel
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Strip — 6 insight cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <InsightCard
+          icon={<FolderTree size={14} />}
+          label="จำนวนกลุ่ม"
+          value={formatNumber(totals.groups)}
+          sub={`${formatNumber(totals.items_total)} SKU รวม`}
+          color="#1F3864"
+        />
+        <InsightCard
+          icon={<TrendingDown size={14} />}
+          label="กลุ่มที่ Move มากสุด"
+          value={totals.topMover?.group_name.split('-')[0].slice(0, 14) || '—'}
+          sub={totals.topMover ? `Out ฿${formatCompact(totals.topMover.out_value)}` : ''}
+          color="#dc2626"
+        />
+        <InsightCard
+          icon={<Layers size={14} />}
+          label="กลุ่มที่มี Stock สูงสุด"
+          value={totals.topValue?.group_name.split('-')[0].slice(0, 14) || '—'}
+          sub={totals.topValue ? `฿${formatCompact(totals.topValue.stock_value)}` : ''}
+          color="#1F3864"
+        />
+        <InsightCard
+          icon={<RefreshCw size={14} />}
+          label="หมุนเร็วสุด"
+          value={totals.fastest?.group_name.split('-')[0].slice(0, 14) || '—'}
+          sub={totals.fastest ? `Turnover ${totals.fastest.turnover_ratio.toFixed(1)}x` : ''}
+          color="#16a34a"
+        />
+        <InsightCard
+          icon={<Clock size={14} />}
+          label="หมุนช้าสุด"
+          value={totals.slowest?.group_name.split('-')[0].slice(0, 14) || '—'}
+          sub={totals.slowest ? `Turnover ${totals.slowest.turnover_ratio.toFixed(1)}x` : ''}
+          color="#E65100"
+        />
+        <InsightCard
+          icon={<Target size={14} />}
+          label="Class A เยอะสุด / C เยอะสุด"
+          value={`${totals.mostA?.group_name.split('-')[0].slice(0, 10) || '—'} / ${totals.mostC?.group_name.split('-')[0].slice(0, 10) || '—'}`}
+          sub={`A=${totals.mostA?.items_a ?? 0} • C=${totals.mostC?.items_c ?? 0}`}
+          color="#d97706"
+        />
+      </div>
+
+      {/* Two side-by-side charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Chart 1: Movement by group (In vs Out) */}
+        <div className="card">
+          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+            Movement by Group (Top {Math.min(TOP_N, chartData.length)}) — {monthsBack} เดือน
+          </h4>
+          <div style={{ height: 360 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 5, right: 15, bottom: 60, left: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="short_name"
+                  stroke="var(--text-muted)"
+                  fontSize={10}
+                  tick={{ fill: 'var(--text-muted)' }}
+                  interval={0}
+                  angle={-35}
+                  textAnchor="end"
+                  height={70}
+                />
+                <YAxis stroke="var(--text-muted)" fontSize={11} tickFormatter={v => `฿${formatCompact(Number(v))}`} />
+                <Tooltip
+                  {...tooltipStyle}
+                  formatter={(v?: number | string, name?: string) => [`฿${formatCompact(Number(v ?? 0))}`, name]}
+                  labelFormatter={l => String(l)}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="in_value"  name="In (รับเข้า)"  fill="#16a34a" radius={[2,2,0,0]} />
+                <Bar dataKey="out_value" name="Out (จ่ายออก)" fill="#dc2626" radius={[2,2,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Chart 2: VV class distribution by group (stacked) */}
+        <div className="card">
+          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+            VV Class Distribution by Group (Top {Math.min(TOP_N, chartData.length)})
+          </h4>
+          <div style={{ height: 360 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 5, right: 15, bottom: 60, left: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="short_name"
+                  stroke="var(--text-muted)"
+                  fontSize={10}
+                  tick={{ fill: 'var(--text-muted)' }}
+                  interval={0}
+                  angle={-35}
+                  textAnchor="end"
+                  height={70}
+                />
+                <YAxis stroke="var(--text-muted)" fontSize={11} allowDecimals={false} />
+                <Tooltip
+                  {...tooltipStyle}
+                  formatter={(v?: number | string, name?: string) => [formatNumber(Number(v ?? 0)), name]}
+                  labelFormatter={l => String(l)}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="items_a" name="Class A" stackId="vv" fill={VV_COLORS.A} radius={[0,0,0,0]} />
+                <Bar dataKey="items_b" name="Class B" stackId="vv" fill={VV_COLORS.B} />
+                <Bar dataKey="items_c" name="Class C" stackId="vv" fill={VV_COLORS.C} radius={[2,2,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Group Performance Table */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+          <FolderTree size={15} style={{ color: 'var(--text-muted)' }} />
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Group Performance</h4>
+          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>
+            {filtered.length} กลุ่ม • คลิกหัวคอลัมน์เพื่อเรียงลำดับ
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-alt)' }}>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Group</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Items</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold uppercase">VV (A/B/C)</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase cursor-pointer hover:text-[var(--text)]" onClick={() => setSortKey('stock')}>
+                  Stock Value{sortKey === 'stock' && ' ↓'}
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase cursor-pointer hover:text-[var(--text)]" onClick={() => setSortKey('in')}>
+                  In ({monthsBack}mo){sortKey === 'in' && ' ↓'}
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase cursor-pointer hover:text-[var(--text)]" onClick={() => setSortKey('out')}>
+                  Out ({monthsBack}mo){sortKey === 'out' && ' ↓'}
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase cursor-pointer hover:text-[var(--text)]" onClick={() => setSortKey('turnover')}>
+                  Turnover{sortKey === 'turnover' && ' ↓'}
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Move Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => {
+                // Build A/B/C inline distribution bar
+                const total = r.items_total || 1;
+                const aPct = (r.items_a / total) * 100;
+                const bPct = (r.items_b / total) * 100;
+                const cPct = (r.items_c / total) * 100;
+                return (
+                  <tr key={r.group_name} className="border-t hover:bg-[var(--bg-alt)]" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text)' }}>
+                      <div className="font-medium">{r.group_name.split('-')[0].trim()}</div>
+                      {r.group_name.includes('-') && (
+                        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{r.group_name.split('-').slice(1).join('-').trim()}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums">{formatNumber(r.items_total)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1 justify-center">
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.A, color: '#fff' }}>{r.items_a}</span>
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.B, color: '#fff' }}>{r.items_b}</span>
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.C, color: '#fff' }}>{r.items_c}</span>
+                      </div>
+                      {/* tiny distribution bar */}
+                      <div className="flex h-1 mt-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                        <div style={{ width: `${aPct}%`, backgroundColor: VV_COLORS.A }} />
+                        <div style={{ width: `${bPct}%`, backgroundColor: VV_COLORS.B }} />
+                        <div style={{ width: `${cPct}%`, backgroundColor: VV_COLORS.C }} />
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums font-semibold">฿{formatCompact(r.stock_value)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums" style={{ color: '#16a34a' }}>฿{formatCompact(r.in_value)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums" style={{ color: '#dc2626' }}>฿{formatCompact(r.out_value)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums">
+                      <span className="font-semibold" style={{ color: r.turnover_ratio >= 4 ? '#16a34a' : r.turnover_ratio >= 1 ? '#d97706' : '#dc2626' }}>
+                        {r.turnover_ratio.toFixed(2)}x
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <div className="h-full" style={{ width: `${Math.max(2, r.movement_share)}%`, backgroundColor: '#dc2626' }} />
+                        </div>
+                        <span className="text-[10px] tabular-nums w-10 text-right" style={{ color: 'var(--text-muted)' }}>
+                          {r.movement_share.toFixed(1)}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+              )}
+            </tbody>
+            {filtered.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+                  <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text)' }}>รวม {totals.groups} กลุ่ม</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">{formatNumber(totals.items_total)}</td>
+                  <td className="px-3 py-2 text-center text-xs font-bold">
+                    A:{totals.items_a} / B:{totals.items_b} / C:{totals.items_c}
+                  </td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">฿{formatCompact(totals.stock_value)}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold" style={{ color: '#16a34a' }}>฿{formatCompact(totals.in_value)}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold" style={{ color: '#dc2626' }}>฿{formatCompact(totals.out_value)}</td>
+                  <td className="px-3 py-2"></td>
+                  <td className="px-3 py-2"></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Reading guide */}
+      <div className="card text-xs" style={{ color: 'var(--text-muted)' }}>
+        <strong style={{ color: 'var(--text)' }}>วิธีใช้รายงานนี้:</strong>
+        <ul className="list-disc ml-5 mt-1 space-y-0.5">
+          <li><strong style={{ color: VV_COLORS.A }}>Class A</strong> = ของแพง & สด → กลุ่มที่มี A เยอะ = ของหลักของธุรกิจ</li>
+          <li><strong style={{ color: VV_COLORS.C }}>Class C</strong> = ของถูก / ของใกล้หมดอายุ → กลุ่มที่มี C เยอะ = ต้องเร่งระบาย</li>
+          <li><strong>Turnover</strong> = อัตราหมุนต่อปี — สูง=หมุนเร็ว (ดี), ต่ำ=ของค้าง</li>
+          <li><strong>Move Share</strong> = สัดส่วน Out ของกลุ่มนี้ จากยอดรวม → เห็นว่ากลุ่มไหนคือ "ตัวขับเคลื่อน" ของธุรกิจ</li>
+          <li><strong>เคสน่าสนใจ:</strong> กลุ่มที่มี Stock Value สูง + Turnover ต่ำ + Class C เยอะ = ของค้างที่ใกล้หมดอายุ ต้องเร่งระบาย</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function InsightCard({ icon, label, value, sub, color }: {
+  icon: React.ReactNode; label: string; value: string; sub: string; color: string;
+}) {
+  return (
+    <div className="card border-l-4" style={{ borderLeftColor: color }}>
+      <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+        {icon}<span>{label}</span>
+      </div>
+      <div className="mt-1 text-sm font-bold" style={{ color }}>{value}</div>
+      <div className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>{sub}</div>
+    </div>
   );
 }
