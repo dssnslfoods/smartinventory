@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Download, Search, Filter } from 'lucide-react';
 import { useStockOnHand } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency } from '@/utils/format';
@@ -14,6 +14,8 @@ export function StockOnHandPage() {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<string>('stock_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   const { data: stockData, isLoading } = useStockOnHand({
     warehouse: warehouse || undefined,
@@ -43,10 +45,19 @@ export function StockOnHandPage() {
       setSortField(field);
       setSortDir('desc');
     }
+    setPage(0);
   };
 
   const totalValue = sortedData.reduce((sum, s) => sum + Number(s.stock_value), 0);
   const totalItems = sortedData.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safePage   = Math.min(page, totalPages - 1);
+  const pageStart  = safePage * PAGE_SIZE;
+  const pageEnd    = Math.min(pageStart + PAGE_SIZE, totalItems);
+  const pagedData  = sortedData.slice(pageStart, pageEnd);
+
+  // Reset to page 0 whenever the filter/search inputs change.
+  useEffect(() => { setPage(0); }, [warehouse, groupCode, isActive, search]);
 
   const handleExport = () => {
     exportToExcel(sortedData.map(s => ({
@@ -200,7 +211,7 @@ export function StockOnHandPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedData.map((row) => (
+                {pagedData.map((row) => (
                   <tr key={`${row.item_code}-${row.warehouse}`}>
                     <td className="font-medium" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</td>
                     <td style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -226,6 +237,54 @@ export function StockOnHandPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination footer — 50 rows / page */}
+        {totalItems > PAGE_SIZE && (
+          <div
+            className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border-t text-sm"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            <span>
+              แสดง <strong style={{ color: 'var(--text)' }}>{formatNumber(pageStart + 1)}</strong>
+              {' – '}
+              <strong style={{ color: 'var(--text)' }}>{formatNumber(pageEnd)}</strong>
+              {' จาก '}
+              <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong>
+              {' รายการ'}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                disabled={safePage === 0}
+                onClick={() => setPage(0)}
+                className="px-2.5 py-1 rounded-md border text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)' }}
+                title="หน้าแรก"
+              >«</button>
+              <button
+                disabled={safePage === 0}
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                className="px-3 py-1 rounded-md border text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)' }}
+              >‹ ก่อนหน้า</button>
+              <span className="px-3 py-1 text-xs tabular-nums">
+                หน้า <strong style={{ color: 'var(--text)' }}>{safePage + 1}</strong> / {totalPages}
+              </span>
+              <button
+                disabled={safePage >= totalPages - 1}
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                className="px-3 py-1 rounded-md border text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)' }}
+              >ถัดไป ›</button>
+              <button
+                disabled={safePage >= totalPages - 1}
+                onClick={() => setPage(totalPages - 1)}
+                className="px-2.5 py-1 rounded-md border text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)' }}
+                title="หน้าสุดท้าย"
+              >»</button>
+            </div>
           </div>
         )}
       </div>
