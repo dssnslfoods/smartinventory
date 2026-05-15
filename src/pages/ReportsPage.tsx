@@ -1238,20 +1238,13 @@ function TurnoverTab() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Turnover Ratio</p>
           <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
             {summary.avg.toFixed(1)}×
           </p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Annual COGS / Stock Value</p>
-        </div>
-        <div className="card">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Days on Hand</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>
-            {Math.round(summary.avgDoh)}d
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Average across all items</p>
         </div>
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Highest Turnover</p>
