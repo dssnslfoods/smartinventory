@@ -319,18 +319,64 @@ export function StockOnHandPage() {
             </button>
           ))}
           <span className="ml-auto text-xs" style={{ color: 'var(--text-muted)' }}>
-            {totalItems > 0
-              ? <>พบ <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong> รายการ · มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></>
-              : <span>ไม่พบรายการที่ตรงกับ filter</span>}
+            {activeFilterCount === 0
+              ? <>คลังมีทั้งหมด <strong style={{ color: 'var(--text)' }}>{formatNumber(stockData?.length ?? 0)}</strong> รายการ — กรุณาค้นหา/เลือก filter ก่อน</>
+              : totalItems > 0
+                ? <>พบ <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong> รายการ · มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></>
+                : <span style={{ color: '#dc2626' }}>ไม่พบรายการที่ตรงกับ filter</span>}
           </span>
         </div>
       </div>
 
-      {/* Data Table */}
+      {/* Data Table — only rendered after the user filters/searches.
+          With ≈3,800 stock lines, showing the full list by default is noisy
+          and expensive. Prompt the executive to narrow first. */}
       <div className="card p-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : activeFilterCount === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+            <Search size={36} className="opacity-30 mb-3" style={{ color: 'var(--text-muted)' }} />
+            <p className="text-base font-semibold mb-1" style={{ color: 'var(--text)' }}>
+              เริ่มค้นหาหรือเลือก filter
+            </p>
+            <p className="text-sm max-w-md" style={{ color: 'var(--text-muted)' }}>
+              ระบบมีรายการสต็อกทั้งหมด <strong>{formatNumber(stockData?.length ?? 0)}</strong> รายการ
+              — กรุณาใช้ช่องค้นหา หรือเลือก filter ด้านบนเพื่อแสดงผล
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <p className="w-full text-xs mb-1" style={{ color: 'var(--text-muted)' }}>หรือกรองด่วน:</p>
+              <button
+                onClick={() => setValueBucket('1M')}
+                className="px-3 py-1.5 rounded-full text-xs font-medium border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              >
+                💰 มูลค่า &gt; ฿1M
+              </button>
+              <button
+                onClick={() => setValueBucket('10M')}
+                className="px-3 py-1.5 rounded-full text-xs font-medium border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              >
+                🏆 มูลค่า &gt; ฿10M
+              </button>
+              <button
+                onClick={() => setIsActive(true)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              >
+                ✅ Active items
+              </button>
+              <button
+                onClick={handleExport}
+                className="px-3 py-1.5 rounded-full text-xs font-medium border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              >
+                📥 Export ทั้งหมด ({formatNumber(stockData?.length ?? 0)} รายการ)
+              </button>
+            </div>
           </div>
         ) : (
           <div className="table-container" style={{ border: 'none' }}>
