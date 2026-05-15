@@ -11,6 +11,7 @@ import { MovementHistoryPage } from '@/pages/MovementHistoryPage';
 import { AlertsPage } from '@/pages/AlertsPage';
 import { ValuationPage } from '@/pages/ValuationPage';
 import { ReportsPage } from '@/pages/ReportsPage';
+import { LotInventoryPage } from '@/pages/LotInventoryPage';
 import { ImportPage } from '@/pages/admin/ImportPage';
 import { SettingsPage } from '@/pages/admin/SettingsPage';
 import { UsersPage } from '@/pages/admin/UsersPage';
@@ -150,6 +151,7 @@ function App() {
                       <Route path="/alerts"    element={<RequirePermission permission="menu.alerts"><AlertsPage /></RequirePermission>} />
                       <Route path="/valuation" element={<RequirePermission permission="menu.valuation"><ValuationPage /></RequirePermission>} />
                       <Route path="/reports"   element={<RequirePermission permission="menu.reports"><ReportsPage /></RequirePermission>} />
+                      <Route path="/lots"      element={<RequirePermission permission="menu.lots"><LotInventoryPage /></RequirePermission>} />
 
                       <Route path="/procurement/suppliers" element={<RequirePermission permission="menu.procurement.suppliers"><SuppliersPage /></RequirePermission>} />
                       <Route path="/procurement/orders"    element={<RequirePermission permission="menu.procurement.orders"><PurchaseOrdersPage /></RequirePermission>} />

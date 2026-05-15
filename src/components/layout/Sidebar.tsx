@@ -21,6 +21,7 @@ import {
   Info,
   BookOpen,
   Download,
+  Layers,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -52,6 +53,7 @@ const mainMenu: MenuEntry[] = [
   { path: '/alerts',    label: 'Low Stock Alerts',   icon: AlertTriangle,   permission: PERMISSIONS.MENU_ALERTS,   badge: 'critical' },
   { path: '/valuation', label: 'Cost & Valuation',   icon: DollarSign,      permission: PERMISSIONS.MENU_VALUATION },
   { path: '/reports',   label: 'Management Reports', icon: BarChart2,       permission: PERMISSIONS.MENU_REPORTS },
+  { path: '/lots',      label: 'Lot Inventory',      icon: Layers,          permission: PERMISSIONS.MENU_LOTS },
   { type: 'divider' },
   { path: '/procurement/suppliers', label: 'Suppliers',        icon: Building2,    permission: PERMISSIONS.MENU_SUPPLIERS },
   { path: '/procurement/orders',    label: 'Purchase Orders',  icon: ShoppingCart, permission: PERMISSIONS.MENU_ORDERS },

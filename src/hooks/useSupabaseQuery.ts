@@ -8,6 +8,7 @@ import type {
   Warehouse, ItemGroup,
   Supplier, PurchaseOrder, PurchaseOrderLine,
   GoodsInTransit, StockPosition,
+  LotDetailView,
 } from '@/types/database';
 
 // Supabase default max rows = 1,000 — always set an explicit limit above data size.
@@ -645,6 +646,123 @@ export function useTransactionsExport(filters?: {
     enabled: false, // only run when explicitly triggered
   });
 }
+
+// ============ Lots (v_lot_detail) ============
+export function useLotDetail(filters?: {
+  itemCode?: string;
+  warehouse?: string;
+  groupCode?: number;
+  search?: string;
+  snapshotDate?: string;
+  daysRemainingMax?: number;
+  page?: number;
+  pageSize?: number;
+}) {
+  const page     = filters?.page     ?? 0;
+  const pageSize = filters?.pageSize ?? 200;
+  return useQuery({
+    queryKey: ['lotDetail', filters],
+    queryFn: async () => {
+      let query = supabase.from('v_lot_detail').select('*', { count: 'exact' });
+      if (filters?.itemCode)        query = query.eq('item_code',     filters.itemCode);
+      if (filters?.warehouse)       query = query.eq('warehouse',     filters.warehouse);
+      if (filters?.groupCode)       query = query.eq('group_code',    filters.groupCode);
+      if (filters?.snapshotDate)    query = query.eq('snapshot_date', filters.snapshotDate);
+      if (filters?.daysRemainingMax !== undefined)
+                                    query = query.lte('days_remaining', filters.daysRemainingMax);
+      if (filters?.search) {
+        query = query.or(`item_code.ilike.%${filters.search}%,itemname.ilike.%${filters.search}%,batch_num.ilike.%${filters.search}%`);
+      }
+      const from = page * pageSize;
+      const to   = from + pageSize - 1;
+      const { data, error, count } = await query
+        .order('expire_date', { ascending: true, nullsFirst: false })
+        .range(from, to);
+      if (error) throw error;
+      return {
+        data:       (data ?? []) as LotDetailView[],
+        count:      count ?? 0,
+        page,
+        pageSize,
+        totalPages: Math.ceil((count ?? 0) / pageSize),
+      };
+    },
+  });
+}
+
+/** Lots of one item+warehouse — used for the expand-row drilldown */
+export function useLotsForItemWarehouse(itemCode?: string, warehouse?: string, snapshotDate?: string) {
+  return useQuery({
+    queryKey: ['lotDetail.itemWhs', itemCode, warehouse, snapshotDate],
+    enabled: !!itemCode && !!warehouse,
+    queryFn: async () => {
+      let q = supabase.from('v_lot_detail').select('*')
+        .eq('item_code', itemCode!)
+        .eq('warehouse', warehouse!);
+      if (snapshotDate) q = q.eq('snapshot_date', snapshotDate);
+      const { data, error } = await q.order('expire_date', { ascending: true, nullsFirst: false }).limit(500);
+      if (error) throw error;
+      return (data ?? []) as LotDetailView[];
+    },
+  });
+}
+
+/** Lot-level summary per item × warehouse (lot_count + earliest_expire) */
+export function useItemLotSummary(snapshotDate?: string) {
+  return useQuery({
+    queryKey: ['itemLotSummary', snapshotDate],
+    queryFn: async () => {
+      let q = supabase.from('v_item_lot_summary').select('*');
+      if (snapshotDate) q = q.eq('snapshot_date', snapshotDate);
+      const { data, error } = await q.limit(20000);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        item_code: string; warehouse: string; snapshot_date: string;
+        lot_count: number; earliest_expire: string | null; latest_expire: string | null;
+        total_qty: number; total_value: number;
+      }>;
+    },
+  });
+}
+
+/** Latest snapshot_date available in inventory_lots */
+export function useLatestLotSnapshot() {
+  return useQuery({
+    queryKey: ['lotSnapshot.latest'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_lots')
+        .select('snapshot_date')
+        .order('snapshot_date', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0]?.snapshot_date as string | undefined;
+    },
+    staleTime: 60 * 1000,
+  });
+}
+
+/** Aging bucket aggregates */
+export function useLotAging(snapshotDate?: string, filters?: { warehouse?: string; groupName?: string }) {
+  return useQuery({
+    queryKey: ['lotAging', snapshotDate, filters],
+    queryFn: async () => {
+      let q = supabase.from('v_lot_aging').select('*');
+      if (snapshotDate)        q = q.eq('snapshot_date', snapshotDate);
+      if (filters?.warehouse)  q = q.eq('warehouse',     filters.warehouse);
+      if (filters?.groupName)  q = q.eq('group_name',    filters.groupName);
+      const { data, error } = await q.limit(5000);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        snapshot_date: string; group_name: string | null;
+        warehouse: string; whs_name: string;
+        aging_bucket: 'expired'|'0-30'|'31-60'|'61-90'|'91-180'|'180+'|'unknown';
+        lot_count: number; total_qty: number; total_value: number;
+      }>;
+    },
+  });
+}
+
 // ============ System Config ============
 export function useSystemConfig() {
   return useQuery({

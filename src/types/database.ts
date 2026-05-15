@@ -68,6 +68,43 @@ export interface StockThreshold {
   updated_at: string;
 }
 
+/** inventory_lots — lot-level stock snapshot.
+ *  One row per (item × warehouse × batch_num × snapshot_date).
+ *  batch_num typically encodes the receipt timestamp (e.g. "2025.08.15 16:39:59"). */
+export interface InventoryLot {
+  id: number;
+  item_code: string;
+  warehouse: string;
+  batch_num: string;
+  qty: number;
+  amount: number;
+  unit_cost: number;         // generated column = amount / qty
+  in_date: string | null;
+  production_date: string | null;
+  expire_date: string | null;
+  snapshot_date: string;     // YYYY-MM-DD — the as-of date of the snapshot
+  company_id: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined / computed
+  itemname?: string;
+  whs_name?: string;
+  group_name?: string;
+  days_remaining?: number | null;
+}
+
+/** v_lot_detail — lot with joined names + computed days_remaining */
+export interface LotDetailView extends InventoryLot {
+  itemname: string;
+  uom: string;
+  group_code: number;
+  group_name: string;
+  whs_name: string;
+  whs_type: string;
+  days_remaining: number | null;
+  is_active: boolean;
+}
+
 export interface ImportLog {
   id: number;
   file_name: string;

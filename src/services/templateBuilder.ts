@@ -495,7 +495,36 @@ export async function buildBeautifulTemplate(): Promise<void> {
     { dataValidationRows: 1000 },
   );
 
-  // ── 7. Transaction Type Legend (read-only reference) ───────────────────────
+  // ── 7. Lot Inventory (per-lot snapshot — for accurate validity by batch) ───
+  const lotCols: ColumnSpec[] = [
+    { key: 'whs',    header: 'Warehouse',    width: 12, required: true, desc: 'รหัสคลัง',
+      validation: { type: 'list', values: ['FS-RM01','FS-RM02','FS-RM03','FS-RM04','FS-FG01','FS-FG02','FS-FG03','FS-PD01','FS-PD02','FS-PK01','FS-PK02','FS-QC01','FS-QC02','FS-CL01','FS-CO01','FS-WS01','BT-RM02'] },
+      alignment: { horizontal: 'center' } },
+    { key: 'item',   header: 'Item Code',    width: 14, required: true, desc: 'อ้างอิง Items' },
+    { key: 'batch',  header: 'BatchNum Lot', width: 24, required: true, desc: 'รหัส lot จาก SAP (เช่น 2025.08.15 16:39:59)' },
+    { key: 'qty',    header: 'Quantity',     width: 14, desc: 'จำนวนคงเหลือใน lot', numFmt: '#,##0.00', alignment: { horizontal: 'right' } },
+    { key: 'amt',    header: 'Total Amount', width: 16, desc: 'มูลค่ารวมของ lot',    numFmt: '#,##0.00', alignment: { horizontal: 'right' } },
+    { key: 'in',     header: 'InDate',       width: 14, desc: 'วันที่รับเข้าคลัง',    numFmt: 'yyyy-mm-dd', alignment: { horizontal: 'center' } },
+    { key: 'prd',    header: 'PrdDate',      width: 14, desc: 'วันที่ผลิต',           numFmt: 'yyyy-mm-dd', alignment: { horizontal: 'center' } },
+    { key: 'exp',    header: 'ExpDate',      width: 14, desc: 'วันหมดอายุของ lot นี้', numFmt: 'yyyy-mm-dd', alignment: { horizontal: 'center' } },
+    { key: 'to',     header: 'ToDate',       width: 14, required: true, desc: 'วัน snapshot (as-of date)', numFmt: 'yyyy-mm-dd', alignment: { horizontal: 'center' } },
+  ];
+  const lotSamples: any[][] = [
+    ['FS-PK02', 'F21400021', '2025.08.15 16:39:59', 76900, 132268.00,    new Date('2025-08-15'), new Date('2025-08-09'), new Date('2026-08-09'), new Date('2026-03-31')],
+    ['FS-PK02', 'F21400022', '2025.09.25 16:36:29', 15000,  39000.00,    new Date('2025-09-25'), new Date('2025-09-18'), new Date('2026-09-18'), new Date('2026-03-31')],
+    ['FS-FG01', 'F7000400100', '2025.11.19',          12,    697.56,     new Date('2025-11-19'), new Date('2025-11-19'), new Date('2026-11-19'), new Date('2026-03-31')],
+    ['FS-FG01', 'F7000400100', '2025.07.15',           7,    406.91,     new Date('2025-07-15'), new Date('2025-07-15'), new Date('2026-07-15'), new Date('2026-03-31')],
+    ['FS-RM03', 'F10900011',  '2026.02.20',         100,   1500.00,      new Date('2026-02-20'), new Date('2026-02-15'), new Date('2027-02-15'), new Date('2026-03-31')],
+  ];
+  buildDataSheet(
+    wb.addWorksheet('Lot Inventory'),
+    { emoji: '🧾', name: 'Lot Inventory (สต็อกตาม lot)', sub: 'แต่ละ lot มี expire date และต้นทุนของตัวเอง — ใช้สำหรับ VV Matrix แบบละเอียดและ FEFO' },
+    lotCols,
+    lotSamples,
+    { dataValidationRows: 2000 },
+  );
+
+  // ── 8. Transaction Type Legend (read-only reference) ───────────────────────
   const ws = wb.addWorksheet('🔑 Tx Type Legend', { views: [{ showGridLines: false }] });
   ws.mergeCells('A1:D1');
   const ll = ws.getCell('A1');
