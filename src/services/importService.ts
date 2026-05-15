@@ -59,16 +59,22 @@ function parseSheet(
   const name = wb.SheetNames.find(n =>
     sheetNames.some(sn => n.toLowerCase().includes(sn.toLowerCase()))
   );
-  if (!name) return [];
+  if (!name) {
+    console.warn('[parseSheet] no sheet matched', { signals: sheetNames, available: wb.SheetNames });
+    return [];
+  }
   const sheet = wb.Sheets[name];
 
   // Read everything as arrays so we can locate the header ourselves
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     raw: true,
-    defval: null,
+    blankrows: false,
   });
-  if (!rows.length) return [];
+  if (!rows.length) {
+    console.warn('[parseSheet] empty sheet', name);
+    return [];
+  }
 
   // Locate the header row: first row in which one of the signals appears
   let headerIdx = -1;
@@ -79,7 +85,11 @@ function parseSheet(
       break;
     }
   }
-  if (headerIdx === -1) return [];
+  if (headerIdx === -1) {
+    console.warn('[parseSheet] header not found', name, 'looking for', headerSignals,
+      'first row sample:', (rows[0] ?? []).slice(0, 6));
+    return [];
+  }
 
   const rawHeaders = rows[headerIdx] ?? [];
   const headers: string[] = rawHeaders.map((h, idx) =>
@@ -121,6 +131,7 @@ function parseSheet(
     obj.__row = row;
     out.push(obj);
   }
+  console.info(`[parseSheet] ${name}: headerRow=${headerIdx + 1} dataStart=${dataStart + 1} rows=${out.length}`);
   return out;
 }
 
