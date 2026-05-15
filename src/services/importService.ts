@@ -261,11 +261,13 @@ export const parseComprehensiveExcel = async (
             doc_date: (() => {
               const d = getVal(row, ['Date', 'DocDate']);
               if (d instanceof Date) {
-                // Use local date components so a Thai-local 2026-03-31 doesn't
-                // round-trip to 2026-03-30 via UTC toISOString().
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
+                // Same xlsx rounding quirk as the lot dateLike helper: shift
+                // +12h then take local components so "almost-midnight" Excel
+                // dates round to the intended day.
+                const shifted = new Date(d.getTime() + 12 * 3600 * 1000);
+                const y = shifted.getFullYear();
+                const m = String(shifted.getMonth() + 1).padStart(2, '0');
+                const day = String(shifted.getDate()).padStart(2, '0');
                 return `${y}-${m}-${day}`;
               }
               return String(d ?? '').split('T')[0].split(' ')[0];
@@ -311,12 +313,15 @@ export const parseComprehensiveExcel = async (
           const dateLike = (v: unknown): string | null => {
             if (!v) return null;
             if (v instanceof Date) {
-              // Use LOCAL date components — xlsx parses cell dates as local
-              // midnight, and toISOString() converts to UTC which drifts dates
-              // back by 1 day in any positive-offset timezone (e.g. Bangkok).
-              const y = v.getFullYear();
-              const m = String(v.getMonth() + 1).padStart(2, '0');
-              const day = String(v.getDate()).padStart(2, '0');
+              // xlsx has a known rounding quirk: an Excel cell "2026-03-31
+              // 00:00:00" comes out as 2026-03-30T16:59:56Z, i.e. 4 seconds
+              // BEFORE midnight in Bangkok local time. getDate() then returns
+              // the wrong day. Shift forward by 12h so any "almost midnight"
+              // value rounds up cleanly, then take local components.
+              const d = new Date(v.getTime() + 12 * 3600 * 1000);
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              const day = String(d.getDate()).padStart(2, '0');
               return `${y}-${m}-${day}`;
             }
             const s = String(v).trim();
