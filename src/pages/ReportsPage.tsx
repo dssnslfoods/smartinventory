@@ -1,15 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Target, RefreshCw, Download, Filter, Clock, Layers, Search, X,
+  TrendingUp, TrendingDown, Minus,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend,
   Scatter, ScatterChart, ResponsiveContainer,
 } from 'recharts';
 import {
   useStockOnHand, useSlowMoving, useInventoryTurnover,
   useSystemConfig, useLotDetail, useLatestLotSnapshot,
+  useMonthlySummary, useMonthlyTotal,
 } from '@/hooks/useSupabaseQuery';
+import type { MonthlySummaryRow } from '@/hooks/useSupabaseQuery';
 import { ITEM_GROUPS, WAREHOUSES } from '@/types/database';
 import { formatNumber, formatDate, formatCompact } from '@/utils/format';
 import { exportToExcel } from '@/utils/export';
@@ -34,6 +37,7 @@ const tooltipStyle = {
 // ── Tab definitions ────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'vv',       label: 'VV Matrix',          icon: Target },
+  { id: 'trends',   label: 'Trends & Compare',    icon: TrendingUp },
   { id: 'slow',     label: 'Slow Moving',         icon: Clock },
   { id: 'turnover', label: 'Inventory Turnover',  icon: RefreshCw },
   { id: 'fefo',     label: 'FEFO Pick List',      icon: Layers },
@@ -102,6 +106,7 @@ export function ReportsPage() {
       </div>
 
       {activeTab === 'vv'       && <VVMatrixTab />}
+      {activeTab === 'trends'   && <TrendsTab />}
       {activeTab === 'slow'     && <SlowMovingTab />}
       {activeTab === 'turnover' && <TurnoverTab />}
       {activeTab === 'fefo'     && <FEFOPickListTab />}
@@ -1875,5 +1880,461 @@ function FEFOPickListTab() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Trends & Compare Tab (MoM / QoQ / YoY analysis) ──────────────────────────
+//
+// Three layers of insight:
+//   1) Headline KPI cards comparing the selected month vs a baseline period
+//      (prior month / prior quarter / same month last year).
+//   2) 24-month trend chart: In, Out, and Net stacked side-by-side so seasonal
+//      patterns are visually obvious.
+//   3) Group-level comparison table — top movers and stagnants per group with
+//      delta % vs the baseline.
+
+type ComparePeriod = 'mom' | 'qoq' | 'yoy';
+
+function TrendsTab() {
+  const { data: monthlyTotal = [], isLoading: loadingT } = useMonthlyTotal(36);
+  const { data: monthlySummary = [], isLoading: loadingS } = useMonthlySummary(36);
+  const isLoading = loadingT || loadingS;
+
+  // Available months (descending) for the selector
+  const allMonths = useMemo(
+    () => monthlyTotal.map(r => r.month).sort((a, b) => b.localeCompare(a)),
+    [monthlyTotal],
+  );
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [comparePeriod, setComparePeriod] = useState<ComparePeriod>('yoy');
+
+  // Default selection to the latest month available once data loads
+  useEffect(() => {
+    if (!selectedMonth && allMonths.length > 0) setSelectedMonth(allMonths[0]);
+  }, [allMonths, selectedMonth]);
+
+  // Compute the baseline month string given the selected month + period
+  const baselineMonth = useMemo(() => {
+    if (!selectedMonth) return '';
+    const d = new Date(selectedMonth);
+    if (comparePeriod === 'mom') d.setMonth(d.getMonth() - 1);
+    else if (comparePeriod === 'qoq') d.setMonth(d.getMonth() - 3);
+    else d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  }, [selectedMonth, comparePeriod]);
+
+  const currentRow  = monthlyTotal.find(r => r.month === selectedMonth);
+  const baselineRow = monthlyTotal.find(r => r.month === baselineMonth);
+
+  // Group-level current vs baseline
+  const groupCompare = useMemo(() => {
+    const cur = new Map<string, MonthlySummaryRow>();
+    const base = new Map<string, MonthlySummaryRow>();
+    for (const r of monthlySummary) {
+      if (r.month === selectedMonth) cur.set(r.group_name, r);
+      if (r.month === baselineMonth) base.set(r.group_name, r);
+    }
+    const groups = new Set([...cur.keys(), ...base.keys()]);
+    return Array.from(groups).map(name => {
+      const c = cur.get(name);
+      const b = base.get(name);
+      const cIn  = Number(c?.in_value  ?? 0);
+      const cOut = Number(c?.out_value ?? 0);
+      const bIn  = Number(b?.in_value  ?? 0);
+      const bOut = Number(b?.out_value ?? 0);
+      return {
+        group_name: name,
+        cur_in: cIn, cur_out: cOut, cur_net: cIn - cOut, cur_tx: Number(c?.tx_count ?? 0),
+        bas_in: bIn, bas_out: bOut, bas_net: bIn - bOut, bas_tx: Number(b?.tx_count ?? 0),
+        delta_out_pct: bOut === 0 ? null : ((cOut - bOut) / bOut) * 100,
+        delta_in_pct:  bIn  === 0 ? null : ((cIn  - bIn)  / bIn) * 100,
+        delta_tx_pct:  (b?.tx_count ?? 0) === 0 ? null
+          : ((Number(c?.tx_count ?? 0) - Number(b?.tx_count ?? 0)) / Number(b?.tx_count ?? 1)) * 100,
+      };
+    }).sort((a, b) => b.cur_out - a.cur_out);
+  }, [monthlySummary, selectedMonth, baselineMonth]);
+
+  // Trailing 24-month trend for the chart, anchored to the selected month
+  const trendData = useMemo(() => {
+    if (!selectedMonth) return [];
+    const sel = new Date(selectedMonth);
+    const min = new Date(sel);
+    min.setMonth(min.getMonth() - 23);
+    return monthlyTotal
+      .filter(r => r.month >= min.toISOString().slice(0, 10) && r.month <= selectedMonth)
+      .map(r => ({
+        month: r.month.slice(0, 7), // YYYY-MM
+        in_value: Number(r.in_value) / 1e6,
+        out_value: Number(r.out_value) / 1e6,
+        net: (Number(r.in_value) - Number(r.out_value)) / 1e6,
+      }));
+  }, [monthlyTotal, selectedMonth]);
+
+  // Year-over-year anchored at selected month — same month each of last 3 years
+  const yoyTrail = useMemo(() => {
+    if (!selectedMonth) return [];
+    const sel = new Date(selectedMonth);
+    const result: Array<{ year: number; in_value: number; out_value: number; net: number; tx_count: number }> = [];
+    for (let y = 2; y >= 0; y--) {
+      const target = new Date(sel);
+      target.setFullYear(sel.getFullYear() - y);
+      const key = target.toISOString().slice(0, 10);
+      const r = monthlyTotal.find(x => x.month === key);
+      result.push({
+        year: target.getFullYear(),
+        in_value:  Number(r?.in_value  ?? 0),
+        out_value: Number(r?.out_value ?? 0),
+        net:       Number(r?.in_value  ?? 0) - Number(r?.out_value ?? 0),
+        tx_count:  Number(r?.tx_count  ?? 0),
+      });
+    }
+    return result;
+  }, [monthlyTotal, selectedMonth]);
+
+  // Detect anomalies — months whose value > 1.5× the trailing 12-month mean
+  const anomalies = useMemo(() => {
+    if (trendData.length < 6) return [];
+    const lastSix = trendData.slice(-6);
+    const meanOut = lastSix.reduce((s, r) => s + r.out_value, 0) / lastSix.length;
+    return lastSix.filter(r => Math.abs(r.out_value - meanOut) > meanOut * 0.5)
+      .map(r => ({ month: r.month, out_value: r.out_value, deviation: ((r.out_value - meanOut) / meanOut) * 100 }));
+  }, [trendData]);
+
+  const handleExport = () => {
+    if (!selectedMonth) return;
+    const rows = groupCompare.map(g => ({
+      'Group':                g.group_name,
+      'Current Month':        selectedMonth,
+      'Baseline Month':       baselineMonth,
+      'Current In (฿)':       g.cur_in,
+      'Baseline In (฿)':      g.bas_in,
+      'In Delta %':           g.delta_in_pct?.toFixed(1) ?? 'N/A',
+      'Current Out (฿)':      g.cur_out,
+      'Baseline Out (฿)':     g.bas_out,
+      'Out Delta %':          g.delta_out_pct?.toFixed(1) ?? 'N/A',
+      'Current Net (฿)':      g.cur_net,
+      'Baseline Net (฿)':     g.bas_net,
+      'Current Tx Count':     g.cur_tx,
+      'Baseline Tx Count':    g.bas_tx,
+      'Tx Delta %':           g.delta_tx_pct?.toFixed(1) ?? 'N/A',
+    }));
+    exportToExcel(rows, `Trends_${comparePeriod.toUpperCase()}_${selectedMonth.slice(0,7)}`);
+  };
+
+  const periodLabel = comparePeriod === 'mom' ? 'Month-over-Month'
+                    : comparePeriod === 'qoq' ? 'Quarter-over-Quarter'
+                    : 'Year-over-Year';
+
+  if (isLoading) {
+    return <div className="card text-center py-20" style={{ color: 'var(--text-muted)' }}>กำลังโหลดข้อมูล trend...</div>;
+  }
+  if (monthlyTotal.length === 0) {
+    return (
+      <div className="card text-center py-20" style={{ color: 'var(--text-muted)' }}>
+        <TrendingUp size={36} className="mx-auto mb-3 opacity-30" />
+        <p>ยังไม่มีข้อมูล Transactions — Import sheet "Transactions" ก่อน</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ── Period selector ── */}
+      <div className="card">
+        <div className="flex flex-wrap items-center gap-3">
+          <Filter size={16} style={{ color: 'var(--text-muted)' }} />
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>เปรียบเทียบช่วงเวลา</span>
+
+          <select
+            className="select"
+            value={selectedMonth}
+            onChange={e => setSelectedMonth(e.target.value)}
+            title="เลือกเดือนปัจจุบัน"
+          >
+            {allMonths.map(m => (
+              <option key={m} value={m}>{m.slice(0, 7)}</option>
+            ))}
+          </select>
+
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>vs</span>
+
+          <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+            {([
+              { id: 'mom', label: 'MoM' },
+              { id: 'qoq', label: 'QoQ' },
+              { id: 'yoy', label: 'YoY' },
+            ] as { id: ComparePeriod; label: string }[]).map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setComparePeriod(id)}
+                className="px-3 py-1.5 text-xs font-medium transition-colors"
+                style={comparePeriod === id
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                  : { color: 'var(--text-muted)' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+            {periodLabel} — เทียบ {selectedMonth.slice(0, 7)} กับ {baselineMonth.slice(0, 7)}
+          </span>
+
+          <button onClick={handleExport} className="btn btn-secondary ml-auto" disabled={!selectedMonth}>
+            <Download size={16} /> Export
+          </button>
+        </div>
+      </div>
+
+      {/* ── KPI delta cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <DeltaCard
+          label="Out Value (มูลค่าจ่ายออก)"
+          current={Number(currentRow?.out_value ?? 0)}
+          baseline={Number(baselineRow?.out_value ?? 0)}
+          formatFn={v => `฿${formatCompact(v)}`}
+          biggerIsBetter
+        />
+        <DeltaCard
+          label="In Value (มูลค่ารับเข้า)"
+          current={Number(currentRow?.in_value ?? 0)}
+          baseline={Number(baselineRow?.in_value ?? 0)}
+          formatFn={v => `฿${formatCompact(v)}`}
+          biggerIsBetter
+        />
+        <DeltaCard
+          label="Net (รับ − จ่าย)"
+          current={Number(currentRow?.in_value ?? 0) - Number(currentRow?.out_value ?? 0)}
+          baseline={Number(baselineRow?.in_value ?? 0) - Number(baselineRow?.out_value ?? 0)}
+          formatFn={v => `฿${formatCompact(v)}`}
+          biggerIsBetter={false} // closer to zero is healthier for inventory
+        />
+        <DeltaCard
+          label="Transactions"
+          current={Number(currentRow?.tx_count ?? 0)}
+          baseline={Number(baselineRow?.tx_count ?? 0)}
+          formatFn={v => formatNumber(v)}
+          biggerIsBetter
+        />
+      </div>
+
+      {/* ── 24-month trend chart ── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+            แนวโน้ม 24 เดือนล่าสุด (มูลค่า ฿ ล้านบาท)
+          </h4>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            ดูแพทเทิร์นและฤดูกาล
+          </span>
+        </div>
+        <div style={{ height: 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={trendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} unit="M" />
+              <Tooltip
+                {...tooltipStyle}
+                formatter={(v) => `฿${(Number(v) ?? 0).toFixed(2)}M`}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="in_value"  name="In"  fill="#2E7D32" />
+              <Bar dataKey="out_value" name="Out" fill="#C62828" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* ── 3-year YoY anchor table ── */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+          <RefreshCw size={15} style={{ color: 'var(--text-muted)' }} />
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+            Year-over-Year — เดือนเดียวกัน 3 ปีย้อนหลัง
+          </h4>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ color: 'var(--text-muted)' }}>
+              <th className="px-4 py-2 text-left text-xs font-semibold uppercase">เดือน</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">In</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Out</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Net</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Tx</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Out YoY%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yoyTrail.map((r, idx) => {
+              const prev = yoyTrail[idx - 1];
+              const yoyPct = prev && prev.out_value > 0
+                ? ((r.out_value - prev.out_value) / prev.out_value) * 100
+                : null;
+              return (
+                <tr key={r.year} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <td className="px-4 py-2 text-xs font-mono">
+                    {selectedMonth ? `${selectedMonth.slice(5,7)}/${r.year}` : r.year}
+                  </td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">฿{formatCompact(r.in_value)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">฿{formatCompact(r.out_value)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums font-semibold">฿{formatCompact(r.net)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">{formatNumber(r.tx_count)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">
+                    {yoyPct == null
+                      ? <span style={{ color: 'var(--text-muted)' }}>—</span>
+                      : <DeltaPill pct={yoyPct} />
+                    }
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Group-level comparison table ── */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+          <Layers size={15} style={{ color: 'var(--text-muted)' }} />
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+            เปรียบเทียบรายกลุ่ม ({periodLabel})
+          </h4>
+          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>
+            เรียงตาม Out Value
+          </span>
+        </div>
+        <div className="table-container" style={{ border: 'none' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: 'var(--text-muted)' }}>
+                <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Group</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Out (Current)</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Out (Baseline)</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Out Δ%</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">In (Current)</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">In Δ%</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Tx Δ%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupCompare.map(g => (
+                <tr key={g.group_name} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <td className="px-4 py-2 text-xs font-medium">{g.group_name}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">฿{formatCompact(g.cur_out)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                    ฿{formatCompact(g.bas_out)}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {g.delta_out_pct == null
+                      ? <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                      : <DeltaPill pct={g.delta_out_pct} />
+                    }
+                  </td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">฿{formatCompact(g.cur_in)}</td>
+                  <td className="px-4 py-2 text-right">
+                    {g.delta_in_pct == null
+                      ? <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                      : <DeltaPill pct={g.delta_in_pct} />
+                    }
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {g.delta_tx_pct == null
+                      ? <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                      : <DeltaPill pct={g.delta_tx_pct} />
+                    }
+                  </td>
+                </tr>
+              ))}
+              {groupCompare.length === 0 && (
+                <tr><td colSpan={7} className="text-center py-12 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  ไม่มีข้อมูลในเดือนที่เลือก
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Anomaly flag ── */}
+      {anomalies.length > 0 && (
+        <div className="card border-l-4" style={{ borderLeftColor: '#d97706', backgroundColor: 'rgba(251,191,36,0.06)' }}>
+          <div className="flex items-start gap-3">
+            <span className="text-lg">⚡</span>
+            <div className="flex-1">
+              <h4 className="text-sm font-semibold mb-1" style={{ color: '#92400e' }}>
+                Anomaly Detected — เดือนที่ Out Value เบี่ยงเบนมาก
+              </h4>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                เดือนที่ Out Value เบี่ยงเบนเกิน ±50% จากค่าเฉลี่ย 6 เดือนล่าสุด — อาจมีเหตุการณ์พิเศษ (โปรโมชั่น, ปิดงวด, สินค้าผิดปกติ)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {anomalies.map(a => (
+                  <span key={a.month} className="text-xs px-2.5 py-1 rounded-full font-medium"
+                    style={{ backgroundColor: 'rgba(217,119,6,0.12)', color: '#92400e' }}>
+                    {a.month}: ฿{a.out_value.toFixed(1)}M ({a.deviation > 0 ? '+' : ''}{a.deviation.toFixed(0)}%)
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Reusable delta widgets ──────────────────────────────────────────────────
+
+function DeltaCard({
+  label, current, baseline, formatFn, biggerIsBetter,
+}: {
+  label: string;
+  current: number;
+  baseline: number;
+  formatFn: (n: number) => string;
+  biggerIsBetter: boolean;
+}) {
+  const delta = current - baseline;
+  const pct = baseline === 0 ? null : (delta / Math.abs(baseline)) * 100;
+  const positive = delta > 0;
+  const flat = Math.abs(delta) < 0.0001;
+  const goodDirection = biggerIsBetter ? positive : !positive;
+  const color = flat ? '#6b7280' : goodDirection ? '#16a34a' : '#dc2626';
+  const Arrow = flat ? Minus : positive ? TrendingUp : TrendingDown;
+
+  return (
+    <div className="card">
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</p>
+      <p className="text-xl font-bold tabular-nums mt-1" style={{ color: 'var(--text)' }}>
+        {formatFn(current)}
+      </p>
+      <div className="flex items-center gap-1.5 text-xs mt-1.5" style={{ color }}>
+        <Arrow size={14} />
+        {pct == null ? (
+          <span>—</span>
+        ) : (
+          <>
+            <span className="font-semibold tabular-nums">{positive ? '+' : ''}{pct.toFixed(1)}%</span>
+            <span style={{ color: 'var(--text-muted)' }}>vs {formatFn(baseline)}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeltaPill({ pct }: { pct: number }) {
+  const positive = pct > 0;
+  const flat = Math.abs(pct) < 0.1;
+  const bg = flat ? 'rgba(107,114,128,0.12)' : positive ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.12)';
+  const fg = flat ? '#6b7280'              : positive ? '#16a34a'              : '#dc2626';
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold tabular-nums"
+      style={{ backgroundColor: bg, color: fg }}>
+      {flat ? '—' : positive ? '↑' : '↓'}
+      {flat ? '' : `${positive ? '+' : ''}${pct.toFixed(1)}%`}
+    </span>
   );
 }
