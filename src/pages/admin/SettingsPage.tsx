@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Trash2, Plus, Clock, Check, Info, Target, RotateCcw } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
+import { PasswordConfirmModal } from '@/components/PasswordConfirmModal';
 import { useThresholds, useSystemConfig, useUpdateSystemConfig, useItemGroups } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatDateTime } from '@/utils/format';
@@ -206,10 +207,10 @@ export function SettingsPage() {
     queryClient.invalidateQueries({ queryKey: ['stockAlerts'] });
   };
 
-  const handleClearAllData = async () => {
-    if (!confirm('Are you sure? This will delete ALL inventory data. This cannot be undone.')) return;
-    if (!confirm('This is your final confirmation. ALL data will be permanently deleted.')) return;
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  const performClearAllData = async () => {
+    await supabase.from('inventory_lots').delete().neq('id', 0);
     await supabase.from('inventory_transactions').delete().neq('id', 0);
     await supabase.from('stock_thresholds').delete().neq('id', 0);
     await supabase.from('items').delete().neq('item_code', '');
@@ -855,10 +856,28 @@ export function SettingsPage() {
         <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
           Clear all imported data. This action cannot be undone.
         </p>
-        <button onClick={handleClearAllData} className="btn btn-danger">
+        <button onClick={() => setShowClearConfirm(true)} className="btn btn-danger">
           <Trash2 size={16} /> Clear All Data
         </button>
       </div>
+
+      {showClearConfirm && (
+        <PasswordConfirmModal
+          title="ล้างฐานข้อมูลทั้งหมด"
+          message="การล้างข้อมูลนี้จะลบทุกอย่างและไม่สามารถย้อนคืนได้"
+          consequences={[
+            'Inventory Lots — สต็อกต่อ lot ทั้งหมด',
+            'Transactions — การเคลื่อนไหวทุกรายการ',
+            'Stock Thresholds — Min/ROP/Max',
+            'Items — รายการสินค้าทั้งหมด',
+            'Last sync timestamp จะถูก reset',
+          ]}
+          typeToConfirm="CLEAR ALL"
+          confirmLabel="ลบทั้งหมดถาวร"
+          onConfirm={performClearAllData}
+          onClose={() => setShowClearConfirm(false)}
+        />
+      )}
     </div>
   );
 }

@@ -14,7 +14,8 @@ import {
 } from '@/services/importService';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
-import type { 
+import { PasswordConfirmModal } from '@/components/PasswordConfirmModal';
+import type {
   SheetConfigKey,
   ImportState
 } from '@/services/importService';
@@ -107,8 +108,9 @@ export function ImportPage() {
     }
   };
 
-  const handleResetAll = async () => {
-    if (!window.confirm('⚠️ คำเตือน: จะล้างข้อมูลทั้งหมดในระบบ ไม่สามารถย้อนคืนได้ ยืนยันหรือไม่?')) return;
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  const performResetAll = async () => {
     setImporting(true);
     try {
       await supabase.rpc('clear_all_data');
@@ -118,7 +120,7 @@ export function ImportPage() {
       await supabase.from('items').delete().neq('item_code', '');
       await supabase.from('item_groups').delete().neq('group_code', 0);
       await supabase.from('warehouses').delete().neq('code', '');
-      
+
       queryClient.clear();
       await queryClient.refetchQueries();
       setFile(null); setImportState(null); refetchLogs();
@@ -319,12 +321,31 @@ export function ImportPage() {
                    <p className="font-medium text-sm text-red-900">ล้างฐานข้อมูลระบบทั้งหมด (Clear All Database)</p>
                    <p className="text-xs text-red-700 mt-0.5">ลบรหัสและประวัติทั้งหมดเพื่อเริ่มโปรเจกต์ใหม่</p>
                  </div>
-                 <button onClick={handleResetAll} className="btn bg-white border-red-300 text-red-600 hover:bg-red-100">Clear All Data</button>
+                 <button onClick={() => setShowClearConfirm(true)} className="btn bg-white border-red-300 text-red-600 hover:bg-red-100">Clear All Data</button>
                </div>
             </div>
           )}
         </div>
       </div>
+
+      {showClearConfirm && (
+        <PasswordConfirmModal
+          title="ล้างฐานข้อมูลทั้งหมด"
+          message="การล้างข้อมูลนี้จะลบทุกอย่างและไม่สามารถย้อนคืนได้"
+          consequences={[
+            'Inventory Lots — สต็อกต่อ lot ทั้งหมด',
+            'Transactions — การเคลื่อนไหวทุกรายการ',
+            'Stock Thresholds — Min/ROP/Max',
+            'Items — รายการสินค้าทั้งหมด',
+            'Item Groups — กลุ่มสินค้า',
+            'Warehouses — รหัสคลังสินค้า',
+          ]}
+          typeToConfirm="CLEAR ALL"
+          confirmLabel="ลบทั้งหมดถาวร"
+          onConfirm={performResetAll}
+          onClose={() => setShowClearConfirm(false)}
+        />
+      )}
     </div>
   );
 }
