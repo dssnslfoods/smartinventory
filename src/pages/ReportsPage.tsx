@@ -1375,6 +1375,11 @@ function FEFOPickListTab() {
   const [search, setSearch]       = useState('');
   const [fsCategory, setFsCategory] = useState('');
   const [lotCountFilter, setLotCountFilter] = useState<'all' | '1' | '2-3' | '4-10' | '10+'>('all');
+  // Bucket filter — clicking an Aging Matrix row sets one of these keys.
+  // null = no bucket filter (matrix shows totals; table shows all rows).
+  type BucketKey = 'expired' | '0-30' | '31-60' | '61-90' | '91-180' | '180+' | 'unknown';
+  const [bucketFilter, setBucketFilter] = useState<BucketKey | null>(null);
+  // Separate "Days Left ≤ N" quick-chip filter (cumulative cap). Stacks with bucketFilter.
   const [daysMax, setDaysMax]     = useState<number | undefined>();
   const [minValue, setMinValue]   = useState<string>('');
   const [hasExpired, setHasExpired] = useState<boolean>(false);
@@ -1443,6 +1448,21 @@ function FEFOPickListTab() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [minValue]);
 
+  // Map bucket key → predicate for a single lot's days_remaining.
+  // Used by both bucket filter and Aging Matrix so the two stay in sync.
+  const matchBucket = (d: number | null, key: BucketKey): boolean => {
+    if (key === 'unknown') return d == null;
+    if (d == null) return false;
+    switch (key) {
+      case 'expired':  return d < 0;
+      case '0-30':     return d >= 0   && d <= 30;
+      case '31-60':    return d >= 31  && d <= 60;
+      case '61-90':    return d >= 61  && d <= 90;
+      case '91-180':   return d >= 91  && d <= 180;
+      case '180+':     return d > 180;
+    }
+  };
+
   // Apply filters + sort
   const grouped = useMemo(() => {
     const lotCountMatch = (n: number) => {
@@ -1458,6 +1478,12 @@ function FEFOPickListTab() {
       if (!lotCountMatch(g.lots.length)) return false;
       if (fsCategory && g.fs_category !== fsCategory) return false;
       if (hasExpired && !g.has_expired) return false;
+      // Bucket filter — keep groups that have at least one lot in the selected bucket.
+      if (bucketFilter !== null) {
+        const hit = g.lots.some(l => matchBucket(l.days_remaining, bucketFilter));
+        if (!hit) return false;
+      }
+      // Days Left ≤ N quick-chip filter (cumulative cap by earliest expiry).
       if (daysMax !== undefined) {
         if (g.earliest_days == null) return false;
         if (g.earliest_days > daysMax) return false;
@@ -1488,9 +1514,12 @@ function FEFOPickListTab() {
       });
     }
     return filtered;
-  }, [groupedAll, lotCountFilter, fsCategory, hasExpired, daysMax, minValueNum, search, sortBy]);
+  }, [groupedAll, lotCountFilter, fsCategory, hasExpired, bucketFilter, daysMax, minValueNum, search, sortBy]);
 
   // ── Aging Matrix: bucket × stats (Items / Lots / Value) ──
+  // IMPORTANT: derive from groupedAll so the matrix stays stable as the user
+  // clicks rows. Otherwise the matrix would collapse to the filtered subset
+  // and the user would see other buckets "disappear" — confusing.
   const agingMatrix = useMemo(() => {
     type Bucket = 'expired' | '0-30' | '31-60' | '61-90' | '91-180' | '180+' | 'unknown';
     const order: Bucket[] = ['expired', '0-30', '31-60', '61-90', '91-180', '180+', 'unknown'];
@@ -1506,7 +1535,7 @@ function FEFOPickListTab() {
       order.map(b => [b, { items: new Set<string>(), lots: 0, value: 0, qty: 0 }])
     ) as any;
 
-    for (const g of grouped) {
+    for (const g of groupedAll) {
       for (const l of g.lots) {
         const d = l.days_remaining;
         const b: Bucket =
@@ -1531,7 +1560,13 @@ function FEFOPickListTab() {
       value:  stats[b].value,
       qty:    stats[b].qty,
     }));
-  }, [grouped]);
+  }, [groupedAll]);
+
+  // Matrix totals (stable — for share %)
+  const matrixTotalValue = useMemo(
+    () => agingMatrix.reduce((s, r) => s + r.value, 0),
+    [agingMatrix],
+  );
 
   // ── KPI Summary ──
   const kpi = useMemo(() => {
@@ -1577,13 +1612,14 @@ function FEFOPickListTab() {
 
   const resetFilters = () => {
     setWarehouse(''); setGroupCode(undefined); setSearch(''); setFsCategory('');
-    setLotCountFilter('all'); setDaysMax(undefined); setMinValue(''); setHasExpired(false);
-    setSortBy('fefo');
+    setLotCountFilter('all'); setBucketFilter(null); setDaysMax(undefined);
+    setMinValue(''); setHasExpired(false); setSortBy('fefo');
   };
 
   const activeFilterCount = [
     warehouse, groupCode, search, fsCategory,
     lotCountFilter !== 'all' ? '1' : '',
+    bucketFilter !== null ? '1' : '',
     daysMax !== undefined ? '1' : '',
     minValueNum != null ? '1' : '',
     hasExpired ? '1' : '',
@@ -1638,7 +1674,16 @@ function FEFOPickListTab() {
         <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
           <Layers size={15} style={{ color: 'var(--text-muted)' }} />
           <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Aging Matrix</h4>
-          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>คลิกแถวเพื่อกรองรายการตามช่วงนั้น</span>
+          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>คลิกแถวเพื่อกรอง <strong>เฉพาะช่วงนั้น</strong> — คลิกซ้ำเพื่อยกเลิก</span>
+          {bucketFilter !== null && (
+            <button
+              onClick={() => setBucketFilter(null)}
+              className="ml-auto text-xs px-2.5 py-1 rounded-full border hover:bg-[var(--bg-card)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            >
+              ล้างฟิลเตอร์ช่วง
+            </button>
+          )}
         </div>
         <table className="w-full text-sm">
           <thead>
@@ -1652,25 +1697,33 @@ function FEFOPickListTab() {
           </thead>
           <tbody>
             {agingMatrix.map(row => {
-              const totalValue = kpi.totalValue || 1;
+              const totalValue = matrixTotalValue || 1;
               const share = (row.value / totalValue) * 100;
-              const dMax =
-                row.key === 'expired' ? 0 :
-                row.key === '0-30'    ? 30 :
-                row.key === '31-60'   ? 60 :
-                row.key === '61-90'   ? 90 :
-                row.key === '91-180'  ? 180 : undefined;
+              const isActive = bucketFilter === row.key;
+              const isDimmed = bucketFilter !== null && !isActive;
               return (
                 <tr
                   key={row.key}
-                  onClick={() => setDaysMax(dMax)}
-                  className="border-t cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
-                  style={{ borderColor: 'var(--border)', opacity: row.items === 0 ? 0.45 : 1 }}
+                  onClick={() => setBucketFilter(prev => prev === row.key ? null : (row.key as BucketKey))}
+                  className="border-t cursor-pointer transition-colors"
+                  style={{
+                    borderColor: 'var(--border)',
+                    opacity: row.items === 0 ? 0.45 : (isDimmed ? 0.55 : 1),
+                    backgroundColor: isActive ? 'var(--bg-alt)' : undefined,
+                    borderLeft: isActive ? `3px solid ${row.color}` : '3px solid transparent',
+                  }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--bg-alt)'; }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = ''; }}
                 >
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: row.color }} />
                       <span className="text-xs font-medium" style={{ color: 'var(--text)' }}>{row.label}</span>
+                      {isActive && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: row.color, color: 'white' }}>
+                          กรองอยู่
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-right text-xs tabular-nums">{formatNumber(row.items)}</td>
