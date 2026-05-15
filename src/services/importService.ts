@@ -249,7 +249,7 @@ export const parseComprehensiveExcel = async (
           };
         }).filter(Boolean) as any[];
 
-        const inventory_transactions = parseSheet(wb,
+        const inventory_transactions_raw = parseSheet(wb,
           ['Transactions', 'Movement', 'dbo_OIMN'],
           ['Transaction No', 'TransNum', 'Date'],
         ).map(row => {
@@ -260,7 +260,14 @@ export const parseComprehensiveExcel = async (
             trans_num: Number(transNum),
             doc_date: (() => {
               const d = getVal(row, ['Date', 'DocDate']);
-              if (d instanceof Date) return d.toISOString().split('T')[0];
+              if (d instanceof Date) {
+                // Use local date components so a Thai-local 2026-03-31 doesn't
+                // round-trip to 2026-03-30 via UTC toISOString().
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+              }
               return String(d ?? '').split('T')[0].split(' ')[0];
             })(),
             trans_type:   Number(getVal(row, ['Tx Type', 'TransType']) ?? 0),
@@ -275,6 +282,21 @@ export const parseComprehensiveExcel = async (
           };
         }).filter(Boolean) as any[];
 
+        // Dedupe by the unique key (trans_num, item_code, doc_line_num) — keep last.
+        // The master file can contain duplicate rows for the same line which would
+        // crash an atomic batch insert; doing it in memory keeps the import going.
+        const txnDedupMap = new Map<string, any>();
+        let txnDupCount = 0;
+        for (const t of inventory_transactions_raw) {
+          const k = `${t.trans_num}|${t.item_code}|${t.doc_line_num}`;
+          if (txnDedupMap.has(k)) txnDupCount++;
+          txnDedupMap.set(k, t);
+        }
+        if (txnDupCount > 0) {
+          console.warn(`[transactions] deduped ${txnDupCount} duplicate rows on (trans_num,item_code,doc_line_num)`);
+        }
+        const inventory_transactions = Array.from(txnDedupMap.values());
+
         // ── Inventory Lots ──
         // Match sheets named "Lot", "Lots", or "lot_คงเหลือ" (case-insensitive substring).
         // The NSL lot sheet has the header on row 1 directly, no banner/description rows.
@@ -288,7 +310,15 @@ export const parseComprehensiveExcel = async (
 
           const dateLike = (v: unknown): string | null => {
             if (!v) return null;
-            if (v instanceof Date) return v.toISOString().split('T')[0];
+            if (v instanceof Date) {
+              // Use LOCAL date components — xlsx parses cell dates as local
+              // midnight, and toISOString() converts to UTC which drifts dates
+              // back by 1 day in any positive-offset timezone (e.g. Bangkok).
+              const y = v.getFullYear();
+              const m = String(v.getMonth() + 1).padStart(2, '0');
+              const day = String(v.getDate()).padStart(2, '0');
+              return `${y}-${m}-${day}`;
+            }
             const s = String(v).trim();
             if (!s || s === 'null' || s === 'undefined') return null;
             // Excel serial?
@@ -432,16 +462,24 @@ export const executeComprehensiveImport = async (
           onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
         });
       } else {
-        if (table === 'inventory_transactions' && txnMode === 'replace') {
-          onProgress('กำลังล้างตาราง Transactions...', 'Clearing old movements', pct);
-          // Single round-trip delete — Postgres handles 100k+ rows in one call
-          // much faster than paginating 5000 at a time over the network.
-          const { error: errClear } = await supabase.from('inventory_transactions').delete().gt('id', 0);
-          if (errClear) throw errClear;
+        if (table === 'inventory_transactions') {
+          // Special-cased: file can contain duplicates and concurrent batches can race,
+          // so we always upsert by the existing unique constraint instead of insert+swallow.
+          if (txnMode === 'replace') {
+            onProgress('กำลังล้างตาราง Transactions...', 'Clearing old movements', pct);
+            // Single round-trip delete — Postgres handles 100k+ rows in one call
+            // much faster than paginating 5000 at a time over the network.
+            const { error: errClear } = await supabase.from('inventory_transactions').delete().gt('id', 0);
+            if (errClear) throw errClear;
+          }
+          await batchUpsert(table, data[key], 'trans_num,item_code,doc_line_num', (d, t) => {
+            onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
+          });
+        } else {
+          await batchInsert(table, data[key], (d, t) => {
+            onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
+          });
         }
-        await batchInsert(table, data[key], (d, t) => {
-          onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
-        });
       }
       pct += progressSegment;
     };
