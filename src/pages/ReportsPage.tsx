@@ -1374,6 +1374,14 @@ function FEFOPickListTab() {
   const { data: snap } = useLatestLotSnapshot();
   const [warehouse, setWarehouse] = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
+  const [search, setSearch]       = useState('');
+  const [fsCategory, setFsCategory] = useState('');
+  const [lotCountFilter, setLotCountFilter] = useState<'all' | '1' | '2-3' | '4-10' | '10+'>('all');
+  const [daysMax, setDaysMax]     = useState<number | undefined>();
+  const [minValue, setMinValue]   = useState<string>('');
+  const [hasExpired, setHasExpired] = useState<boolean>(false);
+  const [sortBy, setSortBy]       = useState<'fefo' | 'lots' | 'value'>('fefo');
+
   const { data: lotResult, isLoading } = useLotDetail({
     snapshotDate: snap,
     warehouse: warehouse || undefined,
@@ -1384,8 +1392,14 @@ function FEFOPickListTab() {
   const lots = lotResult?.data ?? [];
 
   // Group lots by item × warehouse, then sort lots within each group by expire_date asc (FEFO)
-  const grouped = useMemo(() => {
-    const map = new Map<string, { item_code: string; itemname: string; group_name: string; uom: string; warehouse: string; whs_name: string; lots: typeof lots; total_qty: number; total_value: number }>();
+  const groupedAll = useMemo(() => {
+    type Group = {
+      item_code: string; itemname: string; group_name: string; uom: string;
+      warehouse: string; whs_name: string; fs_category: string | null;
+      lots: typeof lots; total_qty: number; total_value: number;
+      earliest_days: number | null; has_expired: boolean;
+    };
+    const map = new Map<string, Group>();
     for (const l of lots) {
       if (Number(l.qty) <= 0) continue;
       const key = `${l.item_code}|${l.warehouse}`;
@@ -1396,14 +1410,16 @@ function FEFOPickListTab() {
         entry.total_value += Number(l.amount);
       } else {
         map.set(key, {
-          item_code: l.item_code, itemname: l.itemname, group_name: l.group_name, uom: l.uom,
-          warehouse: l.warehouse, whs_name: l.whs_name,
-          lots: [l],
-          total_qty: Number(l.qty), total_value: Number(l.amount),
+          item_code:   l.item_code, itemname: l.itemname, group_name: l.group_name, uom: l.uom,
+          warehouse:   l.warehouse, whs_name: l.whs_name,
+          fs_category: l.fs_category ?? null,
+          lots:        [l],
+          total_qty:   Number(l.qty), total_value: Number(l.amount),
+          earliest_days: null, has_expired: false,
         });
       }
     }
-    // sort lots within each group by expire ascending (NULLs last)
+    // Sort lots within each group + compute group-level stats
     for (const g of map.values()) {
       g.lots.sort((a, b) => {
         if (!a.expire_date && !b.expire_date) return 0;
@@ -1411,16 +1427,132 @@ function FEFOPickListTab() {
         if (!b.expire_date) return -1;
         return new Date(a.expire_date).getTime() - new Date(b.expire_date).getTime();
       });
+      g.earliest_days = g.lots[0]?.days_remaining ?? null;
+      g.has_expired   = g.lots.some(l => l.days_remaining != null && l.days_remaining < 0);
     }
-    // sort groups by earliest-expiring lot first, NULLs last
-    return Array.from(map.values()).sort((a, b) => {
-      const ax = a.lots[0]?.expire_date, bx = b.lots[0]?.expire_date;
-      if (!ax && !bx) return 0;
-      if (!ax) return 1;
-      if (!bx) return -1;
-      return new Date(ax).getTime() - new Date(bx).getTime();
-    });
+    return Array.from(map.values());
   }, [lots]);
+
+  // Available FS categories in the dataset
+  const availableFsCategories = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of groupedAll) if (g.fs_category) s.add(g.fs_category);
+    return Array.from(s).sort();
+  }, [groupedAll]);
+
+  const minValueNum = useMemo(() => {
+    const n = parseFloat(minValue);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [minValue]);
+
+  // Apply filters + sort
+  const grouped = useMemo(() => {
+    const lotCountMatch = (n: number) => {
+      switch (lotCountFilter) {
+        case '1':    return n === 1;
+        case '2-3':  return n >= 2 && n <= 3;
+        case '4-10': return n >= 4 && n <= 10;
+        case '10+':  return n > 10;
+        default:     return true;
+      }
+    };
+    const filtered = groupedAll.filter(g => {
+      if (!lotCountMatch(g.lots.length)) return false;
+      if (fsCategory && g.fs_category !== fsCategory) return false;
+      if (hasExpired && !g.has_expired) return false;
+      if (daysMax !== undefined) {
+        if (g.earliest_days == null) return false;
+        if (g.earliest_days > daysMax) return false;
+      }
+      if (minValueNum != null && g.total_value < minValueNum) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        const hit =
+          g.item_code.toLowerCase().includes(q) ||
+          g.itemname.toLowerCase().includes(q) ||
+          (g.fs_category ?? '').toLowerCase().includes(q) ||
+          g.lots.some(l => (l.batch_num ?? '').toLowerCase().includes(q));
+        if (!hit) return false;
+      }
+      return true;
+    });
+    if (sortBy === 'lots') {
+      filtered.sort((a, b) => b.lots.length - a.lots.length);
+    } else if (sortBy === 'value') {
+      filtered.sort((a, b) => b.total_value - a.total_value);
+    } else {
+      // FEFO: earliest-expiring lot first, NULLs last
+      filtered.sort((a, b) => {
+        if (a.earliest_days == null && b.earliest_days == null) return 0;
+        if (a.earliest_days == null) return 1;
+        if (b.earliest_days == null) return -1;
+        return a.earliest_days - b.earliest_days;
+      });
+    }
+    return filtered;
+  }, [groupedAll, lotCountFilter, fsCategory, hasExpired, daysMax, minValueNum, search, sortBy]);
+
+  // ── Aging Matrix: bucket × stats (Items / Lots / Value) ──
+  const agingMatrix = useMemo(() => {
+    type Bucket = 'expired' | '0-30' | '31-60' | '61-90' | '91-180' | '180+' | 'unknown';
+    const order: Bucket[] = ['expired', '0-30', '31-60', '61-90', '91-180', '180+', 'unknown'];
+    const labels: Record<Bucket, string> = {
+      expired: 'หมดอายุแล้ว', '0-30': '≤ 30 วัน', '31-60': '31–60 วัน',
+      '61-90': '61–90 วัน', '91-180': '91–180 วัน', '180+': '> 180 วัน', unknown: 'ไม่ระบุ',
+    };
+    const colors: Record<Bucket, string> = {
+      expired: '#7f1d1d', '0-30': '#dc2626', '31-60': '#ea580c',
+      '61-90': '#d97706', '91-180': '#65a30d', '180+': '#16a34a', unknown: '#94a3b8',
+    };
+    const stats: Record<Bucket, { items: Set<string>; lots: number; value: number; qty: number }> = Object.fromEntries(
+      order.map(b => [b, { items: new Set<string>(), lots: 0, value: 0, qty: 0 }])
+    ) as any;
+
+    for (const g of grouped) {
+      for (const l of g.lots) {
+        const d = l.days_remaining;
+        const b: Bucket =
+          d == null     ? 'unknown' :
+          d < 0         ? 'expired' :
+          d <= 30       ? '0-30'    :
+          d <= 60       ? '31-60'   :
+          d <= 90       ? '61-90'   :
+          d <= 180      ? '91-180'  : '180+';
+        stats[b].items.add(g.item_code);
+        stats[b].lots += 1;
+        stats[b].value += Number(l.amount);
+        stats[b].qty += Number(l.qty);
+      }
+    }
+    return order.map(b => ({
+      key:    b,
+      label:  labels[b],
+      color:  colors[b],
+      items:  stats[b].items.size,
+      lots:   stats[b].lots,
+      value:  stats[b].value,
+      qty:    stats[b].qty,
+    }));
+  }, [grouped]);
+
+  // ── KPI Summary ──
+  const kpi = useMemo(() => {
+    const totalItems = grouped.length;
+    const totalLots = grouped.reduce((s, g) => s + g.lots.length, 0);
+    const totalValue = grouped.reduce((s, g) => s + g.total_value, 0);
+    let urgentLots = 0, urgentValue = 0, expiredLots = 0, expiredValue = 0;
+    let multiLotItems = 0;
+    for (const g of grouped) {
+      if (g.lots.length > 1) multiLotItems++;
+      for (const l of g.lots) {
+        const d = l.days_remaining;
+        if (d == null) continue;
+        if (d < 0) { expiredLots++; expiredValue += Number(l.amount); }
+        else if (d <= 30) { urgentLots++; urgentValue += Number(l.amount); }
+      }
+    }
+    return { totalItems, totalLots, totalValue, urgentLots, urgentValue, expiredLots, expiredValue, multiLotItems };
+  }, [grouped]);
 
   const handleExport = () => {
     const rows: any[] = [];
@@ -1430,6 +1562,7 @@ function FEFOPickListTab() {
         'Item Code':    g.item_code,
         'Item Name':    g.itemname,
         'Group':        g.group_name,
+        'FS Category':  g.fs_category ?? '',
         'Warehouse':    g.warehouse,
         'Batch / Lot':  l.batch_num,
         'Qty':          Number(l.qty),
@@ -1438,10 +1571,26 @@ function FEFOPickListTab() {
         'Days Left':    l.days_remaining,
         'Unit Cost':    Number(l.unit_cost),
         'Value':        Number(l.amount),
+        'Lots in Group':g.lots.length,
       }));
     }
     exportToExcel(rows, 'FEFO_Pick_List');
   };
+
+  const resetFilters = () => {
+    setWarehouse(''); setGroupCode(undefined); setSearch(''); setFsCategory('');
+    setLotCountFilter('all'); setDaysMax(undefined); setMinValue(''); setHasExpired(false);
+    setSortBy('fefo');
+  };
+
+  const activeFilterCount = [
+    warehouse, groupCode, search, fsCategory,
+    lotCountFilter !== 'all' ? '1' : '',
+    daysMax !== undefined ? '1' : '',
+    minValueNum != null ? '1' : '',
+    hasExpired ? '1' : '',
+    sortBy !== 'fefo' ? '1' : '',
+  ].filter(Boolean).length;
 
   if (!snap) {
     return (
@@ -1454,14 +1603,133 @@ function FEFOPickListTab() {
 
   return (
     <div className="space-y-4">
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-4">
+      {/* ── KPI Cards ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="card">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Items</p>
+          <p className="text-xl font-bold tabular-nums">{formatNumber(kpi.totalItems)}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{kpi.multiLotItems} ที่มีหลาย lot</p>
+        </div>
+        <div className="card">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Lots</p>
+          <p className="text-xl font-bold tabular-nums">{formatNumber(kpi.totalLots)}</p>
+        </div>
+        <div className="card">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Value</p>
+          <p className="text-xl font-bold tabular-nums">฿{formatCompact(kpi.totalValue)}</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: '#7f1d1d' }}>
+          <p className="text-xs" style={{ color: '#7f1d1d' }}>หมดอายุแล้ว</p>
+          <p className="text-xl font-bold tabular-nums" style={{ color: '#7f1d1d' }}>{formatNumber(kpi.expiredLots)}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>มูลค่า ฿{formatCompact(kpi.expiredValue)}</p>
+        </div>
+        <div className="card border-l-4" style={{ borderLeftColor: '#dc2626' }}>
+          <p className="text-xs" style={{ color: '#dc2626' }}>≤ 30 วัน</p>
+          <p className="text-xl font-bold tabular-nums" style={{ color: '#dc2626' }}>{formatNumber(kpi.urgentLots)}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>มูลค่า ฿{formatCompact(kpi.urgentValue)}</p>
+        </div>
+        <div className="card">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Snapshot</p>
+          <p className="text-sm font-semibold mt-1">{formatDate(snap)}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>วัน as-of</p>
+        </div>
+      </div>
+
+      {/* ── Aging Matrix ── */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+          <Layers size={15} style={{ color: 'var(--text-muted)' }} />
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Aging Matrix</h4>
+          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>คลิกแถวเพื่อกรองรายการตามช่วงนั้น</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ color: 'var(--text-muted)' }}>
+              <th className="px-4 py-2 text-left text-xs font-semibold uppercase">ช่วงวันหมดอายุ</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Items</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Lots</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold uppercase">Total Value</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agingMatrix.map(row => {
+              const totalValue = kpi.totalValue || 1;
+              const share = (row.value / totalValue) * 100;
+              const dMax =
+                row.key === 'expired' ? 0 :
+                row.key === '0-30'    ? 30 :
+                row.key === '31-60'   ? 60 :
+                row.key === '61-90'   ? 90 :
+                row.key === '91-180'  ? 180 : undefined;
+              return (
+                <tr
+                  key={row.key}
+                  onClick={() => setDaysMax(dMax)}
+                  className="border-t cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
+                  style={{ borderColor: 'var(--border)', opacity: row.items === 0 ? 0.45 : 1 }}
+                >
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: row.color }} />
+                      <span className="text-xs font-medium" style={{ color: 'var(--text)' }}>{row.label}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">{formatNumber(row.items)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums">{formatNumber(row.lots)}</td>
+                  <td className="px-4 py-2 text-right text-xs tabular-nums font-semibold">฿{formatCompact(row.value)}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                        <div className="h-full" style={{ width: `${Math.max(2, share)}%`, backgroundColor: row.color }} />
+                      </div>
+                      <span className="text-[10px] tabular-nums w-10 text-right" style={{ color: 'var(--text-muted)' }}>
+                        {share.toFixed(1)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Filter card: search + dropdowns + chips ── */}
+      <div className="card space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Filter size={18} style={{ color: 'var(--text-muted)' }} />
           <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>FEFO — First Expired, First Out</span>
           <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-            แสดง lot ทั้งหมดเรียงตามวันหมดอายุของ lot — บอกได้ทันทีว่าควรหยิบ lot ไหนก่อน · snapshot {formatDate(snap)}
+            snapshot {formatDate(snap)}
           </span>
-          <select className="select ml-auto" value={warehouse} onChange={e => setWarehouse(e.target.value)}>
+          <div className="flex items-center gap-2 ml-auto">
+            {activeFilterCount > 0 && (
+              <button
+                onClick={resetFilters}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                <X size={12} /> Reset ({activeFilterCount})
+              </button>
+            )}
+            <button onClick={handleExport} className="btn btn-secondary" disabled={grouped.length === 0}>
+              <Download size={16} /> Export ({grouped.length})
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="ค้นหา รหัส / ชื่อ / batch / FS category..."
+              className="input pl-9 w-full"
+            />
+          </div>
+          <select className="select" value={warehouse} onChange={e => setWarehouse(e.target.value)}>
             <option value="">All Warehouses</option>
             {WAREHOUSES.map(w => <option key={w.code} value={w.code}>{w.code}</option>)}
           </select>
@@ -1469,9 +1737,85 @@ function FEFOPickListTab() {
             <option value="">All Groups</option>
             {Object.entries(ITEM_GROUPS).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
           </select>
-          <button onClick={handleExport} className="btn btn-secondary" disabled={grouped.length === 0}>
-            <Download size={16} /> Export
-          </button>
+          {availableFsCategories.length > 0 && (
+            <select className="select" value={fsCategory} onChange={e => setFsCategory(e.target.value)}>
+              <option value="">All FS Categories</option>
+              {availableFsCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value as any)} title="Sort by">
+            <option value="fefo">เรียง: FEFO (ใกล้หมดอายุก่อน)</option>
+            <option value="lots">เรียง: มี lot มากที่สุดก่อน</option>
+            <option value="value">เรียง: มูลค่าสูงสุดก่อน</option>
+          </select>
+          <label className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border cursor-pointer"
+            style={{ borderColor: 'var(--border)', color: 'var(--text)',
+              backgroundColor: hasExpired ? 'rgba(220,38,38,0.08)' : 'transparent' }}>
+            <input type="checkbox" checked={hasExpired} onChange={e => setHasExpired(e.target.checked)} />
+            มี lot หมดอายุแล้ว
+          </label>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>Min ฿:</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              value={minValue}
+              onChange={e => setMinValue(e.target.value)}
+              placeholder="0"
+              className="input w-24 text-right text-xs"
+            />
+          </div>
+        </div>
+
+        {/* Lot-count + Days-left chips */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>จำนวน Lot:</span>
+            {([
+              { label: 'ทั้งหมด', value: 'all'  as const },
+              { label: '1 lot',  value: '1'    as const },
+              { label: '2–3',    value: '2-3'  as const },
+              { label: '4–10',   value: '4-10' as const },
+              { label: '> 10',   value: '10+'  as const },
+            ]).map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setLotCountFilter(opt.value)}
+                className="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+                style={lotCountFilter === opt.value
+                  ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#fff' }
+                  : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <span className="opacity-30">·</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Days Left ≤</span>
+            {([
+              { label: 'ทั้งหมด', value: undefined as number | undefined },
+              { label: '7 วัน',   value: 7 },
+              { label: '30',     value: 30 },
+              { label: '60',     value: 60 },
+              { label: '90',     value: 90 },
+              { label: '180',    value: 180 },
+            ]).map(({ label, value }) => (
+              <button
+                key={String(value ?? 'all')}
+                onClick={() => setDaysMax(value)}
+                className="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+                style={daysMax === value
+                  ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#fff' }
+                  : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
