@@ -32,6 +32,9 @@ export interface Item {
   // group_name removed — join via item_groups table
   is_active: boolean;
   expire_date: string | null;
+  /** NSL Food Service internal category — finer-grained than group_code
+   *  (e.g. 'Fish-Salmon', 'Beef', 'Processed Foods-Crab Stick'). */
+  fs_category: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -103,6 +106,7 @@ export interface LotDetailView extends InventoryLot {
   whs_type: string;
   days_remaining: number | null;
   is_active: boolean;
+  fs_category: string | null;
 }
 
 export interface ImportLog {
@@ -134,6 +138,7 @@ export interface StockOnHand {
   stock_value: number;
   is_active: boolean;
   expire_date: string | null;
+  fs_category?: string | null;
 }
 
 /** v_movement_monthly — monthly movement aggregates for trend charts */
