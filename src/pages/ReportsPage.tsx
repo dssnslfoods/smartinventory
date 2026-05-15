@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
-  Target, RefreshCw, Download, Filter, Clock, Layers,
+  Target, RefreshCw, Download, Filter, Clock, Layers, Search, X,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -138,6 +138,7 @@ interface VVItem {
   warehouse?: string;
   whs_name?: string;
   qty?: number;
+  fs_category?: string | null;
 }
 
 /** Generic record fed into the scoring engine. */
@@ -153,6 +154,7 @@ interface VVInput {
   warehouse?: string;
   whs_name?: string;
   qty?: number;
+  fs_category?: string | null;
 }
 
 /** Core scoring — input list → VVItem list with all percentile / exp / class fields. */
@@ -220,10 +222,11 @@ function computeVVScores(
       risk_flag, priority_rank: 0,
       recommendation,
       is_urgent: value_score >= cfg.urgent_value_min && validity_score <= cfg.urgent_validity_max,
-      batch_num:  v.batch_num,
-      warehouse:  v.warehouse,
-      whs_name:   v.whs_name,
-      qty:        v.qty,
+      batch_num:   v.batch_num,
+      warehouse:   v.warehouse,
+      whs_name:    v.whs_name,
+      qty:         v.qty,
+      fs_category: v.fs_category,
     } satisfies VVItem;
   });
 
@@ -296,9 +299,15 @@ function parseVVConfig(config: Array<{ key: string; value: string }> | undefined
 
 // ── VV Matrix Tab ─────────────────────────────────────────────────────────────
 function VVMatrixTab() {
-  const [vvClass, setVvClass]     = useState('');
-  const [groupCode, setGroupCode] = useState<number | undefined>();
-  const [mode, setMode]           = useState<'item' | 'lot'>('item');
+  const [vvClass, setVvClass]         = useState('');
+  const [groupCode, setGroupCode]     = useState<number | undefined>();
+  const [mode, setMode]               = useState<'item' | 'lot'>('item');
+  const [search, setSearch]           = useState('');
+  const [warehouse, setWarehouse]     = useState('');
+  const [fsCategory, setFsCategory]   = useState('');
+  const [daysMax, setDaysMax]         = useState<number | undefined>();
+  const [riskFlag, setRiskFlag]       = useState<'' | 'critical' | 'high_expiry'>('');
+  const [minStockValue, setMinStockValue] = useState<string>('');
 
   const { data: stockData, isLoading: stockLoading } = useStockOnHand();
   const { data: snap }                                = useLatestLotSnapshot();
@@ -338,6 +347,7 @@ function VVMatrixTab() {
             uom:         s.uom,
             stock_value: Number(s.stock_value),
             expire_date: s.expire_date ?? null,
+            fs_category: (s as any).fs_category ?? null,
           });
         }
       }
@@ -359,20 +369,72 @@ function VVMatrixTab() {
         warehouse:   l.warehouse,
         whs_name:    l.whs_name,
         qty:         Number(l.qty),
+        fs_category: l.fs_category ?? null,
       }));
     return computeVVScores(inputs, cfg, alpha);
   }, [mode, stockData, lotResult, cfg, alpha]);
+
+  // Unique FS Categories present in the current dataset — drives the dropdown
+  const availableFsCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of vvItems) {
+      if (it.fs_category) set.add(it.fs_category);
+    }
+    return Array.from(set).sort();
+  }, [vvItems]);
+
+  // Unique warehouses present (lot mode only)
+  const availableWarehouses = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of vvItems) {
+      if (it.warehouse) set.add(it.warehouse);
+    }
+    return Array.from(set).sort();
+  }, [vvItems]);
+
+  const minStockValueNum = useMemo(() => {
+    const n = parseFloat(minStockValue);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [minStockValue]);
 
   const filtered = useMemo(() =>
     vvItems
       .filter(item => {
         if (vvClass   && item.exp_class  !== vvClass)               return false;
         if (groupCode && item.group_name !== ITEM_GROUPS[groupCode]) return false;
+        if (fsCategory && item.fs_category !== fsCategory)          return false;
+        if (warehouse && item.warehouse !== warehouse)              return false;
+        if (riskFlag && item.risk_flag !== riskFlag)                return false;
+        if (daysMax !== undefined) {
+          if (item.remaining_days == null) return false;
+          if (item.remaining_days > daysMax) return false;
+        }
+        if (minStockValueNum != null && item.stock_value < minStockValueNum) return false;
+        if (search) {
+          const q = search.toLowerCase();
+          const hit =
+            item.item_code.toLowerCase().includes(q) ||
+            item.itemname.toLowerCase().includes(q) ||
+            (item.batch_num ?? '').toLowerCase().includes(q) ||
+            (item.fs_category ?? '').toLowerCase().includes(q);
+          if (!hit) return false;
+        }
         return true;
       })
       .sort((a, b) => a.priority_rank - b.priority_rank),
-    [vvItems, vvClass, groupCode],
+    [vvItems, vvClass, groupCode, fsCategory, warehouse, riskFlag, daysMax, minStockValueNum, search],
   );
+
+  const resetFilters = () => {
+    setVvClass(''); setGroupCode(undefined); setFsCategory('');
+    setWarehouse(''); setDaysMax(undefined); setRiskFlag('');
+    setMinStockValue(''); setSearch('');
+  };
+
+  const activeFilterCount = [
+    vvClass, groupCode, fsCategory, warehouse, daysMax !== undefined ? '1' : '',
+    riskFlag, minStockValueNum != null ? '1' : '', search,
+  ].filter(Boolean).length;
 
   const summary = useMemo(() => {
     const all      = vvItems;
@@ -407,6 +469,7 @@ function VVMatrixTab() {
       } : {}),
       'Item Name':                 r.itemname,
       'Group':                     r.group_name,
+      'FS Category':               r.fs_category ?? '',
       'Stock Value (฿)':           r.stock_value,
       'Expire Date':               r.expire_date ?? 'N/A',
       'Days Remaining':            r.remaining_days ?? 'N/A',
@@ -708,25 +771,119 @@ function VVMatrixTab() {
         </div>
       </div>
 
-      {/* ── Filters */}
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-4">
+      {/* ── Filters: search + action row */}
+      <div className="card space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[260px] max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="ค้นหา รหัส / ชื่อสินค้า / batch / FS category..."
+              className="input pl-9 w-full"
+            />
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {activeFilterCount > 0 && (
+              <button
+                onClick={resetFilters}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                title="ลบ filter ทั้งหมด"
+              >
+                <X size={12} /> Reset ({activeFilterCount})
+              </button>
+            )}
+            <button onClick={handleExport} className="btn btn-secondary">
+              <Download size={16} /> Export ({filtered.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Dropdown row */}
+        <div className="flex flex-wrap items-center gap-3">
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-          <select className="select" value={vvClass} onChange={e => setVvClass(e.target.value)}>
+
+          <select className="select" value={vvClass} onChange={e => setVvClass(e.target.value)} title="Exp Class">
             <option value="">All Classes (Exp)</option>
             <option value="A">Class A – Strategic</option>
             <option value="B">Class B – Core</option>
             <option value="C">Class C – At Risk</option>
           </select>
-          <select className="select" value={groupCode ?? ''} onChange={e => setGroupCode(e.target.value ? Number(e.target.value) : undefined)}>
+
+          <select className="select" value={groupCode ?? ''} onChange={e => setGroupCode(e.target.value ? Number(e.target.value) : undefined)} title="Item Group">
             <option value="">All Groups</option>
             {Object.entries(ITEM_GROUPS).map(([code, name]) => (
               <option key={code} value={code}>{name}</option>
             ))}
           </select>
-          <button onClick={handleExport} className="btn btn-secondary ml-auto">
-            <Download size={16} /> Export
-          </button>
+
+          {availableFsCategories.length > 0 && (
+            <select className="select" value={fsCategory} onChange={e => setFsCategory(e.target.value)} title="FS Category">
+              <option value="">All FS Categories</option>
+              {availableFsCategories.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+
+          {mode === 'lot' && availableWarehouses.length > 0 && (
+            <select className="select" value={warehouse} onChange={e => setWarehouse(e.target.value)} title="Warehouse">
+              <option value="">All Warehouses</option>
+              {availableWarehouses.map(w => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+          )}
+
+          <select
+            className="select"
+            value={riskFlag}
+            onChange={e => setRiskFlag(e.target.value as '' | 'critical' | 'high_expiry')}
+            title="Risk Flag"
+          >
+            <option value="">All Risk Levels</option>
+            <option value="critical">🔴 CRITICAL only</option>
+            <option value="high_expiry">🟠 HIGH RISK only</option>
+          </select>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>Min ฿:</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              value={minStockValue}
+              onChange={e => setMinStockValue(e.target.value)}
+              placeholder="0"
+              className="input w-28 text-right text-xs"
+            />
+          </div>
+        </div>
+
+        {/* Days-left quick chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Days Left ≤</span>
+          {([
+            { label: 'All', value: undefined },
+            { label: '7 วัน',  value: 7 },
+            { label: '30 วัน', value: 30 },
+            { label: '60 วัน', value: 60 },
+            { label: '90 วัน', value: 90 },
+            { label: '180 วัน', value: 180 },
+          ] as const).map(({ label, value }) => (
+            <button
+              key={String(value ?? 'all')}
+              onClick={() => setDaysMax(value)}
+              className="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+              style={daysMax === value
+                ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#fff' }
+                : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+              }
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
