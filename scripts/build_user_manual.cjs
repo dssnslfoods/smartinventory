@@ -187,7 +187,7 @@ const coverSection = () => [
   }),
   new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: `เวอร์ชันเอกสาร: 1.0  ·  ปรับปรุงล่าสุด: ${new Date().toISOString().split('T')[0]}`, font: FONT, size: 22, color: COLOR_MUTED })],
+    children: [new TextRun({ text: `เวอร์ชันเอกสาร: 2.0  ·  ปรับปรุงล่าสุด: ${new Date().toISOString().split('T')[0]}  ·  เพิ่ม Lot Inventory + FEFO + FS Category`, font: FONT, size: 22, color: COLOR_MUTED })],
   }),
 ];
 
@@ -199,14 +199,15 @@ const tocSection = () => [
     ['3', 'หน้า Dashboard'],
     ['4', 'Stock On-Hand (สต็อกคงเหลือ)'],
     ['5', 'Movement History (ประวัติการเคลื่อนไหว)'],
-    ['6', 'Low Stock Alerts (แจ้งเตือนสต็อกต่ำ)'],
+    ['6', 'Low Stock Alerts (แจ้งเตือนสต็อกต่ำ) + Expiring Lots'],
     ['7', 'Cost & Valuation (ต้นทุนและมูลค่า)'],
-    ['8', 'Management Reports — รวม VV Matrix'],
-    ['9', 'Data Import (นำเข้าข้อมูล)'],
-    ['10', 'Settings (ตั้งค่า)'],
-    ['11', 'User Management (จัดการผู้ใช้)'],
-    ['12', 'แนวคิด VV Matrix แบบละเอียด'],
-    ['13', 'ภาคผนวก'],
+    ['8', 'Lot Inventory (สต็อกตาม Lot) — ใหม่'],
+    ['9', 'Management Reports — VV Matrix · Slow Moving · Turnover · Reorder · FEFO'],
+    ['10', 'Data Import (นำเข้าข้อมูล)'],
+    ['11', 'Settings (ตั้งค่า)'],
+    ['12', 'User Management (จัดการผู้ใช้)'],
+    ['13', 'แนวคิด VV Matrix แบบละเอียด'],
+    ['14', 'ภาคผนวก'],
   ].map(([num, title]) => new Paragraph({
     spacing: { after: 80 },
     tabStops: [{ type: TabStopType.RIGHT, position: 9000 }],
@@ -366,10 +367,10 @@ const movementSection = () => [
 ];
 
 const alertsSection = () => [
-  h1('6. Low Stock Alerts (แจ้งเตือนสต็อกต่ำ)'),
-  para('แสดงสินค้าที่ต้องดำเนินการ พร้อมการคำนวณวันที่จะหมดสต็อกแบบประมาณการ'),
+  h1('6. Low Stock Alerts (แจ้งเตือนสต็อกต่ำ) + Expiring Lots'),
+  para('หน้านี้แบ่งเป็น 2 แท็บ — "Low Stock" สำหรับสินค้าที่สต็อกต่ำกว่าเกณฑ์ และ "Expiring Lots" สำหรับ lot ที่กำลังจะหมดอายุ'),
 
-  h2('6.1 ระดับสถานะ (Status)'),
+  h2('6.1 แท็บ Low Stock — ระดับสถานะ'),
   buildTable([
     { label: 'สถานะ',     weight: 0.18 },
     { label: 'เงื่อนไข',  weight: 0.40 },
@@ -387,6 +388,17 @@ const alertsSection = () => [
   callout('💡 ข้อแนะนำ',
     'ถ้า Days Remaining ต่ำกว่า Lead Time ของกระบวนการสั่งซื้อ → ควรสั่งทันที',
     'EAF1FB'),
+  spacer(),
+
+  h2('6.3 แท็บ Expiring Lots — สินค้าใกล้หมดอายุ (ระดับ Lot)'),
+  para('แสดงเฉพาะ lot ที่จำนวนวันก่อนหมดอายุ ≤ เกณฑ์ที่เลือก (7 / 30 / 60 / 90 / 180 วัน) — เรียงโดยให้ urgent ที่สุดอยู่บนสุด'),
+  bullet('5 KPI ด้านบน: หมดอายุแล้ว · ≤ 30 วัน · 31–60 · 61–90 · มูลค่าที่เสี่ยง ≤ 30 วัน'),
+  bullet('Quick-filter ปุ่ม 7 / 30 / 60 / 90 / 180 วัน — เปลี่ยน threshold ได้คลิกเดียว'),
+  bullet('Export Excel ของรายการ lot ที่ใกล้หมดอายุ เพื่อใช้วางแผนโปรโมชั่น'),
+  spacer(),
+  callout('🧾 ต้อง Import sheet "Lot Inventory" ก่อนถึงจะเห็นแท็บนี้',
+    'อ่านบทที่ 8 "Lot Inventory" และบทที่ 10 "Data Import" สำหรับวิธีนำเข้าข้อมูล',
+    'EAF1FB'),
 ];
 
 const valuationSection = () => [
@@ -398,61 +410,144 @@ const valuationSection = () => [
   bullet('ส่งออก Excel เพื่อนำไปใช้รายงานต่อ'),
 ];
 
-const reportsSection = () => [
-  h1('8. Management Reports'),
-  para('รวมรายงานเชิงวิเคราะห์ที่ใช้ตัดสินใจระดับบริหาร เปิดได้จากเมนู Reports'),
+// ── Section 8 (NEW) — Lot Inventory ─────────────────────────────────────────
+const lotInventorySection = () => [
+  h1('8. Lot Inventory (สต็อกตาม Lot)'),
+  para('ฟีเจอร์นี้แยกสต็อกของสินค้าเดียวกันออกเป็นรายการ lot (batch) — เพราะแต่ละ lot มี "วันหมดอายุ" และ "ต้นทุน" ของตัวเอง การวิเคราะห์ระดับ lot จึงแม่นยำกว่าการมองรวมเป็นสินค้าตัวเดียว'),
+  spacer(),
 
-  h2('8.1 Slow Moving Items'),
+  h2('8.1 ทำไมต้องมี Lot Tracking'),
+  para('สมมติสินค้า "Smoked Salmon Sliced 100g" มี 27 lot คงเหลือในคลังเดียวกัน — แต่ละ lot อาจหมดอายุต่างกันตั้งแต่ ต.ค. 2025 ถึง ก.พ. 2027'),
+  bullet('ถ้าดูแบบ "สินค้ารวม" จะเห็นเป็น 1 บรรทัด ใช้ expire_date เดียว → ซ่อนความเสี่ยงของ lot ที่ใกล้หมดอายุ'),
+  bullet('ถ้าดูแบบ "Lot" จะเห็น 27 บรรทัด → รู้ทันทีว่าควรหยิบ lot ไหนก่อน (FEFO) และวางแผนโปรโมชั่นได้ถูกต้อง'),
+  spacer(),
+
+  h2('8.2 หน้า Lot Inventory (เมนู /lots)'),
+  para('หน้าใหม่ที่เพิ่มในเมนู Sidebar — ใช้ icon "Layers"'),
+  bullet('6 Aging cards ด้านบน: หมดอายุแล้ว · ≤ 30 · 31–60 · 61–90 · 91–180 · > 180 วัน'),
+  bullet('คลิก card → กรองตารางตามช่วงนั้นทันที'),
+  bullet('ตาราง FEFO เรียงตามวันหมดอายุน้อยไปมาก'),
+  bullet('ฟิลเตอร์: คลัง / กลุ่มสินค้า / ค้นหารหัสหรือ batch'),
+  bullet('Export Excel ตามที่กรองอยู่'),
+  spacer(),
+
+  h2('8.3 โครงสร้างข้อมูล Lot'),
+  buildTable([
+    { label: 'ฟิลด์',       weight: 0.25 },
+    { label: 'ความหมาย',    weight: 0.45 },
+    { label: 'ตัวอย่าง',     weight: 0.30 },
+  ], [
+    ['Item Code',         'อ้างอิงรายการสินค้า',                       'F7000400100'],
+    ['Warehouse',         'คลังที่เก็บ',                                'FS-FG01'],
+    ['BatchNum Lot',      'รหัส lot จาก SAP (มัก = timestamp รับเข้า)', '2025.08.15 16:39:59'],
+    ['Quantity',          'จำนวนคงเหลือใน lot นั้น',                    '76,900'],
+    ['Total Amount',      'มูลค่ารวมของ lot',                           '132,268'],
+    ['Unit Cost',         'คำนวณอัตโนมัติ = Amount / Qty',              'อัตโนมัติ'],
+    ['InDate',            'วันที่รับเข้าคลัง',                          '2025-08-15'],
+    ['PrdDate',           'วันที่ผลิต',                                 '2025-08-09'],
+    ['ExpDate',           'วันที่หมดอายุของ lot นี้',                   '2026-08-09'],
+    ['ToDate',            'วัน snapshot (as-of date)',                  '2026-03-31'],
+  ]),
+  spacer(),
+
+  h2('8.4 Snapshot vs Transactional'),
+  para('ข้อมูล Lot เป็นแบบ "Snapshot" — เก็บภาพรวมของสต็อก ณ วันที่กำหนด (ToDate) ไม่ใช่ tracking การเคลื่อนไหวรายธุรกรรม'),
+  bullet('การ Import lot ครั้งใหม่ที่ ToDate เดียวกัน → ระบบจะ "ทับ" snapshot เดิม'),
+  bullet('การ Import lot ที่ ToDate ต่างกัน → ระบบเก็บ snapshot หลายชุดเป็นประวัติ'),
+  spacer(),
+
+  callout('🎯 จุดสำคัญ',
+    ['Lot Inventory ใช้คู่กับ Transactions — Transactions = การเคลื่อนไหว, Lot = ภาพรวม ณ วันที่กำหนด',
+     'ทุกครั้งที่ Import lot ใหม่ ระบบจะ refresh กราฟ Aging, VV Matrix แบบ By Lot, และ FEFO Pick List โดยอัตโนมัติ'],
+    'EAF1FB'),
+];
+
+const reportsSection = () => [
+  h1('9. Management Reports'),
+  para('รวมรายงานเชิงวิเคราะห์ที่ใช้ตัดสินใจระดับบริหาร เปิดได้จากเมนู Reports — มี 5 แท็บ'),
+
+  h2('9.1 Slow Moving Items'),
   para('รายการสินค้าที่ไม่มีการจ่ายออกมานานหรือมีอัตราหมุนเวียนต่ำ'),
   bullet('Dead Stock — ไม่มีการเคลื่อนไหวเลยใน 180 วัน'),
   bullet('Slow Moving — เคลื่อนไหวบ้างแต่นาน ๆ ครั้ง'),
   bullet('Normal — มีการเคลื่อนไหวสม่ำเสมอ'),
   spacer(),
 
-  h2('8.2 Inventory Turnover'),
+  h2('9.2 Inventory Turnover'),
   para('อัตราการหมุนเวียนสต็อกต่อปี (Annual COGS / Average Inventory Value)'),
   bullet('Turnover Ratio สูง = สินค้าหมุนเร็ว ดี'),
   bullet('Days on Hand = 365 / Turnover Ratio'),
   spacer(),
 
-  h2('8.3 Reorder Suggestions'),
+  h2('9.3 Reorder Suggestions'),
   para('แสดงสินค้าที่ควรสั่งซื้อพร้อมจำนวนแนะนำที่ควรสั่ง — คำนวณจาก Min/Max Level และอัตราการใช้'),
   spacer(),
 
-  h2('8.4 VV Matrix'),
+  h2('9.4 VV Matrix (มี toggle "By Item" / "By Lot")'),
   para('เครื่องมือคัดกรองสินค้าที่มีความเสี่ยง โดยพิจารณา 2 มิติพร้อมกัน:'),
   bullet('Value Score (1–5) — ตามมูลค่าสต็อก (top X% = score 5)'),
   bullet('Validity Score (1–5) — ตามจำนวนวันก่อนหมดอายุ'),
   para('คะแนนรวมจะถูกคำนวณด้วยสูตร Exponential Score = ValueScore × (ValidityScore / 5)^α', { bold: true }),
   para('โดยค่า α สามารถปรับได้ที่ Settings (1=Linear, 2=Moderate, 3=Aggressive)', { italics: true }),
   spacer(),
-  para('ผลลัพธ์จะแบ่งเป็น Class A/B/C ตามเกณฑ์ที่ Admin ตั้งไว้ — ดูรายละเอียดในบทที่ 12'),
+  para('ผลลัพธ์จะแบ่งเป็น Class A/B/C ตามเกณฑ์ที่ Admin ตั้งไว้ — ดูรายละเอียดในบทที่ 13'),
+  spacer(),
+
+  callout('🆕 By Lot mode',
+    ['Toggle ด้านบนสุดของแท็บ — เปลี่ยนการคำนวณจาก "ระดับสินค้ารวม" เป็น "ระดับ lot"',
+     'ใน By Lot mode แต่ละ lot ได้คะแนนของตัวเอง โดยใช้ expire_date ของ lot นั้นโดยตรง',
+     'เพิ่มคอลัมน์ Batch / Warehouse ในตาราง · Export filename เปลี่ยนเป็น VV_Matrix_By_Lot',
+     'เหมาะมากกับ NSL Food Service เพราะสินค้าอาหารแต่ละ lot มีความสด/ความเสี่ยงต่างกันชัดเจน'],
+    'E8F8EF'),
+  spacer(),
+
+  h2('9.5 FEFO Pick List (ใหม่)'),
+  para('First-Expired First-Out — รายการลำดับการหยิบของออกจากคลัง โดยให้ lot ที่ใกล้หมดอายุที่สุดถูกหยิบก่อน'),
+  bullet('แสดงแต่ละ (สินค้า × คลัง) เป็นกล่อง พร้อม lot ทั้งหมดเรียงจาก expire_date น้อย → มาก'),
+  bullet('ลำดับ "Pick #1 ↓" คือ lot ที่ควรหยิบก่อน'),
+  bullet('กลุ่มสินค้าที่มี lot ใกล้หมดอายุที่สุดจะลอยขึ้นมาบนสุดเสมอ'),
+  bullet('Export Excel เพื่อแจกให้ทีมคลังใช้หยิบของจริง'),
 ];
 
 const importSection = () => [
-  h1('9. Data Import (นำเข้าข้อมูลจาก Excel)'),
-  para('ระบบรองรับการนำเข้าข้อมูลทั้งหมดผ่านไฟล์ Excel เพียงไฟล์เดียว ที่มี 5 Sheet หลัก'),
+  h1('10. Data Import (นำเข้าข้อมูลจาก Excel)'),
+  para('ระบบรองรับการนำเข้าข้อมูลทั้งหมดผ่านไฟล์ Excel เพียงไฟล์เดียว ที่มี 6 Sheet หลัก (รวม Lot Inventory)'),
 
-  h2('9.1 ขั้นตอน 4 Step'),
+  h2('10.1 ขั้นตอน 4 Step'),
   num('Step 1 — กดปุ่ม "โหลด All-in-One Template" เพื่อดาวน์โหลด Excel ตัวอย่าง'),
-  num('Step 2 — กรอกข้อมูลในแต่ละ Sheet (ดูคำอธิบายใน Sheet "Instructions")'),
+  num('Step 2 — กรอกข้อมูลในแต่ละ Sheet (ดูคำอธิบายและ dropdown ในแต่ละ sheet)'),
   num('Step 3 — กลับมาที่หน้านี้ ลากไฟล์มาวางหรือกดอัปโหลด — ระบบจะ preview ให้ตรวจ'),
   num('Step 4 — เลือก Sheet ที่ต้องการนำเข้า (toggle) แล้วกดปุ่ม "เริ่ม Import"'),
   spacer(),
 
-  h2('9.2 Sheet ที่ระบบรองรับ'),
+  h2('10.2 Sheet ที่ระบบรองรับ'),
   buildTable([
     { label: 'Sheet',           weight: 0.20 },
     { label: 'ข้อมูล',           weight: 0.45 },
     { label: 'จำเป็น?',          weight: 0.15 },
     { label: 'Mode',             weight: 0.20 },
   ], [
-    ['Warehouses',             'รหัสและชื่อคลังสินค้า',            'ครั้งแรก',  'Upsert'],
-    ['Item Groups',            'รหัสและชื่อกลุ่ม + Shelf Life',    'ครั้งแรก',  'Upsert'],
-    ['Items',                  'รายการสินค้าทั้งหมด',              'ทุกครั้ง',   'Upsert'],
-    ['Thresholds',             'Min/ROP/Max ของแต่ละสินค้า/คลัง',  'ตามต้องการ', 'Upsert'],
-    ['Transactions',           'การเคลื่อนไหวรับ/จ่าย/โอน',        'ทุกครั้ง',   'Replace หรือ Append'],
+    ['Warehouses',             'รหัสและชื่อคลังสินค้า',                    'ครั้งแรก',  'Upsert'],
+    ['Item Groups',            'รหัสและชื่อกลุ่ม + Shelf Life',            'ครั้งแรก',  'Upsert'],
+    ['Items',                  'รายการสินค้าทั้งหมด + FS Category',        'ทุกครั้ง',   'Upsert'],
+    ['Thresholds',             'Min/ROP/Max ของแต่ละสินค้า/คลัง',          'ตามต้องการ', 'Upsert'],
+    ['Transactions',           'การเคลื่อนไหวรับ/จ่าย/โอน',                'ทุกครั้ง',   'Replace หรือ Append'],
+    ['Lot Inventory (ใหม่)',   'สต็อกตาม lot — มี expire/cost ของ lot นั้น', 'ทุกครั้ง',   'Snapshot Replace'],
   ]),
+  spacer(),
+
+  callout('🆕 FS Category — คอลัมน์เพิ่มเติมใน Items',
+    ['NSL Food Service มีการจัดหมวดสินค้าภายในที่ละเอียดกว่า Group Code (4 กลุ่ม)',
+     'FS Category มี 25 หมวด เช่น Fish-Salmon, Beef, Pork, Processed Foods-Smoked Salmon, Crossiant, Ready to Cook',
+     'ระบบใช้คอลัมน์นี้ในการกรอง/วิเคราะห์เพิ่มเติมในรายงานต่าง ๆ'],
+    'E8F8EF'),
+  spacer(),
+
+  h2('10.3 รูปแบบไฟล์ Excel ที่รองรับ'),
+  para('Parser ของระบบรองรับ 2 รูปแบบ:'),
+  bullet('Styled template (Warehouses / Item Groups / Items / Thresholds / Transactions) — header อยู่แถวที่ 4 มี banner สีน้ำเงินด้านบนและ description row ใต้ header'),
+  bullet('Raw layout (Lot Inventory) — header อยู่แถวที่ 1 ตรง ๆ ตามที่ SAP export ออกมา'),
+  para('ระบบจะ auto-detect ว่า sheet ใดใช้ layout ไหน — ไม่ต้องตั้งค่าเอง', { italics: true }),
   spacer(),
 
   callout('⚠️ Replace vs Append สำหรับ Transactions',
@@ -461,27 +556,35 @@ const importSection = () => [
     'FFF3CD'),
   spacer(),
 
-  h2('9.3 Shelf Life อัตโนมัติ (ลำดับการคำนวณ Expire Date)'),
-  num('ใช้ Expire Date จาก Excel ถ้ากรอกไว้'),
+  callout('🧾 Lot Inventory — Snapshot Replace',
+    ['ระบบจะลบ lot ของ snapshot_date (ToDate) เดียวกันที่มีอยู่ก่อน แล้ว insert ใหม่',
+     'ถ้า Import lot ที่ ToDate ใหม่ ระบบจะเก็บ snapshot เก่าและใหม่ไว้คู่กันเป็นประวัติ',
+     'ไม่กระทบ Transactions, Items, หรือ data อื่น'],
+    'EAF1FB'),
+  spacer(),
+
+  h2('10.4 Shelf Life อัตโนมัติ (ลำดับการคำนวณ Expire Date)'),
+  num('ใช้ Expire Date จาก Lot Inventory โดยตรง (แม่นยำสุด)'),
+  num('ถ้าไม่มี lot → ใช้ Expire Date จาก Items'),
   num('ถ้าว่าง → ใช้ Shelf Life ของกลุ่มสินค้า (Item Groups)'),
   num('ถ้ากลุ่มไม่ตั้ง → ใช้ค่า Global Fallback ที่ Settings (default 365 วัน)'),
   spacer(),
 
   callout('🚨 Danger Zone',
-    ['ปุ่ม "Clear All Data" จะลบ Transactions, Items, Thresholds, Item Groups, และ Warehouses ทั้งหมด',
+    ['ปุ่ม "Clear All Data" จะลบ Lot Inventory, Transactions, Items, Thresholds, Item Groups, และ Warehouses ทั้งหมด',
      'ใช้สำหรับเริ่มต้นโครงการใหม่เท่านั้น ห้ามใช้ระหว่างปฏิบัติงาน'],
     'F8D7DA'),
 ];
 
 const settingsSection = () => [
-  h1('10. Settings (ตั้งค่า)'),
+  h1('11. Settings (ตั้งค่า)'),
   para('หน้าตั้งค่าระบบ ส่วนใหญ่ใช้ครั้งเดียวตอน setup เริ่มต้น'),
 
-  h2('10.1 System Configuration'),
+  h2('11.1 System Configuration'),
   bullet('Active Item Threshold (Days) — สินค้าที่ไม่เคลื่อนไหวเกินกี่วันถือว่า Inactive (default 90 วัน)'),
   spacer(),
 
-  h2('10.2 VV Matrix — Scoring Configuration'),
+  h2('11.2 VV Matrix — Scoring Configuration'),
   para('ปรับเกณฑ์การให้คะแนน Value Score, Validity Score และ Class แบ่ง A/B/C'),
   spacer(),
 
@@ -539,7 +642,7 @@ const settingsSection = () => [
   bullet('HIGH RISK — Validity Score ≤ 2 (ทุกระดับ value)'),
   spacer(),
 
-  h2('10.3 Shelf Life ตามกลุ่มสินค้า'),
+  h2('11.3 Shelf Life ตามกลุ่มสินค้า'),
   para('กำหนด Shelf Life แยกแต่ละ Item Group เพื่อให้ระบบคำนวณ Expire Date อัตโนมัติเมื่อ Excel ไม่มีค่า'),
   bullet('FFG (Finished Goods) — แนะนำ 365 วัน'),
   bullet('FRM (Raw Materials) — แนะนำ 548 วัน (1.5 ปี)'),
@@ -547,7 +650,7 @@ const settingsSection = () => [
   bullet('FPKG (Packaging) — แนะนำ 365 วัน'),
   spacer(),
 
-  h2('10.4 Stock Threshold Settings'),
+  h2('11.4 Stock Threshold Settings'),
   para('กำหนด Min / Reorder Point / Max ต่อสินค้า/คลัง — ใช้กับ Low Stock Alerts'),
   bullet('Min Level — ต่ำกว่านี้ระบบเตือน Critical'),
   bullet('Reorder Point — จุดที่ควรเริ่มสั่งซื้อ'),
@@ -555,29 +658,29 @@ const settingsSection = () => [
 ];
 
 const userMgmtSection = () => [
-  h1('11. User Management (จัดการผู้ใช้)'),
+  h1('12. User Management (จัดการผู้ใช้)'),
   para('Admin จัดการผู้ใช้ภายในบริษัทตนเอง ส่วน Super Admin เห็นได้ทุกบริษัท'),
 
-  h2('11.1 เพิ่มผู้ใช้ใหม่'),
+  h2('12.1 เพิ่มผู้ใช้ใหม่'),
   num('กดปุ่ม "เพิ่มผู้ใช้งาน" มุมขวาบน'),
   num('กรอกชื่อ-นามสกุล, Email, Role, บริษัท'),
   num('กดปุ่ม "สร้างผู้ใช้" — ระบบจะสร้างรหัสผ่านสุ่มให้'),
   num('คัดลอกรหัสผ่านส่งให้ผู้ใช้นำไป login ครั้งแรก'),
   spacer(),
 
-  h2('11.2 แก้ไข Role / สถานะ Active'),
+  h2('12.2 แก้ไข Role / สถานะ Active'),
   num('กดปุ่ม "Edit" หลัง row ของผู้ใช้'),
   num('เลือก Role ใหม่ + ตั้ง Active/Inactive'),
   num('กดปุ่มยืนยัน (✓)'),
   spacer(),
 
-  h2('11.3 Reset รหัสผ่าน'),
+  h2('12.3 Reset รหัสผ่าน'),
   num('กดไอคอนรูปกุญแจ 🔑 หลัง row ของผู้ใช้'),
   num('ระบบสุ่มรหัสใหม่ให้ — สามารถ regenerate ได้'),
   num('กด "Reset รหัสผ่าน" → คัดลอกรหัสใหม่ส่งให้เจ้าตัว'),
   spacer(),
 
-  h2('11.4 ลบผู้ใช้ (Super Admin เท่านั้น)'),
+  h2('12.4 ลบผู้ใช้ (Super Admin เท่านั้น)'),
   num('กดไอคอนรูปถังขยะ 🗑️ หลัง row ของผู้ใช้'),
   num('พิมพ์ Email ของผู้ใช้ให้ตรงเป๊ะเพื่อยืนยัน'),
   num('กด "ลบถาวร" — ระบบจะลบทั้ง auth และ profile'),
@@ -590,7 +693,7 @@ const userMgmtSection = () => [
     'EAF1FB'),
   spacer(),
 
-  h2('11.5 สิทธิ์การเข้าถึง (Permissions)'),
+  h2('12.5 สิทธิ์การเข้าถึง (Permissions)'),
   para('Admin สามารถปรับสิทธิ์ของแต่ละ Role (Executive / Supervisor / Staff) ในเมนู "สิทธิ์การเข้าถึง"'),
   bullet('เลือก Role ที่ต้องการตั้งค่า'),
   bullet('ติ๊กเปิด/ปิดแต่ละสิทธิ์ (เช่น เห็นเมนู Reports, แก้ไข Threshold ฯลฯ)'),
@@ -598,16 +701,16 @@ const userMgmtSection = () => [
 ];
 
 const vvMatrixSection = () => [
-  h1('12. แนวคิด VV Matrix แบบละเอียด'),
+  h1('13. แนวคิด VV Matrix แบบละเอียด'),
   para('VV Matrix (Value & Validity Matrix) เป็นเครื่องมือบริหารสต็อกที่ใช้ข้อมูลความเสี่ยงในอนาคต (Expiry) ประกอบกับมูลค่าสต็อก เพื่อคัดกรองสินค้าที่ต้องเร่งระบาย (Clearance) ก่อนเกิดความเสียหายจริง'),
   spacer(),
 
-  h2('12.1 ทำไมต้อง VV Matrix?'),
+  h2('13.1 ทำไมต้อง VV Matrix?'),
   para('ABC Analysis แบบเดิมพิจารณาแค่มูลค่าสต็อก ทำให้สินค้ามูลค่าสูงที่ใกล้หมดอายุยังถูกจัดเป็น Class A — ไม่สะท้อนความเสี่ยงจริง'),
   para('VV Matrix แก้ปัญหานี้ด้วยการคูณ Value Score กับ Validity Multiplier ที่ลงโทษสินค้าใกล้หมดอายุอย่างเหมาะสม'),
   spacer(),
 
-  h2('12.2 สูตรคำนวณ'),
+  h2('13.2 สูตรคำนวณ'),
   callout('Formula',
     ['Final Score = ValueScore × (ValidityScore / 5)^α',
      '',
@@ -617,7 +720,7 @@ const vvMatrixSection = () => [
     'EAF1FB'),
   spacer(),
 
-  h2('12.3 Validity Multiplier ที่แต่ละ α'),
+  h2('13.3 Validity Multiplier ที่แต่ละ α'),
   buildTable([
     { label: 'Validity Score', weight: 0.20 },
     { label: 'α=1 (Linear)',   weight: 0.27 },
@@ -632,17 +735,34 @@ const vvMatrixSection = () => [
   ]),
   spacer(),
 
-  h2('12.4 การใช้งานเชิงปฏิบัติ'),
+  h2('13.4 การใช้งานเชิงปฏิบัติ'),
   bullet('ใช้กรอง Class C (Final Score < 1.5) → Action Plan: ลดราคา, จัดโปรโมชั่น, โอนคลัง'),
   bullet('ใช้ Risk Flag CRITICAL → ต้องตัดสินใจภายใน 1 สัปดาห์'),
   bullet('ปรับค่า α ตามประเภทสินค้า — ของสด/อาหารใช้ α=3, ของแห้งใช้ α=2'),
   bullet('Re-run รายงานทุกสัปดาห์เพื่อตามดูสินค้าที่ "ตก class" จาก B ไป C'),
+  spacer(),
+
+  h2('13.5 VV Matrix แบบ By Lot vs By Item'),
+  para('ระบบรองรับ 2 โหมดที่ toggle ได้ในหน้า Reports → VV Matrix'),
+  buildTable([
+    { label: 'มิติเปรียบเทียบ',   weight: 0.30 },
+    { label: 'By Item (เดิม)',      weight: 0.35 },
+    { label: 'By Lot (ใหม่)',       weight: 0.35 },
+  ], [
+    ['Granularity',                'รวมสต็อกของสินค้าทุก lot/คลัง',                    'แยกแต่ละ lot ของสินค้า'],
+    ['Expire Date ที่ใช้',          'ค่าจาก items.expire_date (ค่าเดียวต่อสินค้า)',       'expire_date ของแต่ละ lot จริง ๆ'],
+    ['Cost ที่ใช้',                 'moving_avg ของสินค้า',                              'unit_cost ของแต่ละ lot (= Amount/Qty)'],
+    ['ความแม่นยำ',                 'ปานกลาง — ข้อมูลถูก aggregate',                     'สูง — เห็น lot ที่ใกล้หมดอายุชัดเจน'],
+    ['เหมาะกับ',                   'สรุปภาพรวมระดับบริหาร',                            'ตัดสินใจรายธุรกรรม / FEFO / โปรโมชั่น'],
+  ]),
+  spacer(),
+  para('แนะนำ: ใช้ By Lot เป็นหลักเมื่อต้องการแม่นยำ ใช้ By Item เมื่อต้องการภาพรวม', { italics: true }),
 ];
 
 const appendixSection = () => [
-  h1('13. ภาคผนวก'),
+  h1('14. ภาคผนวก'),
 
-  h2('13.1 รหัสคลังสินค้ามาตรฐาน'),
+  h2('14.1 รหัสคลังสินค้ามาตรฐาน'),
   buildTable([
     { label: 'Code',  weight: 0.15 },
     { label: 'ชื่อ',  weight: 0.55 },
@@ -668,20 +788,55 @@ const appendixSection = () => [
   ]),
   spacer(),
 
-  h2('13.2 รหัสกลุ่มสินค้า'),
+  h2('14.2 รหัสกลุ่มสินค้า'),
   buildTable([
     { label: 'Code', weight: 0.15 },
     { label: 'ชื่อกลุ่ม', weight: 0.50 },
     { label: 'ใช้กับ', weight: 0.35 },
   ], [
     ['123', 'FFG-Finish Goods',   'สินค้าสำเร็จรูป'],
+    ['124', 'FPKG-Packaging',     'บรรจุภัณฑ์'],
     ['125', 'FRM-Raw Materials',  'วัตถุดิบ'],
     ['126', 'FBY-By Product',     'ผลพลอยได้จากการผลิต'],
     ['127', 'FPKG-Packaging',     'บรรจุภัณฑ์'],
   ]),
   spacer(),
 
-  h2('13.3 FAQ'),
+  h2('14.3 FS Category (NSL Food Service)'),
+  para('หมวดสินค้าภายในที่ NSL ใช้เพิ่มเติมจาก Group Code — ละเอียดกว่า 4 กลุ่มหลัก'),
+  buildTable([
+    { label: 'หมวด',                              weight: 0.55 },
+    { label: 'ตัวอย่างสินค้า',                     weight: 0.45 },
+  ], [
+    ['Fish-Salmon',                              'Fresh Salmon WH/HeadOn, Norwegian Salmon Fillet'],
+    ['Fish-NZ',                                  'NZ Hoki, NZ Salmon, NZ Hake'],
+    ['Fish-Tuna',                                'Yellowfin Tuna Saku, Bluefin Otoro'],
+    ['Fish-Pangasius Dory',                      'Vietnam Pangasius Fillet'],
+    ['Fish-Other',                               'Cod, Snapper, Sea Bass'],
+    ['Beef',                                     'Aus GF Trimming, Striploin'],
+    ['Pork',                                     'Pork Belly, Pork Loin'],
+    ['Lamb',                                     'NZ Lamb Rack'],
+    ['Poultry-Turkey',                           'Whole Turkey, Turkey Breast'],
+    ['Poultry-Other',                            'Chicken Breast, Duck Breast'],
+    ['Seafood-Mussel',                           'NZ Green Half Shell Mussel'],
+    ['Processed Foods-Crab Stick',               'Surimi Crab Stick'],
+    ['Processed Foods-Ebiko',                    'Ebiko Orange/Red/Green'],
+    ['Processed Foods-Ikura',                    'Salmon Roe'],
+    ['Processed Foods-Smoked Salmon',            'Smoked Salmon Sliced'],
+    ['Processed Foods-Other',                    'Sausage, Bacon'],
+    ['Frozen Cake',                              'Frozen Cheesecake, Brownies'],
+    ['Crossiant',                                'Butter Croissant, Pain au Chocolat'],
+    ['Ready to Cook',                            'Sous-vide Steaks, Pre-marinated Meat'],
+    ['French Fries',                             'Frozen Fries'],
+    ['Daily Goods',                              'Cooking Oil, Sauces'],
+    ['Production FG',                            'In-house produced FG'],
+    ['By Product',                               'Trimmings, Bones'],
+    ['Other-Ingredient',                         'Salt, Spices'],
+    ['Other',                                    'Packaging, Misc'],
+  ]),
+  spacer(),
+
+  h2('14.4 FAQ'),
 
   h3('Q: ทำไมตัวเลขสต็อกใน Dashboard ไม่ตรงกับระบบ ERP?'),
   para('A: SmartInventory คำนวณจาก Transactions ที่ Import เข้ามาเท่านั้น หากนำเข้าไม่ครบถ้วนหรือยังไม่ Import งวดล่าสุดตัวเลขจะคลาดเคลื่อน — ตรวจสอบที่ "Last Sync" บน Dashboard'),
@@ -782,6 +937,7 @@ const doc = new Document({
       ...movementSection(),
       ...alertsSection(),
       ...valuationSection(),
+      ...lotInventorySection(),
       ...reportsSection(),
       ...importSection(),
       ...settingsSection(),
