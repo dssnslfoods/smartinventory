@@ -482,6 +482,111 @@ async function ensureTransactionTypes(
   if (insErr) throw new Error(`[transaction_types backfill] ${insErr.message}`);
 }
 
+/**
+ * Backfill warehouses master with any unknown codes referenced from
+ * transactions or lots. NSL's history mentions branch warehouses
+ * (BT-*, P8-*) that aren't always in the Warehouses sheet. Same idea
+ * as ensureTransactionTypes — register placeholders so the import
+ * doesn't crash; admin can rename in Settings.
+ */
+async function ensureWarehouses(
+  codes: string[],
+  onProgress: (step: string, detail: string, percent: number) => void,
+  pct: number,
+) {
+  const unique = Array.from(new Set(codes.map(c => String(c).trim()).filter(Boolean)));
+  if (unique.length === 0) return;
+
+  const { data: existing, error: selErr } = await supabase
+    .from('warehouses')
+    .select('code')
+    .in('code', unique);
+  if (selErr) throw new Error(`[warehouses lookup] ${selErr.message}`);
+
+  const known = new Set((existing ?? []).map((r: any) => String(r.code)));
+  const missing = unique.filter(c => !known.has(c));
+  if (missing.length === 0) return;
+
+  console.warn(`[warehouses] backfilling ${missing.length} unknown codes:`, missing);
+  onProgress('กำลังเพิ่ม warehouse ที่ขาด...', missing.join(', '), pct);
+
+  // Guess a sensible whs_type from the suffix in the code (e.g. -RM01 → Raw Materials).
+  const guessType = (code: string): string => {
+    const suffix = code.toUpperCase();
+    if (suffix.includes('-RM')) return 'Raw Materials';
+    if (suffix.includes('-FG')) return 'Finished Goods';
+    if (suffix.includes('-PD')) return 'Production';
+    if (suffix.includes('-PK')) return 'Packaging';
+    if (suffix.includes('-QC')) return 'Quality Control';
+    if (suffix.includes('-CL')) return 'Claim Hold';
+    if (suffix.includes('-CO')) return 'Claim Hold';
+    if (suffix.includes('-WS')) return 'Waste';
+    return 'General';
+  };
+
+  const rows = missing.map((code, idx) => ({
+    code,
+    whs_name:   `Unknown warehouse ${code}`,
+    whs_type:   guessType(code),
+    is_active:  true,
+    sort_order: 1000 + idx,
+  }));
+  const { error: insErr } = await supabase
+    .from('warehouses')
+    .upsert(rows, { onConflict: 'code' });
+  if (insErr) throw new Error(`[warehouses backfill] ${insErr.message}`);
+}
+
+/**
+ * Backfill items master with any unknown item_codes referenced from
+ * transactions or lots. Items get minimal placeholder names (group_code
+ * is required — defaults to 0 'Unknown' which the admin can fix later).
+ */
+async function ensureItems(
+  codes: string[],
+  onProgress: (step: string, detail: string, percent: number) => void,
+  pct: number,
+) {
+  const unique = Array.from(new Set(codes.map(c => String(c).trim()).filter(Boolean)));
+  if (unique.length === 0) return;
+
+  // Items table can be large — query in chunks to avoid URL length limits.
+  const known = new Set<string>();
+  const QUERY_CHUNK = 500;
+  for (let i = 0; i < unique.length; i += QUERY_CHUNK) {
+    const slice = unique.slice(i, i + QUERY_CHUNK);
+    const { data, error } = await supabase.from('items').select('item_code').in('item_code', slice);
+    if (error) throw new Error(`[items lookup] ${error.message}`);
+    (data ?? []).forEach((r: any) => known.add(String(r.item_code)));
+  }
+
+  const missing = unique.filter(c => !known.has(c));
+  if (missing.length === 0) return;
+
+  console.warn(`[items] backfilling ${missing.length} unknown item_codes`);
+  onProgress('กำลังเพิ่ม items ที่ขาด...', `${missing.length} codes`, pct);
+
+  // Ensure an "Unknown" item_group exists so placeholders have a valid FK target.
+  await supabase.from('item_groups')
+    .upsert({ group_code: 0, group_name: 'FUNK-Unknown', description: 'Placeholder for items added at import time' }, { onConflict: 'group_code' });
+
+  const rows = missing.map(code => ({
+    item_code:   code,
+    itemname:    `Unknown ${code}`,
+    uom:         'KG',
+    std_cost:    0,
+    moving_avg:  0,
+    group_code:  0,
+    is_active:   true,
+  }));
+  // Insert in batches to stay under request limits
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const { error } = await supabase.from('items').upsert(batch, { onConflict: 'item_code' });
+    if (error) throw new Error(`[items backfill] ${error.message}`);
+  }
+}
+
 export const executeComprehensiveImport = async (
   data: ParsedData,
   includeSheets: Record<SheetConfigKey, boolean>,
@@ -512,11 +617,20 @@ export const executeComprehensiveImport = async (
             if (errClear) throw errClear;
           }
 
-          // Self-heal: SAP exports can carry trans_type codes we haven't seen
-          // before (FK violation crashes the whole batch). Backfill any missing
-          // codes into transaction_types with a placeholder name + 'Cost'
-          // direction (admin can rename later in Settings).
+          // Self-heal: SAP exports can carry trans_type / warehouse / item_code
+          // values that aren't in the master tables. Each unknown value would
+          // trigger an FK violation and (since batches are atomic) roll back
+          // 2000 rows. Backfill placeholders for all three so the import lands
+          // and the admin can clean up names later in Settings.
           await ensureTransactionTypes(data.inventory_transactions, onProgress, pct);
+          await ensureWarehouses(
+            data.inventory_transactions.map((t: any) => t.warehouse),
+            onProgress, pct,
+          );
+          await ensureItems(
+            data.inventory_transactions.map((t: any) => t.item_code),
+            onProgress, pct,
+          );
 
           await batchUpsert(table, data[key], 'trans_num,item_code,doc_line_num', (d, t) => {
             onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
@@ -540,6 +654,17 @@ export const executeComprehensiveImport = async (
     // ── Inventory Lots: snapshot-style replace ──
     // Find the snapshot_date(s) being imported; delete existing rows for those dates, then bulk insert.
     if (includeSheets.inventory_lots && data.inventory_lots.length > 0) {
+      // Self-heal FK references the same way transactions does — lots can
+      // also point at warehouses / items the master doesn't list.
+      await ensureWarehouses(
+        data.inventory_lots.map((l: any) => l.warehouse),
+        onProgress, pct,
+      );
+      await ensureItems(
+        data.inventory_lots.map((l: any) => l.item_code),
+        onProgress, pct,
+      );
+
       const snapshots = Array.from(new Set(data.inventory_lots.map((l: any) => l.snapshot_date)));
       onProgress('กำลังอัปเดต Inventory Lots...', `Replacing snapshot(s): ${snapshots.join(', ')}`, pct);
       for (const sd of snapshots) {
