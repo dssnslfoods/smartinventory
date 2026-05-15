@@ -1,17 +1,17 @@
 import { useState, useMemo } from 'react';
 import {
-  Target, RefreshCw, ShoppingCart, Download, Filter, Clock, Layers,
+  Target, RefreshCw, Download, Filter, Clock, Layers,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
   Scatter, ScatterChart, ResponsiveContainer,
 } from 'recharts';
 import {
-  useStockOnHand, useSlowMoving, useInventoryTurnover, useReorderSuggestions,
+  useStockOnHand, useSlowMoving, useInventoryTurnover,
   useSystemConfig, useLotDetail, useLatestLotSnapshot,
 } from '@/hooks/useSupabaseQuery';
 import { ITEM_GROUPS, WAREHOUSES } from '@/types/database';
-import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
+import { formatNumber, formatDate, formatCompact } from '@/utils/format';
 import { exportToExcel } from '@/utils/export';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
@@ -36,7 +36,6 @@ const TABS = [
   { id: 'vv',       label: 'VV Matrix',          icon: Target },
   { id: 'slow',     label: 'Slow Moving',         icon: Clock },
   { id: 'turnover', label: 'Inventory Turnover',  icon: RefreshCw },
-  { id: 'reorder',  label: 'Reorder Suggestions', icon: ShoppingCart },
   { id: 'fefo',     label: 'FEFO Pick List',      icon: Layers },
 ] as const;
 
@@ -50,7 +49,7 @@ export function ReportsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Management Reports"
-        subtitle="รายงานเชิงวิเคราะห์: VV Matrix, Slow Moving, Turnover, Reorder"
+        subtitle="รายงานเชิงวิเคราะห์: VV Matrix, Slow Moving, Turnover, FEFO"
         helpTitle="Management Reports (รายงานบริหาร)"
         helpBody={(<>
           <HelpSection title="หน้านี้แสดงอะไร">
@@ -77,8 +76,8 @@ export function ReportsPage() {
             <HelpFormula>Turnover Ratio = Annual COGS / Average Inventory Value</HelpFormula>
             ค่าสูง = หมุนเร็ว ดี — Days on Hand = 365 / Turnover
           </HelpSection>
-          <HelpSection title="แท็บ Reorder Suggestions">
-            แสดงสินค้าที่ควรสั่งเพิ่ม + จำนวนแนะนำที่ควรสั่ง — คำนวณจาก Reorder Point และ Max Level
+          <HelpSection title="แท็บ FEFO Pick List">
+            ลำดับการหยิบ lot ตามวันหมดอายุน้อย → มาก สำหรับใช้กับคลังจริง (First-Expired-First-Out)
           </HelpSection>
         </>)}
       />
@@ -105,7 +104,6 @@ export function ReportsPage() {
       {activeTab === 'vv'       && <VVMatrixTab />}
       {activeTab === 'slow'     && <SlowMovingTab />}
       {activeTab === 'turnover' && <TurnoverTab />}
-      {activeTab === 'reorder'  && <ReorderTab />}
       {activeTab === 'fefo'     && <FEFOPickListTab />}
     </div>
   );
@@ -1213,174 +1211,6 @@ function TurnoverTab() {
   );
 }
 
-// ── Reorder Suggestions Tab ───────────────────────────────────────────────────
-function ReorderTab() {
-  const [warehouse, setWhs]       = useState('');
-  const [groupCode, setGroupCode] = useState<number | undefined>();
-
-  const { data, isLoading } = useReorderSuggestions({
-    warehouse: warehouse || undefined,
-    groupName: groupCode ? ITEM_GROUPS[groupCode] : undefined,
-  });
-
-  const summary = useMemo(() => {
-    const all = data ?? [];
-    const totalOrderValue = all.reduce((s, r) => s + Number(r.suggested_order_value), 0);
-    const critical = all.filter(r => r.current_stock <= r.min_level).length;
-    return { total: all.length, totalOrderValue, critical };
-  }, [data]);
-
-  const urgencyColor = (row: NonNullable<typeof data>[number]) => {
-    if (row.current_stock <= row.min_level)     return '#C62828';
-    if (row.current_stock <= row.reorder_point) return '#E65100';
-    return 'var(--text)';
-  };
-  const urgencyLabel = (row: NonNullable<typeof data>[number]) => {
-    if (row.current_stock <= row.min_level)     return 'CRITICAL';
-    if (row.current_stock <= row.reorder_point) return 'Reorder';
-    return 'Monitor';
-  };
-
-  const handleExport = () => {
-    exportToExcel((data ?? []).map(r => ({
-      'Item Code':             r.item_code,
-      'Item Name':             r.itemname,
-      'Group':                 r.group_name,
-      'Warehouse':             r.warehouse,
-      'Current Stock':         Number(r.current_stock),
-      'UOM':                   r.uom,
-      'Min Level':             Number(r.min_level),
-      'Reorder Point':         Number(r.reorder_point),
-      'Max Level':             r.max_level !== null ? Number(r.max_level) : 'N/A',
-      'Daily Avg Out (90d)':   Number(r.daily_avg_out),
-      'Days Remaining':        r.days_remaining !== null ? Number(r.days_remaining) : 'N/A',
-      'Suggested Order Qty':   Number(r.suggested_order_qty),
-      'Moving Avg Cost':       Number(r.moving_avg),
-      'Suggested Order Value': Number(r.suggested_order_value),
-    })), 'Reorder_Suggestions');
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div className="card border-l-4" style={{ borderLeftColor: '#C62828' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Items Below Min Level</p>
-          <p className="text-2xl font-bold" style={{ color: '#C62828' }}>{summary.critical}</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Need immediate reorder</p>
-        </div>
-        <div className="card border-l-4" style={{ borderLeftColor: '#E65100' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Items to Reorder</p>
-          <p className="text-2xl font-bold" style={{ color: '#E65100' }}>{summary.total}</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>At or below reorder point</p>
-        </div>
-        <div className="card border-l-4" style={{ borderLeftColor: 'var(--color-primary)' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Estimated Order Value</p>
-          <p className="text-2xl font-bold" style={{ color: 'var(--color-primary)' }}>
-            ฿{formatCompact(summary.totalOrderValue)}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            {formatCurrency(summary.totalOrderValue)}
-          </p>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-4">
-          <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-          <select className="select" value={warehouse} onChange={e => setWhs(e.target.value)}>
-            <option value="">All Warehouses</option>
-            {WAREHOUSES.map(w => <option key={w.code} value={w.code}>{w.code} - {w.name}</option>)}
-          </select>
-          <select className="select" value={groupCode ?? ''} onChange={e => setGroupCode(e.target.value ? Number(e.target.value) : undefined)}>
-            <option value="">All Groups</option>
-            {Object.entries(ITEM_GROUPS).map(([code, name]) => (
-              <option key={code} value={code}>{name}</option>
-            ))}
-          </select>
-          <button onClick={handleExport} className="btn btn-secondary ml-auto">
-            <Download size={16} /> Export
-          </button>
-        </div>
-      </div>
-
-      <div className="card p-0">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : (
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Urgency</th>
-                  <th>Item Code</th>
-                  <th>Item Name</th>
-                  <th>Warehouse</th>
-                  <th className="text-right">Current</th>
-                  <th className="text-right">Min Level</th>
-                  <th className="text-right">Reorder Pt.</th>
-                  <th className="text-right">Days Left</th>
-                  <th className="text-right">Order Qty</th>
-                  <th className="text-right">Order Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data ?? []).map((row, i) => (
-                  <tr key={`${row.item_code}-${row.warehouse}-${i}`}>
-                    <td>
-                      <span className="badge text-white text-xs font-semibold"
-                        style={{ backgroundColor: urgencyColor(row) }}>
-                        {urgencyLabel(row)}
-                      </span>
-                    </td>
-                    <td className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>
-                      {row.item_code}
-                    </td>
-                    <td className="text-sm" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {row.itemname}
-                    </td>
-                    <td className="text-sm">{row.warehouse}</td>
-                    <td className="text-right tabular-nums font-mono text-sm"
-                      style={{ color: row.current_stock <= row.min_level ? '#C62828' : 'var(--text)' }}>
-                      {formatNumber(Number(row.current_stock), 2)} {row.uom}
-                    </td>
-                    <td className="text-right tabular-nums text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {formatNumber(Number(row.min_level), 2)}
-                    </td>
-                    <td className="text-right tabular-nums text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {formatNumber(Number(row.reorder_point), 2)}
-                    </td>
-                    <td className="text-right tabular-nums font-semibold">
-                      {row.days_remaining !== null ? (
-                        <span style={{ color: Number(row.days_remaining) < 7 ? '#C62828' : 'var(--text)' }}>
-                          {Number(row.days_remaining)}d
-                        </span>
-                      ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                    </td>
-                    <td className="text-right tabular-nums font-semibold" style={{ color: 'var(--color-primary)' }}>
-                      {formatNumber(Number(row.suggested_order_qty), 0)} {row.uom}
-                    </td>
-                    <td className="text-right tabular-nums text-sm">
-                      ฿{formatCompact(Number(row.suggested_order_value))}
-                    </td>
-                  </tr>
-                ))}
-                {(data ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
-                      ไม่มีรายการที่ต้อง reorder ในขณะนี้ ✓
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ── FEFO Pick List Tab ─────────────────────────────────────────────────────
 function FEFOPickListTab() {
