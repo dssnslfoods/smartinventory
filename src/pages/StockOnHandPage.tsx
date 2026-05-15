@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Download, Search, Filter } from 'lucide-react';
+import { Download, Search, Filter, X } from 'lucide-react';
 import { useStockOnHand } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
@@ -15,6 +15,10 @@ export function StockOnHandPage() {
   const [sortField, setSortField] = useState<string>('stock_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
+  const [fsCategory, setFsCategory] = useState('');
+  const [minValue, setMinValue] = useState('');     // ฿
+  const [minQty, setMinQty] = useState('');         // units
+  const [valueBucket, setValueBucket] = useState<'all' | '100k' | '1M' | '10M'>('all');
   const PAGE_SIZE = 50;
 
   const { data: stockData, isLoading } = useStockOnHand({
@@ -24,9 +28,48 @@ export function StockOnHandPage() {
     search: search || undefined,
   });
 
+  const availableFsCategories = useMemo(() => {
+    if (!stockData) return [];
+    const s = new Set<string>();
+    for (const r of stockData) {
+      const c = (r as any).fs_category;
+      if (c) s.add(c);
+    }
+    return Array.from(s).sort();
+  }, [stockData]);
+
+  const minValueNum = useMemo(() => {
+    const n = parseFloat(minValue);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [minValue]);
+  const minQtyNum = useMemo(() => {
+    const n = parseFloat(minQty);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [minQty]);
+
+  const bucketThreshold = useMemo(() => {
+    switch (valueBucket) {
+      case '100k': return 100_000;
+      case '1M':   return 1_000_000;
+      case '10M':  return 10_000_000;
+      default:     return null;
+    }
+  }, [valueBucket]);
+
   const sortedData = useMemo(() => {
     if (!stockData) return [];
-    return [...stockData].sort((a, b) => {
+    const filtered = stockData.filter((r) => {
+      // FS Category
+      if (fsCategory && (r as any).fs_category !== fsCategory) return false;
+      // Min stock value
+      const sv = Number(r.stock_value);
+      if (minValueNum != null && sv < minValueNum) return false;
+      if (bucketThreshold != null && sv < bucketThreshold) return false;
+      // Min current stock
+      if (minQtyNum != null && Number(r.current_stock) < minQtyNum) return false;
+      return true;
+    });
+    return filtered.sort((a, b) => {
       const aVal = (a as unknown as Record<string, unknown>)[sortField];
       const bVal = (b as unknown as Record<string, unknown>)[sortField];
       const aNum = typeof aVal === 'number' ? aVal : Number(aVal) || 0;
@@ -36,7 +79,7 @@ export function StockOnHandPage() {
       }
       return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
     });
-  }, [stockData, sortField, sortDir]);
+  }, [stockData, sortField, sortDir, fsCategory, minValueNum, minQtyNum, bucketThreshold]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -56,8 +99,22 @@ export function StockOnHandPage() {
   const pageEnd    = Math.min(pageStart + PAGE_SIZE, totalItems);
   const pagedData  = sortedData.slice(pageStart, pageEnd);
 
-  // Reset to page 0 whenever the filter/search inputs change.
-  useEffect(() => { setPage(0); }, [warehouse, groupCode, isActive, search]);
+  // Reset to page 0 whenever any filter/search input changes.
+  useEffect(() => {
+    setPage(0);
+  }, [warehouse, groupCode, isActive, search, fsCategory, minValueNum, minQtyNum, bucketThreshold]);
+
+  const resetFilters = () => {
+    setSearch(''); setWarehouse(''); setGroupCode(undefined);
+    setIsActive(undefined); setFsCategory('');
+    setMinValue(''); setMinQty(''); setValueBucket('all');
+  };
+
+  const activeFilterCount = [
+    search, warehouse, groupCode, isActive !== undefined ? '1' : '',
+    fsCategory, minValueNum != null ? '1' : '', minQtyNum != null ? '1' : '',
+    valueBucket !== 'all' ? '1' : '',
+  ].filter(Boolean).length;
 
   const handleExport = () => {
     exportToExcel(sortedData.map(s => ({
@@ -125,20 +182,39 @@ export function StockOnHandPage() {
       </div>
 
       {/* Filters */}
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-4">
-          <Filter size={18} style={{ color: 'var(--text-muted)' }} />
-
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+      <div className="card space-y-3">
+        {/* Row 1 — search + action buttons */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[260px] max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
             <input
               type="text"
-              placeholder="Search item code or name..."
+              placeholder="ค้นหา รหัสสินค้า / ชื่อ / FS category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="input pl-9"
+              className="input pl-9 w-full"
             />
           </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {activeFilterCount > 0 && (
+              <button
+                onClick={resetFilters}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                title="ลบ filter ทั้งหมด"
+              >
+                <X size={12} /> Reset ({activeFilterCount})
+              </button>
+            )}
+            <button onClick={handleExport} className="btn btn-secondary">
+              <Download size={16} /> Export ({totalItems})
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2 — dropdowns */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Filter size={16} style={{ color: 'var(--text-muted)' }} />
 
           <select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="select">
             <option value="">All Warehouses</option>
@@ -158,6 +234,15 @@ export function StockOnHandPage() {
             ))}
           </select>
 
+          {availableFsCategories.length > 0 && (
+            <select className="select" value={fsCategory} onChange={(e) => setFsCategory(e.target.value)}>
+              <option value="">All FS Categories</option>
+              {availableFsCategories.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+
           <select
             value={isActive === undefined ? '' : isActive ? 'active' : 'inactive'}
             onChange={(e) => {
@@ -171,9 +256,73 @@ export function StockOnHandPage() {
             <option value="inactive">Inactive</option>
           </select>
 
-          <button onClick={handleExport} className="btn btn-secondary ml-auto">
-            <Download size={16} /> Export Excel
-          </button>
+          <select
+            value={`${sortField}|${sortDir}`}
+            onChange={(e) => {
+              const [f, d] = e.target.value.split('|');
+              setSortField(f);
+              setSortDir(d as 'asc' | 'desc');
+            }}
+            className="select"
+            title="เรียงลำดับ"
+          >
+            <option value="stock_value|desc">เรียง: มูลค่าสูง → ต่ำ</option>
+            <option value="stock_value|asc">เรียง: มูลค่าต่ำ → สูง</option>
+            <option value="current_stock|desc">เรียง: จำนวนสต็อกสูง → ต่ำ</option>
+            <option value="current_stock|asc">เรียง: จำนวนสต็อกต่ำ → สูง</option>
+            <option value="item_code|asc">เรียง: รหัสสินค้า A-Z</option>
+            <option value="itemname|asc">เรียง: ชื่อสินค้า A-Z</option>
+          </select>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>Min ฿:</span>
+            <input
+              type="number" min="0" step="1000"
+              value={minValue}
+              onChange={e => setMinValue(e.target.value)}
+              placeholder="0"
+              className="input w-28 text-right text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>Min Qty:</span>
+            <input
+              type="number" min="0" step="1"
+              value={minQty}
+              onChange={e => setMinQty(e.target.value)}
+              placeholder="0"
+              className="input w-24 text-right text-xs"
+            />
+          </div>
+        </div>
+
+        {/* Row 3 — stock value bucket chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>มูลค่าสต็อก:</span>
+          {([
+            { label: 'ทั้งหมด',  value: 'all'  as const },
+            { label: '> ฿100K', value: '100k' as const },
+            { label: '> ฿1M',   value: '1M'   as const },
+            { label: '> ฿10M',  value: '10M'  as const },
+          ]).map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setValueBucket(opt.value)}
+              className="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+              style={valueBucket === opt.value
+                ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#fff' }
+                : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+          <span className="ml-auto text-xs" style={{ color: 'var(--text-muted)' }}>
+            {totalItems > 0
+              ? <>พบ <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong> รายการ · มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></>
+              : <span>ไม่พบรายการที่ตรงกับ filter</span>}
+          </span>
         </div>
       </div>
 
