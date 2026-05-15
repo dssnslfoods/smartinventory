@@ -230,17 +230,22 @@ export const parseComprehensiveExcel = async (
           const item_code = getVal(row, ['Item Code']);
           const warehouse = getVal(row, ['Warehouse Code', 'Warehouse']);
           if (!item_code || !warehouse) return null;
-          // Skip rows with no thresholds set at all
+          // Skip rows with no thresholds set — handles null AND empty string AND zero.
+          // (The master file has 37k threshold rows with empty values; importing them all
+          // wastes ~70 round trips and pollutes the table with zeros.)
           const min = getVal(row, ['Min Level', 'Min']);
           const rop = getVal(row, ['Reorder Point', 'ROP']);
           const max = getVal(row, ['Max Level', 'Max']);
-          if (min == null && rop == null && max == null) return null;
+          const minN = min == null || min === '' ? 0 : Number(min);
+          const ropN = rop == null || rop === '' ? 0 : Number(rop);
+          const maxN = max == null || max === '' ? null : Number(max);
+          if (!minN && !ropN && maxN == null) return null;
           return {
             item_code:     String(item_code).trim(),
             warehouse:     String(warehouse).trim(),
-            min_level:     Number(min ?? 0),
-            reorder_point: Number(rop ?? 0),
-            max_level:     max != null ? Number(max) : null,
+            min_level:     minN,
+            reorder_point: ropN,
+            max_level:     maxN,
           };
         }).filter(Boolean) as any[];
 
@@ -353,24 +358,59 @@ export const parseComprehensiveExcel = async (
 };
 
 // ── 2. Execute Relational Import ─────────────────────────────────────────────
-const BATCH_SIZE = 500;
+// Tuned for NSL's master file size (≈300k transactions, ≈2k items).
+// 2000 rows/batch keeps each request under Supabase's 1MB body limit, and
+// 4 concurrent workers ≈ saturates a single TCP connection without
+// hammering PostgREST.
+const BATCH_SIZE  = 2000;
+const CONCURRENCY = 4;
+
+/**
+ * Run `worker` against each chunk in parallel, up to CONCURRENCY at a time.
+ * Slices share a single index counter so the work is naturally load-balanced.
+ */
+async function runConcurrently<T>(
+  chunks: T[],
+  worker: (chunk: T, idx: number) => Promise<number>,
+  onProgress: (done: number, total: number) => void,
+  total: number,
+) {
+  let next = 0;
+  let done = 0;
+  const runOne = async () => {
+    while (next < chunks.length) {
+      const idx = next++;
+      const batchSize = await worker(chunks[idx], idx);
+      done += batchSize;
+      onProgress(Math.min(done, total), total);
+    }
+  };
+  const workers = Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, runOne);
+  await Promise.all(workers);
+}
+
+const sliceIntoChunks = <T>(data: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < data.length; i += size) out.push(data.slice(i, i + size));
+  return out;
+};
 
 const batchUpsert = async (table: string, data: any[], conflictKey: string, onProgress: (done: number, total: number) => void) => {
-  for (let i = 0; i < data.length; i += BATCH_SIZE) {
-    const batch = data.slice(i, i + BATCH_SIZE);
+  const chunks = sliceIntoChunks(data, BATCH_SIZE);
+  await runConcurrently(chunks, async (batch) => {
     const { error } = await supabase.from(table).upsert(batch, { onConflict: conflictKey });
     if (error) throw new Error(`[${table}] ${error.message}`);
-    onProgress(Math.min(i + BATCH_SIZE, data.length), data.length);
-  }
+    return batch.length;
+  }, onProgress, data.length);
 };
 
 const batchInsert = async (table: string, data: any[], onProgress: (done: number, total: number) => void) => {
-  for (let i = 0; i < data.length; i += BATCH_SIZE) {
-    const batch = data.slice(i, i + BATCH_SIZE);
+  const chunks = sliceIntoChunks(data, BATCH_SIZE);
+  await runConcurrently(chunks, async (batch) => {
     const { error } = await supabase.from(table).insert(batch);
     if (error && error.code !== '23505') throw new Error(`[${table}] ${error.message}`);
-    onProgress(Math.min(i + BATCH_SIZE, data.length), data.length);
-  }
+    return batch.length;
+  }, onProgress, data.length);
 };
 
 export const executeComprehensiveImport = async (
@@ -393,13 +433,11 @@ export const executeComprehensiveImport = async (
         });
       } else {
         if (table === 'inventory_transactions' && txnMode === 'replace') {
-           onProgress('กำลังล้างตาราง Transactions...', 'Clearing Old Movements', pct);
-           let hasMore = true;
-           while(hasMore) {
-               const { data: qData, error: errClear } = await supabase.from('inventory_transactions').delete().gt('id', 0).select('id').limit(5000);
-               if (errClear) throw errClear;
-               hasMore = (qData?.length ?? 0) === 5000;
-           }
+          onProgress('กำลังล้างตาราง Transactions...', 'Clearing old movements', pct);
+          // Single round-trip delete — Postgres handles 100k+ rows in one call
+          // much faster than paginating 5000 at a time over the network.
+          const { error: errClear } = await supabase.from('inventory_transactions').delete().gt('id', 0);
+          if (errClear) throw errClear;
         }
         await batchInsert(table, data[key], (d, t) => {
           onProgress(`กำลังอัปเดต ${label}...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
