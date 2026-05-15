@@ -2,7 +2,13 @@ import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { formatNumber } from '@/utils/format';
 
-export type SheetConfigKey = 'warehouses' | 'item_groups' | 'items' | 'stock_thresholds' | 'inventory_transactions';
+export type SheetConfigKey =
+  | 'warehouses'
+  | 'item_groups'
+  | 'items'
+  | 'stock_thresholds'
+  | 'inventory_transactions'
+  | 'inventory_lots';
 
 export interface ParsedData {
   warehouses: any[];
@@ -10,6 +16,7 @@ export interface ParsedData {
   items: any[];
   stock_thresholds: any[];
   inventory_transactions: any[];
+  inventory_lots: any[];
 }
 
 export interface ImportState {
@@ -17,6 +24,7 @@ export interface ImportState {
   sheetFound: Record<SheetConfigKey, boolean>;
   txDateMin: string;
   txDateMax: string;
+  lotSnapshotDate: string;   // ToDate (latest) across all lot rows
 }
 
 const getVal = (row: Record<string, unknown>, keys: string[]): unknown => {
@@ -130,6 +138,47 @@ export const parseComprehensiveExcel = async (
            } : null;
         });
 
+        // ── Inventory Lots ──
+        // Match sheets named "Lot", "Lots", or "lot_คงเหลือ" (case-insensitive substring)
+        const inventory_lots = extract(['Lot Inventory', 'Lots', 'lot_คงเหลือ', 'lot คงเหลือ', 'Lot'], row => {
+          const itemCode = getVal(row, ['Item Code', 'ItemCode']);
+          const warehouse = getVal(row, ['Warehouse', 'Warehouse Code', 'WhsCode']);
+          if (!itemCode || !warehouse) return null;
+
+          const dateLike = (v: unknown): string | null => {
+            if (!v) return null;
+            if (v instanceof Date) return v.toISOString().split('T')[0];
+            const s = String(v).trim();
+            if (!s || s === 'null' || s === 'undefined') return null;
+            // Excel serial?
+            if (/^\d{5}$/.test(s)) {
+              const d = XLSX.SSF.parse_date_code(Number(s));
+              if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+            }
+            // "YYYY.MM.DD..." → take the leading date
+            const m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+            if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+            return s.split('T')[0].split(' ')[0] || null;
+          };
+
+          const qty = Number(getVal(row, ['Quantity', 'Qty', 'OnHand']) ?? 0);
+          const amount = Number(getVal(row, ['Total Amount', 'Amount', 'Value']) ?? 0);
+          const batchRaw = getVal(row, ['BatchNum Lot', 'BatchNum', 'Batch', 'Lot']);
+          // Keep original batch identifier (preserves the timestamp-style id from SAP)
+          const batch_num = batchRaw ? String(batchRaw).trim() : `${itemCode}-${warehouse}-NOBATCH`;
+          return {
+            item_code:       String(itemCode).trim(),
+            warehouse:       String(warehouse).trim(),
+            batch_num,
+            qty,
+            amount,
+            in_date:         dateLike(getVal(row, ['InDate', 'In Date'])),
+            production_date: dateLike(getVal(row, ['PrdDate', 'Production Date', 'ProductionDate'])),
+            expire_date:     dateLike(getVal(row, ['ExpDate', 'Expire Date', 'ExpiryDate', 'Expiration Date'])),
+            snapshot_date:   dateLike(getVal(row, ['ToDate', 'Snapshot Date', 'AsOf'])) ?? new Date().toISOString().split('T')[0],
+          };
+        });
+
         let txDateMin = '';
         let txDateMax = '';
         if (inventory_transactions.length > 0) {
@@ -138,16 +187,27 @@ export const parseComprehensiveExcel = async (
           txDateMax = dates[dates.length - 1] ?? '';
         }
 
-        const parsedData = { warehouses, item_groups, items, stock_thresholds, inventory_transactions };
+        let lotSnapshotDate = '';
+        if (inventory_lots.length > 0) {
+          // Use the most common (mode) snapshot date — typically all rows share one ToDate
+          const counts = new Map<string, number>();
+          for (const l of inventory_lots as any[]) {
+            counts.set(l.snapshot_date, (counts.get(l.snapshot_date) ?? 0) + 1);
+          }
+          lotSnapshotDate = [...counts.entries()].sort((a,b) => b[1] - a[1])[0]?.[0] ?? '';
+        }
+
+        const parsedData = { warehouses, item_groups, items, stock_thresholds, inventory_transactions, inventory_lots };
         const sheetFound = {
           warehouses: warehouses.length > 0,
           item_groups: item_groups.length > 0,
           items: items.length > 0,
           stock_thresholds: stock_thresholds.length > 0,
-          inventory_transactions: inventory_transactions.length > 0
+          inventory_transactions: inventory_transactions.length > 0,
+          inventory_lots: inventory_lots.length > 0,
         };
 
-        resolve({ parsedData, sheetFound, txDateMin, txDateMax });
+        resolve({ parsedData, sheetFound, txDateMin, txDateMax, lotSnapshotDate });
       } catch (err) {
         reject(err);
       }
@@ -218,6 +278,21 @@ export const executeComprehensiveImport = async (
     await executeTable('items', 'items', 'item_code', 'Items (สินค้า)');
     await executeTable('stock_thresholds', 'stock_thresholds', 'item_code,warehouse', 'Stock Thresholds (จุดสั่งซื้อ)');
     await executeTable('inventory_transactions', 'inventory_transactions', null, 'Transactions (การเคลื่อนไหว)');
+
+    // ── Inventory Lots: snapshot-style replace ──
+    // Find the snapshot_date(s) being imported; delete existing rows for those dates, then bulk insert.
+    if (includeSheets.inventory_lots && data.inventory_lots.length > 0) {
+      const snapshots = Array.from(new Set(data.inventory_lots.map((l: any) => l.snapshot_date)));
+      onProgress('กำลังอัปเดต Inventory Lots...', `Replacing snapshot(s): ${snapshots.join(', ')}`, pct);
+      for (const sd of snapshots) {
+        const { error: errClear } = await supabase.from('inventory_lots').delete().eq('snapshot_date', sd);
+        if (errClear) throw new Error(`[inventory_lots clear ${sd}] ${errClear.message}`);
+      }
+      await batchInsert('inventory_lots', data.inventory_lots, (d, t) => {
+        onProgress(`กำลังอัปเดต Inventory Lots...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
+      });
+      pct += progressSegment;
+    }
 
     await supabase.from('system_config').upsert({ key: 'last_sync_at', value: new Date().toISOString() }, { onConflict: 'key' });
 

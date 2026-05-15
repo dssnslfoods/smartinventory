@@ -14,6 +14,7 @@ const pageTitles: Record<string, string> = {
   '/alerts':                 'Low Stock Alerts',
   '/valuation':              'Cost & Valuation',
   '/reports':                'Management Reports',
+  '/lots':                   'Lot Inventory',
   '/procurement/suppliers':  'Suppliers',
   '/procurement/orders':     'Purchase Orders',
   '/procurement/transit':    'Goods in Transit',

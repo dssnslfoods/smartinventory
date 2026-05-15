@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Upload, AlertTriangle, Package, ArrowLeftRight,
-  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Archive
+  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Archive, Layers,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useImportLogs } from '@/hooks/useSupabaseQuery';
@@ -32,7 +32,8 @@ const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any
   { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'] },
   { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'expire_date'], headers: ['Code', 'Name', 'UOM', 'Expire Date'] },
   { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'] },
-  { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'] }
+  { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'] },
+  { key: 'inventory_lots', label: 'Lot Inventory', sub: 'สต็อกต่อ lot', icon: <Layers size={20}/>, cols: ['item_code', 'warehouse', 'batch_num', 'qty', 'expire_date'], headers: ['Item', 'Whs', 'Batch', 'Qty', 'Expire'] },
 ];
 
 export function ImportPage() {
@@ -111,6 +112,7 @@ export function ImportPage() {
     setImporting(true);
     try {
       await supabase.rpc('clear_all_data');
+      await supabase.from('inventory_lots').delete().neq('id', 0);
       await supabase.from('inventory_transactions').delete().neq('id', 0);
       await supabase.from('stock_thresholds').delete().neq('id', 0);
       await supabase.from('items').delete().neq('item_code', '');
@@ -137,7 +139,10 @@ export function ImportPage() {
         helpTitle="Data Import (นำเข้าข้อมูล)"
         helpBody={(<>
           <HelpSection title="ทำงานยังไง">
-            อัปโหลด Excel เดียวที่มี 5 sheets — ระบบจะนำเข้าทีละตารางตามลำดับ FK (Warehouses → Item Groups → Items → Thresholds → Transactions)
+            อัปโหลด Excel เดียวที่มี 6 sheets — ระบบจะนำเข้าทีละตารางตามลำดับ FK (Warehouses → Item Groups → Items → Thresholds → Transactions → Lot Inventory)
+          </HelpSection>
+          <HelpSection title="🧾 Lot Inventory (ใหม่)">
+            Sheet สำหรับ "สต็อกต่อ lot" — แต่ละ lot มี expire date และต้นทุนของตัวเอง ทำให้ VV Matrix แม่นยำขึ้นและเปิดทาง FEFO pick list. โหมด import: ระบบจะลบข้อมูล lot ของ <strong>snapshot_date เดียวกัน</strong> ก่อน insert ใหม่ (snapshot-style replace)
           </HelpSection>
           <HelpSection title="ขั้นตอน 4 Step">
             <ol className="list-decimal ml-5 text-xs space-y-1">

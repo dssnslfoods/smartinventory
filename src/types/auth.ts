@@ -74,6 +74,7 @@ export const PERMISSIONS = {
   MENU_ALERTS:      'menu.alerts',
   MENU_VALUATION:   'menu.valuation',
   MENU_REPORTS:     'menu.reports',
+  MENU_LOTS:        'menu.lots',
   MENU_SUPPLIERS:   'menu.procurement.suppliers',
   MENU_ORDERS:      'menu.procurement.orders',
   MENU_TRANSIT:     'menu.procurement.transit',
@@ -105,6 +106,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       'menu.alerts',
       'menu.valuation',
       'menu.reports',
+      'menu.lots',
     ],
   },
   {
@@ -139,6 +141,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'menu.alerts':                'ดู Low Stock Alerts',
   'menu.valuation':             'ดู Cost & Valuation',
   'menu.reports':               'ดู Management Reports',
+  'menu.lots':                  'ดู Lot Inventory',
   'menu.procurement.suppliers': 'ดู Suppliers',
   'menu.procurement.orders':    'ดู Purchase Orders',
   'menu.procurement.transit':   'ดู Goods in Transit',
@@ -168,6 +171,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.alerts',
     'menu.valuation',
     'menu.reports',
+    'menu.lots',
     'menu.procurement.suppliers',
     'menu.procurement.orders',
     'menu.procurement.transit',
@@ -179,6 +183,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.alerts',
     'menu.valuation',
     'menu.reports',
+    'menu.lots',
     'menu.procurement.suppliers',
     'menu.procurement.orders',
     'menu.procurement.transit',
@@ -203,7 +208,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
 export const FEATURE_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
     label: 'โมดูลหลัก',
-    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports'],
+    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots'],
   },
   {
     label: 'จัดซื้อ',
