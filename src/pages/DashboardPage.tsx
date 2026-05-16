@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   useKPI, useStockOnHand, useMovementMonthly,
-  useTransactions, useDataDateRange,
+  useDataDateRange,
   useSlowMoving,
   useLatestLotSnapshot, useLotAging, useMonthlyTotal,
 } from '@/hooks/useSupabaseQuery';
@@ -83,7 +83,6 @@ export function DashboardPage() {
   const { data: monthlyData = [], isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
   // Pull just enough transactions for the "Top 10 Most Active" widget —
   // 50 rows is more than enough to compute a top-10 (was 200, 4× over-fetch).
-  const { data: recentTx }                               = useTransactions({ page: 0, pageSize: 50 });
   const { data: dataDateRange }                          = useDataDateRange();
   const { data: slowData = [] }                          = useSlowMoving();
   const { data: latestSnapshot }                         = useLatestLotSnapshot();
@@ -220,32 +219,7 @@ export function DashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.value - a.value).slice(0, 10);
   }, [stockData]);
 
-  // ── Top Moved Items (last 30 days from recent transactions) ────────────────
-  const itemNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of stockData) {
-      if (!map.has(s.item_code)) {
-        map.set(s.item_code, s.itemname || (s as any).item_name || '—');
-      }
-    }
-    return map;
-  }, [stockData]);
-
-  const topMoved = useMemo(() => {
-    if (!recentTx?.data) return [];
-    const map = new Map<string, { item_code: string; totalIn: number; totalOut: number; totalMoved: number; txCount: number }>();
-    for (const tx of recentTx.data) {
-      const prev = map.get(tx.item_code) ?? { item_code: tx.item_code, totalIn: 0, totalOut: 0, totalMoved: 0, txCount: 0 };
-      prev.totalIn += Number(tx.in_qty);
-      prev.totalOut += Number(tx.out_qty);
-      prev.totalMoved += Number(tx.in_qty) + Number(tx.out_qty);
-      prev.txCount++;
-      map.set(tx.item_code, prev);
-    }
-    return Array.from(map.values()).sort((a, b) => b.totalMoved - a.totalMoved).slice(0, 10);
-  }, [recentTx]);
-
-  // ── MoM Comparison ─────────────────────────────────────────────────────────
+  // ── MoM Comparison (Month-over-Month — last month vs the month before) ────
   const mom = useMemo(() => {
     if (monthlyData.length < 2) return null;
     const curr = monthlyData[monthlyData.length - 1];
@@ -256,6 +230,27 @@ export function DashboardPage() {
       prevMonth: prev.month,
       inCurr: curr.In, inPrev: prev.In, inPct: pct(curr.In, prev.In),
       outCurr: curr.Out, outPrev: prev.Out, outPct: pct(curr.Out, prev.Out),
+    };
+  }, [monthlyData]);
+
+  // ── QoQ Comparison (Quarter-over-Quarter — last 3 months vs prior 3) ──────
+  // Uses the last 6 entries of monthlyData (most recent → oldest tail).
+  // current quarter = months[-3..-1] · previous quarter = months[-6..-4].
+  const qoq = useMemo(() => {
+    if (monthlyData.length < 6) return null;
+    const last6 = monthlyData.slice(-6);
+    const currQ = last6.slice(3);
+    const prevQ = last6.slice(0, 3);
+    const sumIn  = (arr: typeof last6) => arr.reduce((s, m) => s + Number(m.In  ?? 0), 0);
+    const sumOut = (arr: typeof last6) => arr.reduce((s, m) => s + Number(m.Out ?? 0), 0);
+    const pct = (c: number, p: number) => (p === 0 ? 0 : ((c - p) / Math.abs(p)) * 100);
+    const inCurr  = sumIn(currQ),  inPrev  = sumIn(prevQ);
+    const outCurr = sumOut(currQ), outPrev = sumOut(prevQ);
+    return {
+      currStart: currQ[0].month, currEnd: currQ[2].month,
+      prevStart: prevQ[0].month, prevEnd: prevQ[2].month,
+      inCurr, inPrev, inPct: pct(inCurr, inPrev),
+      outCurr, outPrev, outPct: pct(outCurr, outPrev),
     };
   }, [monthlyData]);
 
@@ -284,9 +279,9 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-3 text-xs flex-wrap">
-          {recentTx?.count != null && (
+          {dataDateRange?.totalTransactions != null && (
             <span className="px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: 'rgba(31,56,100,0.1)', color: COLORS.primary }}>
-              {formatNumber(recentTx.count)} transactions
+              {formatNumber(dataDateRange.totalTransactions)} transactions
             </span>
           )}
           {latestSnapshot && (
@@ -692,8 +687,8 @@ export function DashboardPage() {
 
       </div>
 
-      {/* ====== Section 6: MoM Comparison (full-width) ====== */}
-      <div className="grid grid-cols-1 gap-6">
+      {/* ====== Section 6: MoM + QoQ Comparison (2 cols) ====== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* MoM Comparison */}
         <div className="card relative">
           <div className="flex items-center gap-2 mb-1">
@@ -721,63 +716,36 @@ export function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
 
-      {/* ====== Section 7: Top 10 Most Moved Items (Last 30 days) ====== */}
-      <div className="card relative">
-        <HelpButton
-          title="สินค้าเคลื่อนไหวมากสุด"
-          body={(<>
-            <HelpSection title="คืออะไร">
-              สินค้าที่มี Tx จำนวนหน่วยรวม (รับ+จ่าย) มากที่สุดจากธุรกรรมล่าสุด 200 รายการ
-            </HelpSection>
-            <HelpSection title="คอลัมน์">
-              <ul className="list-disc ml-5 text-xs space-y-1">
-                <li><strong>Total Moved</strong> = In + Out (รวมหน่วยทั้งสองทาง)</li>
-                <li><strong>Tx Count</strong> = จำนวนธุรกรรม</li>
-              </ul>
-            </HelpSection>
-          </>)}
-        />
-        <div className="flex items-center gap-2 mb-1">
-          <Activity size={16} style={{ color: COLORS.primary }} />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 10 Most Active Items</h3>
-        </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>From recent 200 transactions</p>
-        {topMoved.length === 0 ? (
-          <EmptyChart icon={<Activity size={28} />} text="ยังไม่มี Transaction" />
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th className="text-center">#</th>
-                  <th>Item Code</th>
-                  <th>Item Name</th>
-                  <th className="text-right">In</th>
-                  <th className="text-right">Out</th>
-                  <th className="text-right">Total Moved</th>
-                  <th className="text-right">Tx Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topMoved.map((row, idx) => (
-                  <tr key={row.item_code}>
-                    <td className="text-center" style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
-                    <td className="font-mono text-sm" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</td>
-                    <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {itemNameMap.get(row.item_code) ?? '—'}
-                    </td>
-                    <td className="text-right" style={{ color: COLORS.green }}>+{formatNumber(row.totalIn, 0)}</td>
-                    <td className="text-right" style={{ color: COLORS.red }}>-{formatNumber(row.totalOut, 0)}</td>
-                    <td className="text-right font-semibold">{formatNumber(row.totalMoved, 0)}</td>
-                    <td className="text-right" style={{ color: 'var(--text-muted)' }}>{row.txCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* QoQ Comparison */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <CalendarRange size={16} style={{ color: COLORS.primary }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>เทียบไตรมาสก่อน (QoQ)</h3>
+            <InfoTooltip title="Quarter-over-Quarter">
+              <p className="mb-2">รวม 3 เดือนล่าสุด เทียบกับ 3 เดือนก่อนหน้า — ช่วยกรอง noise รายเดือน</p>
+              <p>🟢 % เขียว = ขึ้น · 🔴 % แดง = ลง</p>
+            </InfoTooltip>
           </div>
-        )}
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+            {qoq
+              ? `${formatDate(qoq.currStart)}–${formatDate(qoq.currEnd)} vs ${formatDate(qoq.prevStart)}–${formatDate(qoq.prevEnd)}`
+              : 'Quarter-over-Quarter Comparison'}
+          </p>
+          {!qoq ? (
+            <EmptyChart icon={<CalendarRange size={28} />} text="ต้องมีข้อมูลอย่างน้อย 6 เดือน" />
+          ) : (
+            <div className="space-y-3">
+              <MomRow label="รับเข้า (In)"   curr={qoq.inCurr}  prev={qoq.inPrev}  pct={qoq.inPct}  color={COLORS.green} />
+              <MomRow label="จ่ายออก (Out)"  curr={qoq.outCurr} prev={qoq.outPrev} pct={qoq.outPct} color={COLORS.red} />
+              <MomRow label="Net (สุทธิ)"
+                      curr={qoq.inCurr - qoq.outCurr}
+                      prev={qoq.inPrev - qoq.outPrev}
+                      pct={(qoq.inPrev - qoq.outPrev) === 0 ? 0 : (((qoq.inCurr - qoq.outCurr) - (qoq.inPrev - qoq.outPrev)) / Math.abs(qoq.inPrev - qoq.outPrev)) * 100}
+                      color={COLORS.primary} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
