@@ -3124,7 +3124,7 @@ const MODE_INFO: Record<VVMode, {
     emoji:    '⚠️',
     label:    'Item — Worst-Case',
     short:    'รวมเป็น SKU โดยใช้ lot ที่ใกล้หมดที่สุด',
-    why:      'ปรัชญา Conservative — ถ้ามี lot ใดเสี่ยง → SKU นี้เสี่ยง',
+    why:      'แนวคิด Conservative — ถ้ามี lot ใดเสี่ยง → SKU นี้เสี่ยง',
     formula:  'Validity Score = คะแนนของ lot ที่ใกล้หมดที่สุด (Min)  •  Value Score = sum ของ stock value',
     useFor:   'การตัดสินใจระดับ SKU แบบรอบคอบ — alert, การหยุดสั่งซื้อ',
     goodFor:  ['Risk Alert', 'หยุดสั่ง SKU ที่ใกล้หมด', 'Food safety', 'Quarterly review'],
@@ -3135,7 +3135,7 @@ const MODE_INFO: Record<VVMode, {
     emoji:    '⚖️',
     label:    'Item — Weighted',
     short:    'รวมเป็น SKU โดยถ่วงน้ำหนัก validity ด้วยมูลค่า lot',
-    why:      'ปรัชญา Realistic — สะท้อนความสดของเงินที่จมใน SKU นี้โดยเฉลี่ย',
+    why:      'แนวคิด Realistic — สะท้อนความสดของเงินที่จมใน SKU นี้โดยเฉลี่ย',
     formula:  'Validity Score = Σ(lot_days × lot_value) / Σ(lot_value)  •  Value Score = sum ของ stock value',
     useFor:   'การตั้งราคา, การประเมินมูลค่าเชิงกลยุทธ์, แผนการตลาด',
     goodFor:  ['การตั้งราคา/ส่วนลด', 'Pricing strategy', 'การเจรจา Supplier', 'งบประมาณ'],
@@ -3154,15 +3154,33 @@ function ModeSelectorCard({
 }) {
   const order: VVMode[] = ['lot', 'item_worst', 'item_weighted'];
   const active = MODE_INFO[mode];
+  // Persist collapse preference per session so the user doesn't have to
+  // click "ย่อ" every time they navigate back to this tab.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem('vv-mode-collapsed') === '1'; }
+    catch { return false; }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      try { sessionStorage.setItem('vv-mode-collapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   return (
     <div className="card p-0 overflow-hidden">
-      {/* Header strip with title + 3 buttons */}
+      {/* Header strip with title + 3 buttons + collapse toggle */}
       <div className="px-4 py-3 border-b flex flex-wrap items-center gap-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
-        <div>
-          <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode</p>
-          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>เลือกมุมมองตามคำถามที่ต้องการตอบ</p>
-        </div>
+        {!collapsed && (
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode</p>
+            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>เลือกมุมมองตามคำถามที่ต้องการตอบ</p>
+          </div>
+        )}
+        {collapsed && (
+          <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode:</p>
+        )}
         <div className="flex flex-wrap rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
           {order.map(m => {
             const info = MODE_INFO[m];
@@ -3188,14 +3206,24 @@ function ModeSelectorCard({
             );
           })}
         </div>
-        {snap && (
-          <span className="text-[10px] px-2 py-1 rounded ml-auto" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+        {snap && !collapsed && (
+          <span className="text-[10px] px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
             Snapshot: {snap}
           </span>
         )}
+        {/* Collapse / Expand toggle — pushed to the right */}
+        <button
+          onClick={toggleCollapsed}
+          className="ml-auto text-xs px-2.5 py-1 rounded border hover:bg-[var(--bg-card)] transition-colors flex items-center gap-1"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          title={collapsed ? 'ขยาย — แสดงคำอธิบายเต็ม' : 'ย่อ — แสดงเฉพาะปุ่มเลือก mode'}
+        >
+          {collapsed ? '▼ ขยายคำอธิบาย' : '▲ ย่อ'}
+        </button>
       </div>
 
-      {/* Inline tooltip card — explains the active mode */}
+      {/* Inline tooltip card — explains the active mode (hidden when collapsed) */}
+      {!collapsed && (
       <div className="p-4" style={{ borderLeft: `4px solid ${active.accent}` }}>
         <div className="flex items-start gap-3 mb-2">
           <span className="text-xl">{active.emoji}</span>
@@ -3207,7 +3235,7 @@ function ModeSelectorCard({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-xs">
           <div>
-            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>💡 ปรัชญา</p>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>💡 แนวคิด</p>
             <p style={{ color: 'var(--text-muted)' }}>{active.why}</p>
           </div>
           <div>
@@ -3269,6 +3297,7 @@ function ModeSelectorCard({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
