@@ -126,9 +126,24 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
           </button>
         </form>
 
-        <p className="text-center text-white/40 text-xs mt-6">
-          NSL Food Service Co., Ltd. &copy; 2025
-        </p>
+        <div className="text-center text-white/50 text-xs mt-6 space-y-1">
+          <p>
+            Developed by{' '}
+            <span className="font-semibold text-white/70">D2Infinite Co., Ltd.</span>
+          </p>
+          <p className="text-white/40">
+            &copy; 2026 D2Infinite Co., Ltd. &nbsp;·&nbsp;
+            Licensed under the{' '}
+            <a
+              href="https://opensource.org/licenses/MIT"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-white/70 transition-colors"
+            >
+              MIT License
+            </a>
+          </p>
+        </div>
       </div>
     </div>
   );
