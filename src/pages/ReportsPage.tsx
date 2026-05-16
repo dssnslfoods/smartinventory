@@ -1387,20 +1387,30 @@ function SlowMovingTab() {
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
+          <div className="table-container" style={{ border: 'none', overflowX: 'auto' }}>
+            <table className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '8%' }} />   {/* Status */}
+                <col style={{ width: '11%' }} />  {/* Item Code */}
+                <col style={{ width: '22%' }} />  {/* Item Name */}
+                <col style={{ width: '9%' }} />   {/* Group */}
+                <col style={{ width: '7%' }} />   {/* WH */}
+                <col style={{ width: '11%' }} />  {/* Qty */}
+                <col style={{ width: '9%' }} />   {/* Value */}
+                <col style={{ width: '11%' }} />  {/* Last Out + days */}
+                <col style={{ width: '12%' }} />  {/* Oldest Lot */}
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Status</th>
-                  <th>Item Code</th>
-                  <th>Item Name</th>
-                  <th>Group</th>
-                  <th>Warehouse</th>
-                  <th className="text-right">Stock Qty</th>
-                  <th className="text-right">Stock Value</th>
-                  <th>Last Out</th>
-                  <th className="text-right">Days Since Out</th>
-                  <th className="text-right">Oldest Lot</th>
+                  <th className="px-2 py-2">สถานะ</th>
+                  <th className="px-2 py-2">รหัส</th>
+                  <th className="px-2 py-2">ชื่อสินค้า</th>
+                  <th className="px-2 py-2">กลุ่ม</th>
+                  <th className="px-2 py-2">WH</th>
+                  <th className="px-2 py-2 text-right">คงเหลือ</th>
+                  <th className="px-2 py-2 text-right">มูลค่า</th>
+                  <th className="px-2 py-2 text-right">ออกล่าสุด</th>
+                  <th className="px-2 py-2 text-right">Lot เก่าสุด</th>
                 </tr>
               </thead>
               <tbody>
@@ -1416,44 +1426,54 @@ function SlowMovingTab() {
                     className="cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
                     title="คลิกเพื่อดูรายละเอียด lot ของรายการนี้"
                   >
-                    <td>
-                      <div className="flex items-center gap-1.5">
-                        <span className="badge text-white text-xs"
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="badge text-white text-[10px] px-1.5 py-0.5"
                           style={{ backgroundColor: SLOW_COLORS[row.movement_status] }}>
                           {row.movement_status === 'dead_stock' ? 'Dead' :
                            row.movement_status === 'slow_moving' ? 'Slow' : 'Active'}
                         </span>
                         {row.fefo_violation && (
                           <span
-                            className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                            className="text-[10px] px-1 py-0.5 rounded font-bold"
                             style={{ backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
                             title="FEFO Violation — มี lot เก่าค้าง ทั้งที่มี lot ใหม่กว่า"
                           >
-                            ⚠️ FEFO
+                            ⚠️
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>
+                    <td className="px-2 py-2 font-mono text-xs font-medium truncate"
+                        style={{ color: 'var(--color-primary-light)' }} title={row.item_code}>
                       {row.item_code}
                     </td>
-                    <td className="text-sm" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td className="px-2 py-2 text-xs truncate" title={row.itemname}>
                       {row.itemname}
                     </td>
-                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-2 py-2 text-[11px] truncate" style={{ color: 'var(--text-muted)' }}
+                        title={row.group_name ?? ''}>
                       {(row.group_name ?? '').split('-')[0]}
                     </td>
-                    <td>{row.warehouse}</td>
-                    <td className="text-right tabular-nums">{formatNumber(Number(row.current_stock), 2)} {row.uom}</td>
-                    <td className="text-right tabular-nums text-sm">฿{formatCompact(Number(row.stock_value))}</td>
-                    <td className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {row.last_out_date ? formatDate(row.last_out_date) : <span className="text-red-600">Never</span>}
+                    <td className="px-2 py-2 text-xs truncate" title={row.whs_name ?? row.warehouse}>
+                      {row.warehouse}
                     </td>
-                    <td className="text-right tabular-nums font-semibold"
-                      style={{ color: row.movement_status === 'dead_stock' ? SLOW_COLORS.dead_stock : 'var(--text)' }}>
-                      {row.days_since_last_out !== null ? `${formatNumber(row.days_since_last_out, 0)}d` : '∞'}
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">
+                      {formatNumber(Number(row.current_stock), 0)} <span style={{ color: 'var(--text-muted)' }}>{row.uom}</span>
                     </td>
-                    <td className="text-right tabular-nums text-sm">
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">
+                      ฿{formatCompact(Number(row.stock_value))}
+                    </td>
+                    <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
+                      <div style={{ color: 'var(--text-muted)' }}>
+                        {row.last_out_date ? formatDate(row.last_out_date) : <span className="text-red-600">Never</span>}
+                      </div>
+                      <div className="tabular-nums font-semibold text-[11px]"
+                        style={{ color: row.movement_status === 'dead_stock' ? SLOW_COLORS.dead_stock : 'var(--text)' }}>
+                        {row.days_since_last_out !== null ? `${formatNumber(row.days_since_last_out, 0)}d` : '∞'}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">
                       {row.oldest_lot_age_days != null ? (
                         <span style={{
                           color: row.oldest_lot_age_days >= 180 ? '#7c3aed'
@@ -1464,7 +1484,7 @@ function SlowMovingTab() {
                           {formatNumber(row.oldest_lot_age_days, 0)}d
                           {row.lot_count > 1 && (
                             <span className="text-[10px] ml-1" style={{ color: 'var(--text-muted)' }}>
-                              ({formatNumber(row.lot_count)} lots)
+                              ({formatNumber(row.lot_count)})
                             </span>
                           )}
                         </span>
@@ -1475,7 +1495,7 @@ function SlowMovingTab() {
                   </tr>
                 ))}
                 {(data ?? []).length === 0 && (
-                  <tr><td colSpan={10} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
                 )}
               </tbody>
             </table>

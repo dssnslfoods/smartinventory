@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Info } from 'lucide-react';
 
 interface Props {
@@ -14,13 +14,21 @@ interface Props {
   placement?: 'below' | 'above';
 }
 
+const POPOVER_WIDTH = 320; // matches w-80 (Tailwind)
+const VIEWPORT_PADDING = 8;
+
 /**
  * Hover-aware info bubble. Clickable to keep open on touch devices.
- * Use next to chart titles, KPI cards, or any concept the user might want
- * a deeper explanation of.
+ *
+ * Auto-flips horizontally when the icon is near the right edge of the
+ * viewport, so the popover never gets clipped. Falls back to a centred
+ * layout on narrow screens (< POPOVER_WIDTH + padding) so the bubble
+ * spans the available width.
  */
 export function InfoTooltip({ title, children, size = 14, color, placement = 'below' }: Props) {
   const [open, setOpen] = useState(false);
+  const [hAlign, setHAlign] = useState<'left' | 'right' | 'center'>('left');
+  const [centerOffset, setCenterOffset] = useState(0);
   const containerRef = useRef<HTMLSpanElement>(null);
 
   // Close when clicking outside
@@ -32,6 +40,33 @@ export function InfoTooltip({ title, children, size = 14, color, placement = 'be
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
+
+  // Decide horizontal placement before paint to avoid clipping flash
+  useLayoutEffect(() => {
+    if (!open || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const vw   = window.innerWidth;
+
+    // Narrow viewport: anchor to viewport, not the icon, and centre.
+    if (vw < POPOVER_WIDTH + VIEWPORT_PADDING * 2) {
+      setHAlign('center');
+      // distance from icon's left edge to (viewport_left + padding)
+      setCenterOffset(VIEWPORT_PADDING - rect.left);
+      return;
+    }
+
+    const spaceRight = vw - rect.left;
+    if (spaceRight >= POPOVER_WIDTH + VIEWPORT_PADDING) {
+      setHAlign('left');                  // popover extends to the right of the icon
+    } else {
+      setHAlign('right');                 // not enough room → anchor to icon's right edge
+    }
+  }, [open]);
+
+  const horizontalStyle: React.CSSProperties =
+    hAlign === 'left'   ? { left:  0 } :
+    hAlign === 'right'  ? { right: 0 } :
+    /* center */         { left: centerOffset, width: `calc(100vw - ${VIEWPORT_PADDING * 2}px)` };
 
   return (
     <span
@@ -52,11 +87,11 @@ export function InfoTooltip({ title, children, size = 14, color, placement = 'be
 
       {open && (
         <div
-          className="absolute z-50 w-80 max-w-[90vw] rounded-lg shadow-lg border text-left"
+          className="absolute z-50 w-80 max-w-[calc(100vw-16px)] rounded-lg shadow-lg border text-left"
           style={{
             top:    placement === 'below' ? '100%' : 'auto',
             bottom: placement === 'above' ? '100%' : 'auto',
-            left: 0,
+            ...horizontalStyle,
             marginTop:    placement === 'below' ? 4 : 0,
             marginBottom: placement === 'above' ? 4 : 0,
             backgroundColor: 'var(--bg-card)',
