@@ -349,7 +349,11 @@ export function DashboardPage() {
           tooltipTitle="Working Capital"
           tooltip={<>
             <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน (Moving Avg)</p>
-            <p>ยิ่งสูง → ยิ่งต้องการกระแสเงินสด · ยิ่งเสีย Carrying Cost ต่อปี</p>
+            <CalcBlock formula="Σ (current_stock × moving_avg) ทุก SKU × คลัง">
+              <CalcLine label="Inventory Value" value={`฿${formatNumber(financialKpi.invValue, 0)}`} bold />
+              <CalcLine label="≈" value={`฿${formatCompact(financialKpi.invValue)}`} muted />
+            </CalcBlock>
+            <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
           </>}
         />
         <KpiCard
@@ -360,17 +364,19 @@ export function DashboardPage() {
           color={financialKpi.turnover >= 4 ? COLORS.green : financialKpi.turnover >= 1 ? COLORS.amber : COLORS.red}
           tooltipTitle="Inventory Turnover"
           tooltip={<>
-            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
-              Turnover = COGS / Inventory
+            <CalcBlock formula="Turnover = COGS / Inventory">
+              <CalcLine label="COGS (Out value)" value={`฿${formatCompact(financialKpi.cogs12mo)}`} />
+              <CalcLine label="÷ Inventory" value={`฿${formatCompact(financialKpi.invValue)}`} />
+              <CalcLine label="= Turnover" value={`${financialKpi.turnover.toFixed(4)}×`} bold />
+            </CalcBlock>
+            <p className="mt-2 mb-1">
+              <strong>Window:</strong> {financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูล
             </p>
-            <p className="mb-2">
-              <strong>Window:</strong> {financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูล{' '}
-              {financialKpi.windowStart && financialKpi.windowEnd && (
-                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                  ({formatDate(financialKpi.windowStart)} – {formatDate(financialKpi.windowEnd)})
-                </span>
-              )}
-            </p>
+            {financialKpi.windowStart && financialKpi.windowEnd && (
+              <p className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
+                ({formatDate(financialKpi.windowStart)} – {formatDate(financialKpi.windowEnd)})
+              </p>
+            )}
             <ul className="list-disc ml-4 space-y-0.5">
               <li>🟢 ≥ 4×/ปี — ดี (อาหาร)</li>
               <li>🟠 1-4× — ปานกลาง</li>
@@ -387,9 +393,12 @@ export function DashboardPage() {
           tooltipTitle="Days Inventory Outstanding (DIO)"
           tooltip={<>
             <p className="mb-2">ของอยู่ในคลังเฉลี่ยกี่วันก่อนถูกขายออก · อาหารควร ≤ 90 วัน</p>
-            <p>
-              คำนวณจาก <strong>{financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูลจริง</strong>{' '}
-              (anchor ตามวันที่ข้อมูล ไม่ใช่ปฏิทินจากวันนี้)
+            <CalcBlock formula="DIO = 365 / Turnover">
+              <CalcLine label="Turnover" value={`${financialKpi.turnover.toFixed(4)}×`} />
+              <CalcLine label="365 ÷ Turnover" value={financialKpi.dio == null ? 'N/A' : `${formatNumber(financialKpi.dio, 0)} วัน`} bold />
+            </CalcBlock>
+            <p className="mt-2">
+              คำนวณจาก <strong>{financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูลจริง</strong>
             </p>
           </>}
         />
@@ -400,7 +409,15 @@ export function DashboardPage() {
           sublabel="มี tx ใน 90 วัน"
           color={COLORS.teal}
           tooltipTitle="Active SKUs"
-          tooltip="จำนวนรหัสสินค้าที่มีการเคลื่อนไหวใน 90 วันที่ผ่านมา"
+          tooltip={<>
+            <p className="mb-2">จำนวนรหัสสินค้าที่มีการเคลื่อนไหวใน 90 วันที่ผ่านมา</p>
+            <CalcBlock formula="COUNT(DISTINCT item_code) WHERE doc_date ≥ today − 90d">
+              <CalcLine label="Active SKUs" value={formatNumber(kpi?.activeItems ?? 0)} bold />
+            </CalcBlock>
+            <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              SKU ที่ไม่ Active = ไม่มีธุรกรรมเกิน 90 วัน → จัดอยู่ใน Slow / Dead Stock
+            </p>
+          </>}
         />
         <KpiCard
           icon={<AlertTriangle size={18} />}
@@ -410,8 +427,13 @@ export function DashboardPage() {
           color={expiringSoon.expiredLots > 0 ? COLORS.red : expiringSoon.lots > 0 ? COLORS.amber : COLORS.green}
           tooltipTitle="Lots ใกล้หมดอายุ"
           tooltip={<>
-            <p className="mb-2">จำนวน lot ที่หมดอายุไปแล้ว + จะหมดใน 30 วัน + มูลค่าที่เสี่ยง</p>
-            <p><strong>Action:</strong> ดู FEFO Pick List หรือ Lot Inventory เพื่อเร่งระบาย</p>
+            <p className="mb-2">รวม lot ที่ <strong>หมดแล้ว + จะหมดใน 30 วัน</strong></p>
+            <CalcBlock formula="Σ lots WHERE bucket IN ('expired', '0-30')">
+              <CalcLine label="🔴 หมดแล้ว"        value={`${formatNumber(expiringSoon.expiredLots)} lots · ฿${formatCompact(expiringSoon.expiredValue)}`} />
+              <CalcLine label="🟠 ≤ 30 วัน"       value={`${formatNumber(expiringSoon.lots - expiringSoon.expiredLots)} lots · ฿${formatCompact(expiringSoon.value - expiringSoon.expiredValue)}`} />
+              <CalcLine label="รวม"                value={`${formatNumber(expiringSoon.lots)} lots · ฿${formatCompact(expiringSoon.value)}`} bold />
+            </CalcBlock>
+            <p className="mt-2"><strong>Action:</strong> ดู FEFO Pick List เพื่อเร่งระบาย</p>
           </>}
         />
         <KpiCard
@@ -421,7 +443,20 @@ export function DashboardPage() {
           sublabel={`${movementHealth.counts.dead_stock} items · ฿${formatCompact(movementHealth.values.dead_stock)}`}
           color={movementHealth.deadPct <= 5 ? COLORS.green : movementHealth.deadPct <= 15 ? COLORS.amber : COLORS.red}
           tooltipTitle="Dead Stock %"
-          tooltip="สินค้าที่ไม่มีการเคลื่อนไหวเลย ≥ 180 วัน · มาตรฐานควร < 5%"
+          tooltip={<>
+            <p className="mb-2">สินค้าที่ไม่มีการเคลื่อนไหวเลย ≥ 180 วัน</p>
+            <CalcBlock formula="Dead % = Dead items / Total items × 100">
+              <CalcLine label="Dead items"  value={`${formatNumber(movementHealth.counts.dead_stock)} items`} />
+              <CalcLine label="÷ Total"      value={`${formatNumber(movementHealth.total)} items`} />
+              <CalcLine label="= Dead %"     value={`${movementHealth.deadPct.toFixed(2)}%`} bold />
+            </CalcBlock>
+            <p className="mt-2 mb-1"><strong>มูลค่าเสี่ยง</strong></p>
+            <CalcBlock formula="">
+              <CalcLine label="Dead stock value"  value={`฿${formatNumber(movementHealth.values.dead_stock, 0)}`} bold />
+              <CalcLine label="Slow stock value"  value={`฿${formatNumber(movementHealth.values.slow_moving, 0)}`} muted />
+            </CalcBlock>
+            <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>มาตรฐาน Dead Stock ควร &lt; 5%</p>
+          </>}
         />
       </div>
 
@@ -779,6 +814,32 @@ function KpiCard({
         <p className="text-xl font-bold tabular-nums mt-0.5" style={{ color }}>{value}</p>
         <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>{sublabel}</p>
       </div>
+    </div>
+  );
+}
+
+// ── Calculation block (used inside KPI tooltips to show the math) ───────────
+function CalcBlock({ formula, children }: { formula: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+      {formula && (
+        <p className="font-mono mb-1.5 pb-1.5 border-b" style={{ color: 'var(--text)', borderColor: 'var(--border)' }}>
+          {formula}
+        </p>
+      )}
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+function CalcLine({ label, value, bold, muted }: {
+  label: string; value: string; bold?: boolean; muted?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-[11px]"
+         style={{ color: muted ? 'var(--text-muted)' : 'var(--text)' }}>
+      <span className={bold ? 'font-semibold' : ''}>{label}</span>
+      <span className={`font-mono tabular-nums ${bold ? 'font-bold' : ''}`}>{value}</span>
     </div>
   );
 }
