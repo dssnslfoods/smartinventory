@@ -175,6 +175,7 @@ export function useItems(filters?: { isActive?: boolean; groupCode?: number; sea
         group_name: row.item_groups?.group_name ?? '',
       })) as (Item & { group_name: string })[];
     },
+    staleTime: 15 * 60 * 1000, // master data — refresh every 15 min
   });
 }
 
@@ -267,6 +268,7 @@ export function useSlowMoving(filters?: {
       if (error) throw error;
       return (data ?? []) as SlowMovingItem[];
     },
+    staleTime: 15 * 60 * 1000, // computed analytical view — refresh every 15 min
   });
 }
 
@@ -284,6 +286,7 @@ export function useInventoryTurnover(filters?: { groupName?: string }) {
       if (error) throw error;
       return (data ?? []) as InventoryTurnover[];
     },
+    staleTime: 15 * 60 * 1000, // computed analytical view — refresh every 15 min
   });
 }
 
@@ -390,6 +393,7 @@ export function useDataDateRange() {
         totalTransactions: countRes.count ?? 0,
       };
     },
+    staleTime: 30 * 60 * 1000, // date range moves only on new imports — cache 30 min
   });
 }
 
@@ -738,7 +742,9 @@ export function useLatestLotSnapshot() {
       if (error) throw error;
       return data?.[0]?.snapshot_date as string | undefined;
     },
-    staleTime: 60 * 1000,
+    // Lot snapshots only change on Import. Cache 30 min — invalidate
+    // explicitly from the import flow when a new snapshot is loaded.
+    staleTime: 30 * 60 * 1000,
   });
 }
 
@@ -760,6 +766,7 @@ export function useLotAging(snapshotDate?: string, filters?: { warehouse?: strin
         lot_count: number; total_qty: number; total_value: number;
       }>;
     },
+    staleTime: 15 * 60 * 1000, // aging changes with lot import — 15 min cache
   });
 }
 

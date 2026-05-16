@@ -1,32 +1,50 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { AppLayout } from '@/components/layout/AppLayout';
+
+// ─── Eager-loaded (always-on critical path) ─────────────────────────────────
+// LoginPage stays eager so the very first paint is fast for unauthenticated
+// users; AppLayout is part of the shell and already imported above.
 import { LoginPage } from '@/pages/LoginPage';
-import { DashboardPage } from '@/pages/DashboardPage';
-import { StockOnHandPage } from '@/pages/StockOnHandPage';
-import { MovementHistoryPage } from '@/pages/MovementHistoryPage';
-import { AlertsPage } from '@/pages/AlertsPage';
-import { ValuationPage } from '@/pages/ValuationPage';
-import { ReportsPage } from '@/pages/ReportsPage';
-import { LotInventoryPage } from '@/pages/LotInventoryPage';
-import { ImportPage } from '@/pages/admin/ImportPage';
-import { SettingsPage } from '@/pages/admin/SettingsPage';
-import { AuditLogPage } from '@/pages/admin/AuditLogPage';
-import { UsersPage } from '@/pages/admin/UsersPage';
-import { PermissionsPage } from '@/pages/admin/PermissionsPage';
-import { VVMatrixGuidePage } from '@/pages/admin/VVMatrixGuidePage';
-import SuppliersPage from '@/pages/procurement/SuppliersPage';
-import PurchaseOrdersPage from '@/pages/procurement/PurchaseOrdersPage';
-import GoodsInTransitPage from '@/pages/procurement/GoodsInTransitPage';
-import { SuperAdminLayout } from '@/pages/superadmin/SuperAdminLayout';
-import SuperAdminDashboardPage from '@/pages/superadmin/DashboardPage';
-import CompaniesPage from '@/pages/superadmin/CompaniesPage';
-import SuperAdminUsersPage from '@/pages/superadmin/UsersPage';
-import FeaturesPage from '@/pages/superadmin/FeaturesPage';
+
+// ─── Lazy-loaded routes — each becomes its own chunk ────────────────────────
+// Pattern: lazy(() => import('...').then(m => ({ default: m.NamedExport })))
+// This converts named exports to default for React.lazy.
+const DashboardPage       = lazy(() => import('@/pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const StockOnHandPage     = lazy(() => import('@/pages/StockOnHandPage').then(m => ({ default: m.StockOnHandPage })));
+const MovementHistoryPage = lazy(() => import('@/pages/MovementHistoryPage').then(m => ({ default: m.MovementHistoryPage })));
+const AlertsPage          = lazy(() => import('@/pages/AlertsPage').then(m => ({ default: m.AlertsPage })));
+const ValuationPage       = lazy(() => import('@/pages/ValuationPage').then(m => ({ default: m.ValuationPage })));
+const ReportsPage         = lazy(() => import('@/pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const LotInventoryPage    = lazy(() => import('@/pages/LotInventoryPage').then(m => ({ default: m.LotInventoryPage })));
+const ImportPage          = lazy(() => import('@/pages/admin/ImportPage').then(m => ({ default: m.ImportPage })));
+const SettingsPage        = lazy(() => import('@/pages/admin/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const AuditLogPage        = lazy(() => import('@/pages/admin/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
+const UsersPage           = lazy(() => import('@/pages/admin/UsersPage').then(m => ({ default: m.UsersPage })));
+const PermissionsPage     = lazy(() => import('@/pages/admin/PermissionsPage').then(m => ({ default: m.PermissionsPage })));
+const VVMatrixGuidePage   = lazy(() => import('@/pages/admin/VVMatrixGuidePage').then(m => ({ default: m.VVMatrixGuidePage })));
+const SuppliersPage       = lazy(() => import('@/pages/procurement/SuppliersPage'));
+const PurchaseOrdersPage  = lazy(() => import('@/pages/procurement/PurchaseOrdersPage'));
+const GoodsInTransitPage  = lazy(() => import('@/pages/procurement/GoodsInTransitPage'));
+const SuperAdminLayout    = lazy(() => import('@/pages/superadmin/SuperAdminLayout').then(m => ({ default: m.SuperAdminLayout })));
+const SuperAdminDashboardPage = lazy(() => import('@/pages/superadmin/DashboardPage'));
+const CompaniesPage       = lazy(() => import('@/pages/superadmin/CompaniesPage'));
+const SuperAdminUsersPage = lazy(() => import('@/pages/superadmin/UsersPage'));
+const FeaturesPage        = lazy(() => import('@/pages/superadmin/FeaturesPage'));
+
 import type { PermissionKey } from '@/types/auth';
+
+// ─── Suspense fallback ──────────────────────────────────────────────────────
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]" aria-label="Loading page">
+      <div className="w-10 h-10 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -124,14 +142,18 @@ function App() {
             element={
               <ProtectedRoute>
                 <RequireSuperAdmin>
-                  <SuperAdminLayout>
-                    <Routes>
-                      <Route path="/"         element={<SuperAdminDashboardPage />} />
-                      <Route path="/companies" element={<CompaniesPage />} />
-                      <Route path="/users"     element={<SuperAdminUsersPage />} />
-                      <Route path="/features"  element={<FeaturesPage />} />
-                    </Routes>
-                  </SuperAdminLayout>
+                  <Suspense fallback={<PageLoader />}>
+                    <SuperAdminLayout>
+                      <Suspense fallback={<PageLoader />}>
+                        <Routes>
+                          <Route path="/"         element={<SuperAdminDashboardPage />} />
+                          <Route path="/companies" element={<CompaniesPage />} />
+                          <Route path="/users"     element={<SuperAdminUsersPage />} />
+                          <Route path="/features"  element={<FeaturesPage />} />
+                        </Routes>
+                      </Suspense>
+                    </SuperAdminLayout>
+                  </Suspense>
                 </RequireSuperAdmin>
               </ProtectedRoute>
             }
@@ -144,8 +166,9 @@ function App() {
               <ProtectedRoute>
                 <ActiveUserRoute>
                   <AppLayout>
-                    <Routes>
-                      <Route path="/" element={<DashboardPage />} />
+                    <Suspense fallback={<PageLoader />}>
+                      <Routes>
+                        <Route path="/" element={<DashboardPage />} />
 
                       <Route path="/stock"     element={<RequirePermission permission="menu.stock"><StockOnHandPage /></RequirePermission>} />
                       <Route path="/movement"  element={<RequirePermission permission="menu.movement"><MovementHistoryPage /></RequirePermission>} />
@@ -164,7 +187,8 @@ function App() {
                       <Route path="/admin/permissions"  element={<RequirePermission permission="menu.admin.users"><PermissionsPage /></RequirePermission>} />
                       <Route path="/admin/audit"        element={<RequirePermission permission="menu.admin.audit"><AuditLogPage /></RequirePermission>} />
                       <Route path="/admin/vv-guide"    element={<RequirePermission permission="menu.admin.settings"><VVMatrixGuidePage /></RequirePermission>} />
-                    </Routes>
+                      </Routes>
+                    </Suspense>
                   </AppLayout>
                 </ActiveUserRoute>
               </ProtectedRoute>

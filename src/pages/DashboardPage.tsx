@@ -81,7 +81,9 @@ export function DashboardPage() {
   const { data: kpi, isLoading: kpiLoading }            = useKPI();
   const { data: stockData = [] }                         = useStockOnHand();
   const { data: monthlyData = [], isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
-  const { data: recentTx }                               = useTransactions({ page: 0, pageSize: 200 });
+  // Pull just enough transactions for the "Top 10 Most Active" widget —
+  // 50 rows is more than enough to compute a top-10 (was 200, 4× over-fetch).
+  const { data: recentTx }                               = useTransactions({ page: 0, pageSize: 50 });
   const { data: dataDateRange }                          = useDataDateRange();
   const { data: slowData = [] }                          = useSlowMoving();
   const { data: turnoverData = [] }                      = useInventoryTurnover();
