@@ -716,6 +716,66 @@ const sec11ThreeModes = [
   ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
 ];
 
+// ── Section 12 — Interactive UX features (NEW) ──────────────────────────────
+const sec12Interactive = [
+  h1('12. การใช้งานบนหน้าจอ — Interactive Features (ใหม่)'),
+  para('หน้า VV Matrix ออกแบบมาให้ผู้บริหาร / ทีมขาย โฟกัสเฉพาะเรื่องที่ต้องดำเนินการได้ทันที — มี 4 features หลักที่ทำให้การวิเคราะห์เร็วขึ้น'),
+  spacer(),
+
+  h2('12.1 Empty State — ไม่แสดงตาราง 1,000+ รายการตอนเปิดหน้า'),
+  para('เพื่อให้ทำงานเร็ว ระบบ "ไม่แสดงรายการทั้งหมด" เมื่อเข้าหน้าครั้งแรก — User ต้องเลือก filter อย่างน้อย 1 อย่าง ถึงจะเห็นตาราง'),
+  callout('สิ่งที่เห็นตอนเปิดหน้า', [
+    '• ไอคอนตัวกรองกลางจอ พร้อมข้อความ "เลือกเงื่อนไขเพื่อเริ่มดูรายการสินค้า"',
+    '• ปุ่ม shortcut 3 ปุ่ม: Class C – At Risk · 🔴 Critical only · Days Left ≤ 30 — กดเดียวเข้า filter ที่พบบ่อย',
+    '• Filter ที่ใช้ได้: Class · Group · FS Category · Warehouse · Risk · Days ≤ N · Min ฿ · Search · คลิกจุดในกราฟ',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  h2('12.2 คลิกจุดในกราฟ → กรองตาราง'),
+  para('VV Matrix scatter chart ทุกจุดคลิกได้ — คลิกแล้วตารางด้านล่างจะกรองให้เหลือเฉพาะรายการในช่อง (Value, Validity) นั้น'),
+  callout('พฤติกรรม', [
+    '• จุดที่ถูกเลือก: เส้นขอบสีเข้ม + opacity เต็ม',
+    '• Pill สีน้ำเงินด้านบนตาราง: "Value = X, Validity = Y (N รายการ)" + ปุ่ม × ยกเลิก',
+    '• คลิกจุดเดิมซ้ำ = ยกเลิกการกรอง',
+    '• ระบบ scroll ลงไปที่ตารางอัตโนมัติเพื่อให้เห็นผลทันที',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  callout('🎯 Use Case — คลิก scatter ทีละช่องตามลำดับความเสี่ยง', [
+    '1. คลิกช่อง (Value=5, Validity=1) — ของแพง+หมดอายุ → 🔴 CRITICAL · เร่งระบายด่วน',
+    '2. คลิกช่อง (Value=4-5, Validity=2-3) — ของแพง+เริ่มเสี่ยง → 🟠 ติดตามใกล้ชิด · เตรียมโปรโมชัน',
+    '3. คลิกช่อง (Value=1-2, Validity=4-5) — ของถูก+สด → ไม่ต้องเร่ง · ขายตามรอบปกติ',
+    '4. Export Excel แต่ละช่องเป็น action list ส่งทีมขาย',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  h2('12.3 Pagination 15 รายการต่อหน้า'),
+  para('เมื่อ filter แล้วยังเหลือรายการมาก (เช่น Class C อาจมี 200+) ระบบใช้ pagination เพื่อความเร็วในการ render และให้สายตาโฟกัสง่าย'),
+  callout('Pagination Controls', [
+    '• แสดง 15 รายการต่อหน้า · ระบุช่วงด้านล่าง "1-15 จาก 213 รายการ"',
+    '• ปุ่ม pagination แบบ compact: 1 … 5 6 7 … 15 (ใช้ ellipses เมื่อมีหลายหน้า)',
+    '• ปุ่มลูกศร ← / → สำหรับเดินทีละหน้า',
+    '• เปลี่ยน filter / mode = reset กลับหน้า 1 อัตโนมัติ',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  h2('12.4 Export ตามที่ filter อยู่'),
+  para('ปุ่ม "Export" บน toolbar ของหน้า VV Matrix จะ export เฉพาะรายการที่ผ่าน filter ปัจจุบัน (ไม่ใช่ทั้ง dataset) — ทำให้ admin/ทีมขายเลือก slice ที่สนใจแล้วได้ Excel ที่เน้นเฉพาะกลุ่มนั้น'),
+  callout('Excel Output', [
+    '• ตัวอย่าง: คลิกช่อง Critical → Export → ได้ Excel เฉพาะรายการ CRITICAL พร้อม priority rank',
+    '• คอลัมน์: rank · code · batch/lot · item name · group · stock value · expire · days left · scores · class · risk flag · recommendation',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  callout('💡 รวมเป็น Workflow ที่ใช้จริงในแต่ละสัปดาห์', [
+    '1. เปิดหน้า VV Matrix → เห็น scatter ทันที (ยังไม่มีตาราง)',
+    '2. คลิกช่องที่จำนวนรายการเยอะที่สุดในโซน Class C (มุมขวาล่าง)',
+    '3. กรองเพิ่ม Risk = Critical หรือ Days Left ≤ 30 ตามต้องการ',
+    '4. ดูตาราง paginated 15 รายการ → ค่อย ๆ เคลียร์ทีละหน้า',
+    '5. Export Excel ส่งทีมขาย/คลังเพื่อ action',
+  ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
+];
+
 // ── Document ─────────────────────────────────────────────────────────────────
 const doc = new Document({
   creator: 'SmartInventory · NSL Food Service',
@@ -769,6 +829,7 @@ const doc = new Document({
       ...sec9Whatif,
       ...sec10Summary,
       ...sec11ThreeModes,
+      ...sec12Interactive,
     ],
   }],
 });

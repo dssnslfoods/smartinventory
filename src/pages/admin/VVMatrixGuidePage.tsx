@@ -1,4 +1,4 @@
-import { Target, Info, Target as TargetIcon } from 'lucide-react';
+import { Target, Info, Target as TargetIcon, MousePointerClick, Filter, LayoutGrid } from 'lucide-react';
 
 export function VVMatrixGuidePage() {
   return (
@@ -136,9 +136,86 @@ export function VVMatrixGuidePage() {
           <Info size={16} /> การคำนวณอายุสินค้า (Automatic Calculation)
         </h3>
         <p className="text-xs text-amber-800 leading-relaxed">
-          หากนำเข้าข้อมูลโดยไม่มีวันหมดอายุ ระบบจะคำนวณจาก <strong>(วันที่นำเข้า + Shelf Life ของกลุ่มสินค้า)</strong> 
+          หากนำเข้าข้อมูลโดยไม่มีวันหมดอายุ ระบบจะคำนวณจาก <strong>(วันที่นำเข้า + Shelf Life ของกลุ่มสินค้า)</strong>
           ตามที่กำหนดไว้ในหน้า Setting เพื่อให้ระบบคำนวณ VV Matrix ต่อไปได้โดยไม่มีข้อมูลที่ว่างเปล่า
         </p>
+      </div>
+
+      {/* ── Interactive Features (NEW) ───────────────────────────────────── */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--text)' }}>
+            <MousePointerClick size={18} className="text-indigo-500" />
+            การใช้งานบนหน้าจอ — Interactive Features
+          </h3>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            หน้า Reports → VV Matrix ออกแบบให้ผู้บริหาร/ทีมขายโฟกัสเฉพาะเรื่องที่ต้อง action ได้ทันที
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Empty state */}
+          <div className="card">
+            <div className="flex items-start gap-2 mb-2">
+              <Filter size={16} className="text-indigo-500 mt-0.5" />
+              <h4 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                Empty State + Pagination
+              </h4>
+            </div>
+            <ul className="text-xs space-y-1.5 list-disc pl-4" style={{ color: 'var(--text-muted)' }}>
+              <li>ตารางไม่แสดงทันทีเมื่อเข้าหน้า — กดเลือก filter ก่อน</li>
+              <li>มี shortcut 3 ปุ่ม: Class C / Critical / Days ≤ 30</li>
+              <li>แสดง 15 รายการต่อหน้า · pagination เลขหน้าด้านล่าง</li>
+              <li>เปลี่ยน filter = reset กลับหน้า 1 อัตโนมัติ</li>
+            </ul>
+          </div>
+
+          {/* Click cells */}
+          <div className="card">
+            <div className="flex items-start gap-2 mb-2">
+              <MousePointerClick size={16} className="text-indigo-500 mt-0.5" />
+              <h4 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                คลิกจุดในกราฟ
+              </h4>
+            </div>
+            <ul className="text-xs space-y-1.5 list-disc pl-4" style={{ color: 'var(--text-muted)' }}>
+              <li>คลิกบับเบิ้ลในกราฟ scatter → กรองตารางเหลือเฉพาะช่อง (V, Vd) นั้น</li>
+              <li>จุดที่เลือกมีเส้นขอบสีน้ำเงิน + opacity เต็ม</li>
+              <li>Pill ด้านบนตาราง: "Value = X, Validity = Y (N รายการ)"</li>
+              <li>คลิกซ้ำ = ยกเลิก</li>
+            </ul>
+          </div>
+
+          {/* 3 modes */}
+          <div className="card">
+            <div className="flex items-start gap-2 mb-2">
+              <LayoutGrid size={16} className="text-indigo-500 mt-0.5" />
+              <h4 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                3 Analysis Modes
+              </h4>
+            </div>
+            <ul className="text-xs space-y-1.5 list-disc pl-4" style={{ color: 'var(--text-muted)' }}>
+              <li><strong>By Lot</strong> — 1 lot = 1 หน่วยคะแนน (FEFO, audit)</li>
+              <li><strong>Item Worst-Case</strong> — Validity = lot เก่าสุด (alert)</li>
+              <li><strong>Item Weighted</strong> — Validity ถ่วงน้ำหนักด้วยมูลค่า (budget)</li>
+              <li>สลับ mode ได้ทันที — ทุกตัวเลขอัปเดทตาม</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Workflow callout */}
+        <div className="card bg-indigo-50/40 border-indigo-200">
+          <h4 className="font-bold text-indigo-700 mb-2 flex items-center gap-2">
+            🎯 Workflow ที่แนะนำ — Weekly Review
+          </h4>
+          <ol className="text-xs space-y-1 list-decimal pl-5 text-indigo-900">
+            <li>เข้าหน้า Reports → VV Matrix → เห็น scatter ทันที (ตารางยังว่าง)</li>
+            <li>คลิกช่องโซน Class C (มุมขวาล่าง) ที่มีจำนวนรายการมากที่สุด</li>
+            <li>กรองเพิ่ม: Risk = Critical หรือ Days Left ≤ 30 (ตามจุดประสงค์)</li>
+            <li>ไล่ดูตาราง 15 รายการ/หน้า → ค่อย ๆ เคลียร์</li>
+            <li>กด Export — ได้ Excel เฉพาะ slice ที่กรองอยู่ส่งให้ทีมขาย/คลัง</li>
+          </ol>
+        </div>
       </div>
 
     </div>
