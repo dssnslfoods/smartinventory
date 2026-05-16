@@ -512,7 +512,7 @@ function CostAnalyticsTab() {
     exportToExcel(turnoverByGroup.map(g => ({
       'Group':                 g.group,
       'Inventory Value (MA)':  g.value,
-      'Annual COGS':           g.cogs,
+      'Annual COGS Proxy':     g.cogs,
       'Turnover Ratio':        Number(g.turnover.toFixed(2)),
       'Days Inventory':        g.dio < 999 ? Math.round(g.dio) : 'N/A',
       'Carrying Cost (Est)':   Math.round(g.value * carryingRate),
@@ -565,12 +565,12 @@ function CostAnalyticsTab() {
           icon={<TrendingUp size={14} />}
           label="Inventory Turnover"
           value={`${kpi.turnover.toFixed(2)}×`}
-          sub={`${kpi.monthsCounted}mo data · COGS ${formatCompact(kpi.cogs12mo)}`}
+          sub={`${kpi.monthsCounted}mo data · COGS Proxy ฿${formatCompact(kpi.cogs12mo)}`}
           color={kpi.turnover >= 4 ? '#16a34a' : kpi.turnover >= 1 ? '#d97706' : '#dc2626'}
           tooltipTitle="Inventory Turnover (อัตราหมุนเวียนสต็อก)"
           tooltip={<>
             <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
-              Turnover = COGS (12 เดือน) / Inventory Value
+              Turnover = COGS Proxy (12 mo) / Inventory Value
             </p>
             <p className="mb-2">บอกว่าสต็อก "หมุนกี่รอบต่อปี" — ยิ่งสูง = ของขายออกเร็ว</p>
             <ul className="list-disc ml-4 space-y-0.5">
@@ -578,6 +578,10 @@ function CostAnalyticsTab() {
               <li>🟠 1-4× = ปานกลาง</li>
               <li>🔴 &lt; 1× = ของค้างนาน (เสี่ยงหมดอายุ)</li>
             </ul>
+            <p className="text-[10px] mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              <strong>COGS Proxy</strong> = ยอด Out direction (Delivery + Goods Issue + Return)
+              — ใกล้เคียง COGS จริง ไม่นับ Transfers/Cost adjustments
+            </p>
           </>}
         />
         <RatioCard
@@ -677,7 +681,7 @@ function CostAnalyticsTab() {
       <div className="card text-xs" style={{ color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>📚 วิธีอ่านอัตราส่วน:</strong>
         <ul className="list-disc ml-5 mt-1 space-y-0.5">
-          <li><strong>Inventory Turnover</strong> = COGS / Inventory — ยิ่งสูง สินค้าหมุนเวียนเร็ว · มาตรฐานธุรกิจอาหาร ≥ 4×/ปี</li>
+          <li><strong>Inventory Turnover</strong> = COGS Proxy / Inventory — ยิ่งสูง สินค้าหมุนเวียนเร็ว · มาตรฐานธุรกิจอาหาร ≥ 4×/ปี</li>
           <li><strong>DIO (Days Inventory Outstanding)</strong> = 365 / Turnover — สำหรับอาหาร ควร ≤ 90 วัน</li>
           <li><strong>Carrying Cost</strong> = ต้นทุนที่จม + ดอกเบี้ย + ค่าเช่าคลัง + ค่าเสื่อม + ค่าประกัน — ประมาณ 20-30%/ปี ของมูลค่าสต็อก</li>
           <li><strong>Dead Stock %</strong> = สัดส่วนของที่ไม่เคลื่อนไหวเลย 180 วัน — KPI สำคัญ ควร &lt; 5%</li>
@@ -737,7 +741,7 @@ function CostAnalyticsTab() {
                 อัตรา "หมุนเวียน" สต็อก = <strong>กี่ครั้งต่อปี</strong> ที่ของถูกขายและเติมใหม่
               </p>
               <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
-                Turnover = ยอดจ่ายออก (COGS) / มูลค่าสต็อกเฉลี่ย
+                Turnover = COGS Proxy / มูลค่าสต็อกเฉลี่ย
               </p>
               <p className="mb-2"><strong>เกณฑ์อ่านสีกราฟ:</strong></p>
               <ul className="list-disc ml-4 space-y-0.5">
@@ -1130,7 +1134,12 @@ function ExplanationCard({ carryingRate }: { carryingRate: number }) {
             <div className="space-y-2">
               <div>
                 <p style={{ color: 'var(--text)' }}><strong>1. Inventory Turnover (อัตราหมุนเวียน)</strong></p>
-                <p className="ml-4">= ยอดจ่ายออก / มูลค่าสต็อก · ยิ่งสูงยิ่งดี · มาตรฐานอาหาร ≥ 4×/ปี</p>
+                <p className="ml-4">= COGS Proxy / มูลค่าสต็อก · ยิ่งสูงยิ่งดี · มาตรฐานอาหาร ≥ 4×/ปี</p>
+                <p className="ml-4 text-[10px] italic mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  <strong>COGS Proxy</strong> = ยอด Out direction (Delivery + Goods Issue + Goods Return)
+                  &nbsp;·&nbsp; ไม่นับ Transfers ระหว่างคลัง · ไม่นับ Cost adjustments
+                  &nbsp;·&nbsp; ใช้แทน COGS จริงเพราะใกล้เคียง &gt; 95% สำหรับธุรกิจอาหาร
+                </p>
               </div>
               <div>
                 <p style={{ color: 'var(--text)' }}><strong>2. Days Inventory (DIO)</strong></p>

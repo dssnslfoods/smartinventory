@@ -86,8 +86,11 @@ export function ReportsPage() {
             ]} />
           </HelpSection>
           <HelpSection title="แท็บ Inventory Turnover">
-            <HelpFormula>Turnover Ratio = Annual COGS / Average Inventory Value</HelpFormula>
+            <HelpFormula>Turnover Ratio = Annual COGS Proxy / Average Inventory Value</HelpFormula>
             ค่าสูง = หมุนเร็ว ดี — Days on Hand = 365 / Turnover
+            <p className="text-[10px] italic mt-1" style={{ color: 'var(--text-muted)' }}>
+              <strong>COGS Proxy</strong> = ยอด Out direction (Delivery + Issue + Return) ใกล้เคียง COGS จริงในบัญชี
+            </p>
           </HelpSection>
           <HelpSection title="แท็บ FEFO Pick List">
             ลำดับการหยิบ lot ตามวันหมดอายุน้อย → มาก สำหรับใช้กับคลังจริง (First-Expired-First-Out)
@@ -1428,7 +1431,7 @@ function TurnoverTab() {
           <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
             {summary.avg.toFixed(1)}×
           </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Annual COGS / Stock Value</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Annual COGS Proxy / Stock Value</p>
         </div>
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Highest Turnover</p>
@@ -1493,7 +1496,7 @@ function TurnoverTab() {
                   <th>Item Code</th>
                   <th>Item Name</th>
                   <th>Group</th>
-                  <th className="text-right">Annual COGS</th>
+                  <th className="text-right">Annual COGS Proxy</th>
                   <th className="text-right">Stock Value</th>
                   <th className="text-right">Turnover</th>
                   <th className="text-right">Days on Hand</th>
