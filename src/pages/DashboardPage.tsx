@@ -1,13 +1,11 @@
 import { useMemo } from 'react';
 import {
-  Package, Clock, ArrowLeftRight, RefreshCw,
+  Package, Clock, RefreshCw,
   TrendingUp, TrendingDown, CalendarRange, Activity, AlertTriangle,
   Layers, Target, Banknote,
 } from 'lucide-react';
 import {
-  ComposedChart, PieChart, BarChart,
-  Area, Line, Bar, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
   useKPI, useStockOnHand, useMovementMonthly,
@@ -21,10 +19,9 @@ import {
   type VVInput,
 } from '@/lib/vvMatrix';
 import {
-  formatNumber, formatCurrency, formatDate, formatDateTime,
+  formatNumber, formatDate, formatDateTime,
   formatThaiMonthRange, formatCompact,
 } from '@/utils/format';
-import { HelpButton, HelpSection, HelpLegend } from '@/components/HelpButton';
 import { InfoTooltip } from '@/components/InfoTooltip';
 
 // ── Color tokens ─────────────────────────────────────────────────────────────
@@ -42,17 +39,6 @@ const COLORS = {
 };
 
 const GROUP_COLORS = ['#1F3864', '#2E75B6', '#00897B', '#E65100', '#7B1FA2', '#C62828', '#0891B2'];
-
-const WHS_TYPE_COLORS: Record<string, string> = {
-  FG: '#1F3864', RM: '#2E75B6', PD: '#00897B',
-  PK: '#E65100', QC: '#7B1FA2', CL: '#C62828',
-  CO: '#C62828', WS: '#78909C', BT: '#2E75B6',
-};
-
-function getWhsColor(code: string): string {
-  const prefix = code.split('-')[1]?.substring(0, 2) ?? '';
-  return WHS_TYPE_COLORS[prefix] ?? WHS_TYPE_COLORS[code.split('-')[0]] ?? '#64748b';
-}
 
 const AGING_BUCKETS: Record<string, { label: string; color: string }> = {
   expired: { label: 'หมดอายุแล้ว',  color: '#7f1d1d' },
@@ -85,7 +71,7 @@ export function DashboardPage() {
   // === Data hooks ===
   const { data: kpi, isLoading: kpiLoading }            = useKPI();
   const { data: stockData = [] }                         = useStockOnHand();
-  const { data: monthlyData = [], isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
+  const { data: monthlyData = [] }                       = useMovementMonthly({ months: 12 });
   // Pull just enough transactions for the "Top 10 Most Active" widget —
   // 50 rows is more than enough to compute a top-10 (was 200, 4× over-fetch).
   const { data: dataDateRange }                          = useDataDateRange();
@@ -122,14 +108,6 @@ export function DashboardPage() {
       daysOld <= 90  ? 'stale'   : 'very_stale';
     return { daysOld, status, lastDate: dataDateRange.maxDate };
   }, [dataDateRange]);
-
-  const movementTrend = useMemo(
-    () => monthlyData.map((m) => ({
-      ...m, net: m.In - m.Out,
-      label: new Date(m.month).toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }),
-    })),
-    [monthlyData],
-  );
 
   // ── Financial KPIs (Inventory Turnover, DIO, Carrying Cost) ────────────────
   // OPTION A FIX: anchor the 12-month window on the data's LATEST month,
@@ -242,17 +220,6 @@ export function DashboardPage() {
     () => stockByGroup.reduce((sum, g) => sum + g.value, 0),
     [stockByGroup],
   );
-
-  // ── Warehouse Stock Value ──────────────────────────────────────────────────
-  const stockByWarehouse = useMemo(() => {
-    const map = new Map<string, { warehouse: string; whs_name: string; value: number }>();
-    for (const s of stockData) {
-      const prev = map.get(s.warehouse) ?? { warehouse: s.warehouse, whs_name: s.whs_name, value: 0 };
-      prev.value += Number(s.stock_value);
-      map.set(s.warehouse, prev);
-    }
-    return Array.from(map.values()).sort((a, b) => b.value - a.value).slice(0, 10);
-  }, [stockData]);
 
   // ── MoM Comparison (Month-over-Month — last month vs the month before) ────
   const mom = useMemo(() => {
@@ -890,107 +857,6 @@ export function DashboardPage() {
           </div>
         </div>
       )}
-
-      {/* ====== Section 4: Movement Trend ====== */}
-      <div className="card relative">
-        <HelpButton
-          title="แนวโน้มการเคลื่อนไหวสินค้า (12 Months)"
-          body={(<>
-            <HelpSection title="กราฟอ่านยังไง">
-              พื้นที่เขียว = รับเข้า · พื้นที่แดง = จ่ายออก · เส้นน้ำเงิน = Net (รับ−จ่าย)
-            </HelpSection>
-            <HelpSection title="ช่วงเวลา">12 เดือนล่าสุดในข้อมูล</HelpSection>
-          </>)}
-        />
-        <div className="flex items-center gap-2 mb-1">
-          <ArrowLeftRight size={16} style={{ color: COLORS.primary }} />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>แนวโน้มการเคลื่อนไหว 12 เดือน</h3>
-        </div>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Movement Trend (qty)</p>
-        {monthlyLoading ? (
-          <div className="h-80 flex items-center justify-center">
-            <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : movementTrend.length === 0 ? (
-          <EmptyChart icon={<TrendingUp size={32} />} text="ยังไม่มีข้อมูลการเคลื่อนไหว" />
-        ) : (
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={movementTrend} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                <defs>
-                  <linearGradient id="gradIn" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={COLORS.green} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={COLORS.green} stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="gradOut" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={COLORS.red} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={COLORS.red} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={11} />
-                <YAxis stroke="var(--text-muted)" fontSize={11} tickFormatter={(v) => formatCompact(Number(v))} />
-                <Tooltip {...tooltipStyle} formatter={(v?: number | string, name?: string) => [formatNumber(Number(v ?? 0), 0), name]} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="In"  name="รับเข้า"   fill="url(#gradIn)"  stroke={COLORS.green} strokeWidth={2} />
-                <Area type="monotone" dataKey="Out" name="จ่ายออก"   fill="url(#gradOut)" stroke={COLORS.red}   strokeWidth={2} />
-                <Line type="monotone" dataKey="net" name="Net (สุทธิ)" stroke={COLORS.primary} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 3, fill: COLORS.primary }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* ====== Section 5: Warehouse Stock Value (full-width) ====== */}
-      <div className="grid grid-cols-1 gap-6">
-        {/* Warehouse Stock Value — full-width now that Group bar is removed
-            (Group composition is already covered by the donut in Section 3) */}
-        <div className="card relative">
-          <HelpButton
-            title="มูลค่าสินค้าแยกตามคลัง"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                Top 10 คลังที่มีมูลค่าสต็อกสูงสุด · สีตามประเภทคลัง
-              </HelpSection>
-              <HelpSection title="ประเภท">
-                <HelpLegend items={[
-                  { color: '#1F3864', label: 'FG', meaning: 'Finished Goods' },
-                  { color: '#2E75B6', label: 'RM', meaning: 'Raw Materials' },
-                  { color: '#00897B', label: 'PD', meaning: 'Production' },
-                  { color: '#E65100', label: 'PK', meaning: 'Packaging' },
-                ]} />
-              </HelpSection>
-            </>)}
-          />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>คลังที่มีมูลค่าสูงสุด</h3>
-          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Top 10 Warehouses by Value</p>
-          {stockByWarehouse.length === 0 ? (
-            <EmptyChart icon={<Package size={28} />} text="ไม่มีข้อมูลคลัง" />
-          ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stockByWarehouse} layout="vertical" margin={{ left: 0, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                  <XAxis type="number" tickFormatter={(v) => formatCompact(v)} stroke="var(--text-muted)" fontSize={11} />
-                  <YAxis type="category" dataKey="warehouse" width={75} stroke="var(--text-muted)" fontSize={11} tick={{ fill: 'var(--text)' }} />
-                  <Tooltip
-                    {...tooltipStyle}
-                    formatter={(v?: number | string) => formatCurrency(Number(v ?? 0))}
-                    labelFormatter={(label) => {
-                      const item = stockByWarehouse.find((w) => w.warehouse === label);
-                      return item ? `${item.warehouse} — ${item.whs_name}` : String(label);
-                    }}
-                  />
-                  <Bar dataKey="value" name="มูลค่า" radius={[0, 4, 4, 0]} barSize={20}>
-                    {stockByWarehouse.map((w) => <Cell key={w.warehouse} fill={getWhsColor(w.warehouse)} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-      </div>
 
       {/* ====== Section 6: MoM + QoQ Comparison (2 cols) ====== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
