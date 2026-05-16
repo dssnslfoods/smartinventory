@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Download, Search, Filter, X } from 'lucide-react';
-import { useStockOnHand } from '@/hooks/useSupabaseQuery';
+import { useStockOnHand, useLatestLotSnapshot } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import { PageHeader } from '@/components/PageHeader';
 import { InfoTooltip } from '@/components/InfoTooltip';
+import { LotDetailModal } from '@/components/LotDetailModal';
 
 export function StockOnHandPage() {
   const [warehouse, setWarehouse] = useState('');
@@ -20,6 +21,12 @@ export function StockOnHandPage() {
   const [minValue, setMinValue] = useState('');     // ฿
   const [minQty, setMinQty] = useState('');         // units
   const [valueBucket, setValueBucket] = useState<'all' | '100k' | '1M' | '10M'>('all');
+
+  /** Drill-down state — click a row to see all lots for that (item × warehouse). */
+  const [drillDown, setDrillDown] = useState<{
+    item_code: string; itemname: string; warehouse: string; whs_name?: string;
+  } | null>(null);
+  const { data: latestSnap } = useLatestLotSnapshot();
   const PAGE_SIZE = 50;
 
   const { data: stockData, isLoading } = useStockOnHand({
@@ -474,7 +481,17 @@ export function StockOnHandPage() {
               </thead>
               <tbody>
                 {pagedData.map((row) => (
-                  <tr key={`${row.item_code}-${row.warehouse}`}>
+                  <tr
+                    key={`${row.item_code}-${row.warehouse}`}
+                    onClick={() => setDrillDown({
+                      item_code: row.item_code,
+                      itemname:  row.itemname || (row as any).item_name || '',
+                      warehouse: row.warehouse,
+                      whs_name:  row.whs_name,
+                    })}
+                    className="cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
+                    title="คลิกเพื่อดูรายละเอียด lot ทั้งหมดของรายการนี้"
+                  >
                     <td className="font-medium" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</td>
                     <td style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {row.itemname || (row as any).item_name || '—'}
@@ -549,7 +566,23 @@ export function StockOnHandPage() {
             </div>
           </div>
         )}
+
+        {/* Hint: rows are clickable */}
+        <p className="px-4 py-2 text-[10px] text-center border-t"
+           style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+          💡 คลิกที่แถวเพื่อดูรายละเอียด lot ทั้งหมดของรายการนั้น (เรียงตาม FEFO)
+        </p>
       </div>
+
+      {/* Lot drill-down modal */}
+      <LotDetailModal
+        itemCode={drillDown?.item_code ?? null}
+        itemName={drillDown?.itemname}
+        warehouse={drillDown?.warehouse ?? null}
+        whsName={drillDown?.whs_name}
+        snapshotDate={latestSnap}
+        onClose={() => setDrillDown(null)}
+      />
     </div>
   );
 }
