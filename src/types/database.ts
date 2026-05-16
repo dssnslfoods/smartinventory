@@ -191,6 +191,13 @@ export interface SlowMovingItem {
   days_since_last_out: number | null;
   total_out_qty: number;
   movement_status: 'dead_stock' | 'slow_moving' | 'normal';
+  /** Lot-age fields (added by Hybrid mode — Option B). */
+  oldest_lot_in_date:  string | null;
+  oldest_lot_age_days: number | null;
+  lot_count:           number;
+  /** TRUE when oldest lot ≥ 180 days AND newer lots exist in the same warehouse.
+   *  Surfaces SKUs that look "Normal" but have aging stock stuck behind newer lots. */
+  fefo_violation:      boolean;
 }
 
 /** v_inventory_turnover — annual turnover ratio per item */
