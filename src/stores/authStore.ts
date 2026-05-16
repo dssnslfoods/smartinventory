@@ -11,6 +11,10 @@ interface AuthState {
   company:     Company | null;
   permissions: Set<string>;
   loading:     boolean;
+  /** Timestamp (ms) at which the current user successfully cleared their
+   *  must_change_password flag. Used to suppress stale reads from a
+   *  concurrent loadProfile() that started before the RPC committed. */
+  pwdClearedAt: number | null;
 
   setUser:     (user: User | null) => void;
   setSession:  (session: Session | null) => void;
@@ -20,20 +24,36 @@ interface AuthState {
   signOut:     () => Promise<void>;
   initialize:  () => Promise<void>;
   loadProfile: (userId: string) => Promise<void>;
+  /** Optimistically flip must_change_password=false locally and remember
+   *  the timestamp so any in-flight loadProfile() reading stale data
+   *  won't re-flip it back to true. */
+  markPasswordChanged: () => void;
   hasPermission: (key: PermissionKey) => boolean;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user:        null,
-  session:     null,
-  profile:     null,
-  company:     null,
-  permissions: new Set(),
-  loading:     true,
+  user:         null,
+  session:      null,
+  profile:      null,
+  company:      null,
+  permissions:  new Set(),
+  loading:      true,
+  pwdClearedAt: null,
 
   setUser:    (user)    => set({ user }),
   setSession: (session) => set({ session }),
   setLoading: (loading) => set({ loading }),
+
+  /** See type doc — used by ForcedPasswordChangeGate after a successful
+   *  password update + clear_must_change_password() RPC. */
+  markPasswordChanged: () => {
+    set(state => ({
+      pwdClearedAt: Date.now(),
+      profile: state.profile
+        ? { ...state.profile, must_change_password: false }
+        : null,
+    }));
+  },
 
   hasPermission: (key: PermissionKey) => {
     const { profile, permissions } = get();
@@ -55,6 +75,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (!profile) {
         set({ profile: null, company: null, permissions: new Set() });
         return;
+      }
+
+      // ── Stale-read guard ──────────────────────────────────────────────────
+      // If the user just cleared their must_change_password flag locally (via
+      // markPasswordChanged within the last 60 s), don't let a stale DB read
+      // from a concurrent loadProfile() flip it back to TRUE — the actual row
+      // is or is about to be FALSE, but a SELECT that started before the RPC
+      // committed will return the old value.
+      const { pwdClearedAt } = get();
+      if (
+        pwdClearedAt &&
+        Date.now() - pwdClearedAt < 60_000 &&
+        profile.must_change_password
+      ) {
+        profile.must_change_password = false;
       }
 
       const company = (profile.company as Company) ?? null;
@@ -121,7 +156,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     // Clear in-memory state
-    set({ user: null, session: null, profile: null, company: null, permissions: new Set() });
+    set({ user: null, session: null, profile: null, company: null, permissions: new Set(), pwdClearedAt: null });
 
     // Belt-and-braces: wipe any persisted Supabase auth tokens that might
     // survive a failed signOut, then hard-redirect to /login.

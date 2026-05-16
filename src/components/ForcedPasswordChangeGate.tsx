@@ -17,7 +17,7 @@ import { useAuthStore } from '@/stores/authStore';
  *   6. loadProfile() re-runs → modal disappears, app unlocks
  */
 export function ForcedPasswordChangeGate({ children }: { children: React.ReactNode }) {
-  const { profile, loadProfile, signOut } = useAuthStore();
+  const { profile, markPasswordChanged, signOut } = useAuthStore();
   const [pwd1, setPwd1]     = useState('');
   const [pwd2, setPwd2]     = useState('');
   const [show, setShow]     = useState(false);
@@ -41,20 +41,39 @@ export function ForcedPasswordChangeGate({ children }: { children: React.ReactNo
     }
     setSaving(true);
     setError('');
+
+    // Watchdog — if we somehow get stuck for over 20 s, give the user a way out.
+    const watchdog = window.setTimeout(() => {
+      setError('การบันทึกใช้เวลานานผิดปกติ — ลองอีกครั้ง หรือ refresh หน้าเว็บ');
+      setSaving(false);
+    }, 20_000);
+
     try {
       // 1. Update auth password (Supabase enforces JWT for this — only self)
       const { error: authErr } = await supabase.auth.updateUser({ password: pwd1 });
       if (authErr) throw new Error(authErr.message);
 
-      // 2. Clear the must_change_password flag (RPC scoped to auth.uid())
+      // 2. Clear the must_change_password flag in the profile row
       const { error: rpcErr } = await supabase.rpc('clear_must_change_password');
       if (rpcErr) throw new Error(rpcErr.message);
 
-      // 3. Re-load profile so the gate unmounts and the app is reachable.
-      await loadProfile(profile.id);
+      // 3. Optimistically unmount the gate. We deliberately do NOT await a
+      //    full loadProfile() round-trip here:
+      //
+      //    - supabase.auth.updateUser fires USER_UPDATED → the auth listener
+      //      in authStore.initialize() starts its own loadProfile in parallel.
+      //    - If we then await another loadProfile, both round-trips block the
+      //      submit button. On a slow network this looks like the app hung.
+      //    - markPasswordChanged() flips the local profile flag immediately
+      //      (gate unmounts) AND sets pwdClearedAt so the listener's stale
+      //      read (must_change_password=true, captured before the RPC) gets
+      //      ignored in loadProfile().
+      window.clearTimeout(watchdog);
+      markPasswordChanged();
+      // No setSaving(false) — this component is about to unmount.
     } catch (e: any) {
+      window.clearTimeout(watchdog);
       setError(e?.message ?? 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
-    } finally {
       setSaving(false);
     }
   };
