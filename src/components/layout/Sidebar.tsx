@@ -61,6 +61,7 @@ const mainMenu: MenuEntry[] = [
   { type: 'divider' },
   { path: '/admin/import',   label: 'Data Import', icon: Upload,    permission: PERMISSIONS.MENU_IMPORT },
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },
+  { path: '/admin/audit',    label: 'Audit Log',   icon: Shield,    permission: PERMISSIONS.MENU_AUDIT },
   { path: '/admin/vv-guide', label: 'คู่มือ VV Matrix', icon: Info,      permission: PERMISSIONS.MENU_SETTINGS },
   { type: 'divider' },
   { path: '/SmartInventory_User_Manual_NSL.docx',     label: 'คู่มือการใช้งาน', icon: BookOpen, download: true },

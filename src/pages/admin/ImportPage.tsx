@@ -4,6 +4,7 @@ import {
   ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Archive, Layers,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { recordAudit } from '@/lib/auditLog';
 import { useImportLogs } from '@/hooks/useSupabaseQuery';
 import { formatNumber } from '@/utils/format';
 import { useQueryClient } from '@tanstack/react-query';
@@ -112,6 +113,17 @@ export function ImportPage() {
 
   const performResetAll = async () => {
     setImporting(true);
+
+    // Snapshot deletion scope BEFORE we wipe, so the audit log can record it
+    const [{ count: lotsCount }, { count: txCount }, { count: itemsCount },
+           { count: groupsCount }, { count: whsCount }] = await Promise.all([
+      supabase.from('inventory_lots').select('*', { count: 'exact', head: true }),
+      supabase.from('inventory_transactions').select('*', { count: 'exact', head: true }),
+      supabase.from('items').select('*', { count: 'exact', head: true }),
+      supabase.from('item_groups').select('*', { count: 'exact', head: true }),
+      supabase.from('warehouses').select('*', { count: 'exact', head: true }),
+    ]);
+
     try {
       await supabase.rpc('clear_all_data');
       await supabase.from('inventory_lots').delete().neq('id', 0);
@@ -121,10 +133,35 @@ export function ImportPage() {
       await supabase.from('item_groups').delete().neq('group_code', 0);
       await supabase.from('warehouses').delete().neq('code', '');
 
+      // Record audit success
+      await recordAudit({
+        action:   'CLEAR_ALL_DATA_FROM_IMPORT',
+        resource: 'inventory_lots + transactions + thresholds + items + item_groups + warehouses',
+        payload:  {
+          deleted_counts: {
+            lots:         lotsCount   ?? 0,
+            transactions: txCount     ?? 0,
+            items:        itemsCount  ?? 0,
+            item_groups:  groupsCount ?? 0,
+            warehouses:   whsCount    ?? 0,
+          },
+          source_page: 'Import → Dangerous Zone',
+        },
+        status: 'success',
+      });
+
       queryClient.clear();
       await queryClient.refetchQueries();
       setFile(null); setImportState(null); refetchLogs();
     } catch(err) {
+      // Record failure too — we want to know who attempted and why it failed
+      await recordAudit({
+        action:   'CLEAR_ALL_DATA_FROM_IMPORT',
+        resource: 'inventory_lots + transactions + thresholds + items + item_groups + warehouses',
+        status:   'failed',
+        error_message: err instanceof Error ? err.message : String(err),
+        payload:  { source_page: 'Import → Dangerous Zone' },
+      });
       alert('Error clearing data: ' + err);
     } finally {
       setImporting(false);
