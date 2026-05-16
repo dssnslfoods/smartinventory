@@ -538,8 +538,6 @@ function CostAnalyticsTab() {
             >
               <option value="0.15">15% / ปี (Low — แห้ง/ของไม่เสีย)</option>
               <option value="0.22">22% / ปี (Industry Average) ⭐</option>
-              <option value="0.30">30% / ปี (High — อาหารแช่แข็ง/สด)</option>
-              <option value="0.40">40% / ปี (Very High — ของสด)</option>
             </select>
             <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
               ใช้ประมาณค่า "เงินจมต่อปี"
