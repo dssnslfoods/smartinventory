@@ -30,9 +30,6 @@ export default defineConfig({
           // Icons — separate so the lucide tree-shake-friendly chunk
           // doesn't bloat the main app bundle
           'vendor-icons':    ['lucide-react'],
-          // Word doc generation (only used by docs script, but if
-          // imported in app this isolates it)
-          'vendor-docx':     ['docx'],
         },
       },
     },
