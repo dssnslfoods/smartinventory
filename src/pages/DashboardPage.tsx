@@ -142,9 +142,12 @@ export function DashboardPage() {
       }
     }
     const total = counts.normal + counts.slow_moving + counts.dead_stock;
+    const totalValue = values.normal + values.slow_moving + values.dead_stock;
     return {
-      counts, values, total,
-      deadPct: total > 0 ? (counts.dead_stock / total) * 100 : 0,
+      counts, values, total, totalValue,
+      deadPct:      total      > 0 ? (counts.dead_stock / total)      * 100 : 0,
+      slowPct:      total      > 0 ? (counts.slow_moving / total)     * 100 : 0,
+      deadValuePct: totalValue > 0 ? (values.dead_stock / totalValue) * 100 : 0,
     };
   }, [slowData]);
 
@@ -356,6 +359,29 @@ export function DashboardPage() {
               <CalcLine label="≈" value={`฿${formatCompact(financialKpi.invValue)}`} muted />
             </CalcBlock>
             <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
+            {(() => {
+              const carry15 = financialKpi.invValue * 0.15;
+              const coverYears = financialKpi.cogs12mo > 0
+                ? financialKpi.invValue / financialKpi.cogs12mo
+                : null;
+              if (coverYears != null && coverYears >= 3) {
+                return <Insight tone="critical">
+                  <strong>วิกฤต — เงินจมในคลังสูงผิดปกติ</strong><br />
+                  ฿{formatCompact(financialKpi.invValue)} เทียบกับ COGS 12 เดือน (฿{formatCompact(financialKpi.cogs12mo)})
+                  → เก็บสต็อกมากกว่ายอดขายในรอบ {coverYears.toFixed(1)} ปี ·
+                  ถือต้นทุน (15%/ปี) ประมาณ <strong>฿{formatCompact(carry15)}/ปี</strong>
+                </Insight>;
+              }
+              if (coverYears != null && coverYears >= 1) {
+                return <Insight tone="warn">
+                  Working Capital ฿{formatCompact(financialKpi.invValue)} ≈ COGS {coverYears.toFixed(1)} ปี ·
+                  Carrying Cost ≈ <strong>฿{formatCompact(carry15)}/ปี</strong> (15%/ปี)
+                </Insight>;
+              }
+              return <Insight tone="info">
+                Carrying Cost โดยประมาณ <strong>฿{formatCompact(carry15)}/ปี</strong> (อัตราถือครอง 15%/ปี)
+              </Insight>;
+            })()}
           </>}
         />
         <KpiCard
@@ -388,6 +414,27 @@ export function DashboardPage() {
               <li>🟠 1-4× — ปานกลาง</li>
               <li>🔴 &lt; 1× — ของค้าง</li>
             </ul>
+            {financialKpi.turnover < 1 && (
+              <Insight tone="critical">
+                <strong>Inventory Turnover ต่ำวิกฤต ({financialKpi.turnover.toFixed(2)}×):</strong>{' '}
+                ในรอบ {financialKpi.monthsCounted} เดือน สินค้าหมุนเวียนออกไปไม่ถึง 1 รอบด้วยซ้ำ
+                (ทำได้เพียง {financialKpi.turnover.toFixed(2)} รอบ) ยืนยันว่าสินค้าจมอยู่กับที่นานเกินไป ·
+                มาตรฐานอาหารควร ≥ 4×/ปี
+              </Insight>
+            )}
+            {financialKpi.turnover >= 1 && financialKpi.turnover < 4 && (
+              <Insight tone="warn">
+                <strong>ต่ำกว่ามาตรฐาน ({financialKpi.turnover.toFixed(2)}×):</strong>{' '}
+                สินค้าหมุน {financialKpi.turnover.toFixed(2)} รอบ ในรอบ {financialKpi.monthsCounted} เดือน
+                — มาตรฐานอุตสาหกรรมอาหารควรอยู่ที่ ≥ 4×/ปี
+              </Insight>
+            )}
+            {financialKpi.turnover >= 4 && (
+              <Insight tone="ok">
+                <strong>ดี ({financialKpi.turnover.toFixed(2)}×):</strong>{' '}
+                สินค้าหมุนเวียน {financialKpi.turnover.toFixed(2)} รอบ/ปี ตามมาตรฐานอาหาร (≥ 4×/ปี)
+              </Insight>
+            )}
           </>}
         />
         <KpiCard
@@ -406,6 +453,35 @@ export function DashboardPage() {
             <p className="mt-2">
               คำนวณจาก <strong>{financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูลจริง</strong>
             </p>
+            {financialKpi.dio != null && (() => {
+              const dio = financialKpi.dio;
+              const years = dio / 365;
+              if (dio > 365) {
+                return <Insight tone="critical">
+                  <strong>Days Inventory สูงถึง {formatNumber(dio, 0)} วัน (ประมาณ {years.toFixed(1)} ปี):</strong>{' '}
+                  นี่คือจุดที่น่ากลัวที่สุด — คลังต้องใช้เวลาเกือบ {years.toFixed(1)} ปี
+                  ในการระบายสินค้าออกทั้งหมดด้วยอัตราการขายปัจจุบัน
+                  ขณะที่ค่าเฉลี่ยมาตรฐานธุรกิจอาหารมักจะอยู่ที่ไม่เกิน 30–90 วันเท่านั้น
+                </Insight>;
+              }
+              if (dio > 180) {
+                return <Insight tone="critical">
+                  <strong>DIO {formatNumber(dio, 0)} วัน เกินมาตรฐาน:</strong>{' '}
+                  ใช้เวลาประมาณ {Math.round(dio / 30)} เดือนกว่าจะระบายสินค้าออกหมด
+                  ขณะที่มาตรฐานอาหารอยู่ที่ 30–90 วัน ({(dio / 90).toFixed(1)}× ของมาตรฐาน)
+                </Insight>;
+              }
+              if (dio > 90) {
+                return <Insight tone="warn">
+                  <strong>DIO {formatNumber(dio, 0)} วัน ค่อนข้างสูง:</strong>{' '}
+                  เกินมาตรฐานอาหาร (30–90 วัน) — แนะนำเร่งระบายสินค้ากลุ่ม Slow / Dead
+                </Insight>;
+              }
+              return <Insight tone="ok">
+                <strong>DIO {formatNumber(dio, 0)} วัน:</strong>{' '}
+                อยู่ในเกณฑ์มาตรฐานอุตสาหกรรมอาหาร (30–90 วัน)
+              </Insight>;
+            })()}
           </>}
         />
         <KpiCard
@@ -423,6 +499,35 @@ export function DashboardPage() {
             <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
               SKU ที่ไม่ Active = ไม่มีธุรกรรมเกิน 90 วัน → จัดอยู่ใน Slow / Dead Stock
             </p>
+            {(() => {
+              const active = kpi?.activeItems ?? 0;
+              const inactive = Math.max(0, movementHealth.total - active);
+              if (movementHealth.total === 0) {
+                return <Insight tone="info">
+                  Active SKU = SKU ที่มีธุรกรรม In/Out ภายใน 90 วันที่ผ่านมา
+                </Insight>;
+              }
+              const activePct = (active / movementHealth.total) * 100;
+              if (activePct < 30) {
+                return <Insight tone="critical">
+                  <strong>Active SKU เพียง {activePct.toFixed(0)}% ของทั้งคลัง:</strong>{' '}
+                  มี {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
+                  มีการเคลื่อนไหวใน 90 วัน — อีก {formatNumber(inactive)} SKU
+                  ไม่ขยับ จัดอยู่ใน Slow / Dead Stock
+                </Insight>;
+              }
+              if (activePct < 60) {
+                return <Insight tone="warn">
+                  Active {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
+                  ({activePct.toFixed(0)}%) — มี {formatNumber(inactive)} SKU
+                  ไม่มีการเคลื่อนไหวเกิน 90 วัน → เสี่ยงเป็น Slow / Dead Stock
+                </Insight>;
+              }
+              return <Insight tone="ok">
+                Active {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
+                ({activePct.toFixed(0)}%) — สัดส่วน SKU ที่หมุนเวียนอยู่ในเกณฑ์ดี
+              </Insight>;
+            })()}
           </>}
         />
         <KpiCard
@@ -440,6 +545,25 @@ export function DashboardPage() {
               <CalcLine label="รวม"                value={`${formatNumber(expiringSoon.lots)} lots · ฿${formatCompact(expiringSoon.value)}`} bold />
             </CalcBlock>
             <p className="mt-2"><strong>Action:</strong> ดู FEFO Pick List เพื่อเร่งระบาย</p>
+            {expiringSoon.expiredLots > 0 && (
+              <Insight tone="critical">
+                🚨 <strong>มี lot หมดอายุไปแล้ว {formatNumber(expiringSoon.expiredLots)} lots</strong>{' '}
+                มูลค่า ฿{formatCompact(expiringSoon.expiredValue)} —
+                ต้องเร่งระบายหรือ write-off ทันที (เสี่ยงผิด GMP/HACCP หากยังเก็บไว้)
+              </Insight>
+            )}
+            {expiringSoon.expiredLots === 0 && expiringSoon.lots > 0 && (
+              <Insight tone="warn">
+                ⚠️ <strong>{formatNumber(expiringSoon.lots)} lots</strong> จะหมดอายุภายใน 30 วัน
+                มูลค่า ฿{formatCompact(expiringSoon.value)} —
+                แนะนำใช้ FEFO Pick List เร่งระบาย ก่อนสูญเสียมูลค่า
+              </Insight>
+            )}
+            {expiringSoon.lots === 0 && (
+              <Insight tone="ok">
+                ✅ ไม่มี lot ที่หมดอายุภายใน 30 วันข้างหน้า — สภาพคลังด้านอายุสินค้าอยู่ในเกณฑ์ดี
+              </Insight>
+            )}
           </>}
         />
         <KpiCard
@@ -462,6 +586,36 @@ export function DashboardPage() {
               <CalcLine label="Slow stock value"  value={`฿${formatNumber(movementHealth.values.slow_moving, 0)}`} muted />
             </CalcBlock>
             <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>มาตรฐาน Dead Stock ควร &lt; 5%</p>
+            {(() => {
+              const deadPct      = movementHealth.deadPct;
+              const deadValPct   = movementHealth.deadValuePct;
+              const deadCount    = movementHealth.counts.dead_stock;
+              const deadVal      = movementHealth.values.dead_stock;
+              if (deadPct > 50) {
+                return <Insight tone="critical">
+                  <strong>Dead Stock % สูงถึง {deadPct.toFixed(1)}%:</strong>{' '}
+                  มูลค่าเงินที่จมคิดเป็น {deadValPct.toFixed(1)}% ของคลังทั้งหมด (฿{formatCompact(deadVal)}) ·
+                  มีสินค้าถึง <strong>{formatNumber(deadCount)} รายการ</strong>ที่ไม่มีการเคลื่อนไหวเลย —
+                  มาตรฐานควร &lt; 5%
+                </Insight>;
+              }
+              if (deadPct > 15) {
+                return <Insight tone="critical">
+                  <strong>Dead Stock {deadPct.toFixed(1)}% สูงกว่ามาตรฐานมาก:</strong>{' '}
+                  มี {formatNumber(deadCount)} รายการ มูลค่า ฿{formatCompact(deadVal)}
+                  ({deadValPct.toFixed(1)}% ของมูลค่าคลังรวม) ไม่ขยับเลย ≥ 180 วัน — มาตรฐานควร &lt; 5%
+                </Insight>;
+              }
+              if (deadPct > 5) {
+                return <Insight tone="warn">
+                  <strong>Dead Stock {deadPct.toFixed(1)}% เกินมาตรฐาน (&lt; 5%):</strong>{' '}
+                  มี {formatNumber(deadCount)} รายการ ({formatCompact(deadVal)} บาท) ไม่ขยับเลย ≥ 180 วัน
+                </Insight>;
+              }
+              return <Insight tone="ok">
+                <strong>Dead Stock {deadPct.toFixed(1)}%</strong> อยู่ในเกณฑ์มาตรฐาน (&lt; 5%) — สภาพคลังดี
+              </Insight>;
+            })()}
           </>}
         />
       </div>
@@ -976,6 +1130,36 @@ function CalcLine({ label, value, bold, muted }: {
          style={{ color: muted ? 'var(--text-muted)' : 'var(--text)' }}>
       <span className={bold ? 'font-semibold' : ''}>{label}</span>
       <span className={`font-mono tabular-nums ${bold ? 'font-bold' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Interpretive narrative block — sits at the bottom of a KPI tooltip and
+ * translates the raw numbers into plain Thai with industry benchmarks.
+ *
+ *   tone='critical' → red    (vicious red wash, for true alarms)
+ *   tone='warn'     → amber  (above standard but not yet critical)
+ *   tone='ok'       → green  (within benchmark)
+ *   tone='info'     → blue   (neutral context — no severity)
+ */
+function Insight({ tone, children }: { tone: 'critical' | 'warn' | 'ok' | 'info'; children: React.ReactNode }) {
+  const palette = {
+    critical: { bg: 'rgba(220,38,38,0.10)', border: '#dc2626', fg: '#991b1b' },
+    warn:     { bg: 'rgba(234,88,12,0.10)', border: '#ea580c', fg: '#9a3412' },
+    ok:       { bg: 'rgba(22,163,74,0.10)', border: '#16a34a', fg: '#15803d' },
+    info:     { bg: 'rgba(31,56,100,0.08)', border: '#1F3864', fg: 'var(--text)' },
+  }[tone];
+  return (
+    <div
+      className="mt-2 rounded p-2 text-[11px] leading-relaxed"
+      style={{
+        backgroundColor: palette.bg,
+        borderLeft: `3px solid ${palette.border}`,
+        color: palette.fg,
+      }}
+    >
+      {children}
     </div>
   );
 }
