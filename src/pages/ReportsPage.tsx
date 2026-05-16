@@ -336,6 +336,12 @@ function VVMatrixTab() {
   const [daysMax, setDaysMax]         = useState<number | undefined>();
   const [riskFlag, setRiskFlag]       = useState<'' | 'critical' | 'high_expiry'>('');
   const [minStockValue, setMinStockValue] = useState<string>('');
+  /** Clicking a bubble in the VV Matrix scatter sets this — filters table
+   *  to that exact (value_score, validity_score) cell. */
+  const [cellFilter, setCellFilter]   = useState<{ v: number; vd: number } | null>(null);
+  /** Pagination state — 15 rows per page. Resets to 0 when any filter changes. */
+  const [page, setPage]               = useState(0);
+  const PAGE_SIZE = 15;
 
   const { data: stockData, isLoading: stockLoading } = useStockOnHand();
   const { data: snap }                                = useLatestLotSnapshot();
@@ -512,6 +518,9 @@ function VVMatrixTab() {
           if (item.remaining_days > daysMax) return false;
         }
         if (minStockValueNum != null && item.stock_value < minStockValueNum) return false;
+        if (cellFilter) {
+          if (item.value_score !== cellFilter.v || item.validity_score !== cellFilter.vd) return false;
+        }
         if (search) {
           const q = search.toLowerCase();
           const hit =
@@ -524,19 +533,28 @@ function VVMatrixTab() {
         return true;
       })
       .sort((a, b) => a.priority_rank - b.priority_rank),
-    [vvItems, vvClass, groupCode, fsCategory, warehouse, riskFlag, daysMax, minStockValueNum, search],
+    [vvItems, vvClass, groupCode, fsCategory, warehouse, riskFlag, daysMax, minStockValueNum, cellFilter, search],
   );
 
   const resetFilters = () => {
     setVvClass(''); setGroupCode(undefined); setFsCategory('');
     setWarehouse(''); setDaysMax(undefined); setRiskFlag('');
-    setMinStockValue(''); setSearch('');
+    setMinStockValue(''); setSearch(''); setCellFilter(null);
   };
 
   const activeFilterCount = [
     vvClass, groupCode, fsCategory, warehouse, daysMax !== undefined ? '1' : '',
-    riskFlag, minStockValueNum != null ? '1' : '', search,
+    riskFlag, minStockValueNum != null ? '1' : '', search, cellFilter ? '1' : '',
   ].filter(Boolean).length;
+
+  // Reset to first page whenever filters change so user always sees row 1.
+  useEffect(() => { setPage(0); }, [
+    vvClass, groupCode, fsCategory, warehouse, riskFlag, daysMax, minStockValueNum, cellFilter, search, mode,
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage   = Math.min(page, totalPages - 1);
+  const paged      = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   const summary = useMemo(() => {
     const all      = vvItems;
@@ -781,7 +799,8 @@ function VVMatrixTab() {
             </span>
           </div>
           <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-            จุด 1 จุด = สินค้าหลายตัวที่มีคะแนนตำแหน่งเดียวกัน · <strong>ขนาด=จำนวน</strong> · X = Value, Y = Validity · โซนเสี่ยง: ขวาล่าง
+            จุด 1 จุด = สินค้าหลายตัวที่มีคะแนนตำแหน่งเดียวกัน · <strong>ขนาด=จำนวน</strong> · X = Value, Y = Validity · โซนเสี่ยง: ขวาล่าง ·{' '}
+            <strong style={{ color: 'var(--color-primary)' }}>คลิกที่จุดเพื่อดูรายการ</strong>
           </p>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -849,14 +868,33 @@ function VVMatrixTab() {
                     fillOpacity={0.75}
                     stroke="#fff"
                     strokeWidth={1.5}
+                    onClick={(d: any) => {
+                      const x = d?.payload?.x ?? d?.x;
+                      const y = d?.payload?.y ?? d?.y;
+                      if (typeof x === 'number' && typeof y === 'number') {
+                        const next = { v: x, vd: y };
+                        // Click same bubble twice → clear
+                        setCellFilter(prev =>
+                          prev && prev.v === next.v && prev.vd === next.vd ? null : next
+                        );
+                        setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+                      }
+                    }}
                     shape={(props: any) => {
                       // Scale radius by item count — sqrt scale so big bins don't dwarf small ones.
                       // r range: 6 (count=1) → 26 (count=maxBin)
                       const count = props.payload?.count ?? 1;
                       const r = 6 + 20 * Math.sqrt((count - 1) / Math.max(1, maxBinCount - 1));
+                      const isSelected = cellFilter && cellFilter.v === props.payload?.x && cellFilter.vd === props.payload?.y;
                       return (
-                        <g>
-                          <circle cx={props.cx} cy={props.cy} r={r} fill={props.fill} fillOpacity={0.75} stroke="#fff" strokeWidth={1.5} />
+                        <g style={{ cursor: 'pointer' }}>
+                          <circle
+                            cx={props.cx} cy={props.cy} r={r}
+                            fill={props.fill}
+                            fillOpacity={isSelected ? 1 : 0.75}
+                            stroke={isSelected ? '#1F3864' : '#fff'}
+                            strokeWidth={isSelected ? 3 : 1.5}
+                          />
                           {count > 1 && (
                             <text
                               x={props.cx} y={props.cy} dy={4}
@@ -1076,11 +1114,66 @@ function VVMatrixTab() {
         </div>
       </div>
 
+      {/* ── Cell filter pill — shows the currently selected (V, Vd) cell */}
+      {cellFilter && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border" style={{
+          backgroundColor: 'rgba(31,56,100,0.06)',
+          borderColor: 'var(--color-primary)',
+        }}>
+          <Target size={14} style={{ color: 'var(--color-primary)' }} />
+          <span className="text-xs" style={{ color: 'var(--text)' }}>
+            แสดงเฉพาะรายการในช่อง{' '}
+            <strong>Value = {cellFilter.v}</strong>, <strong>Validity = {cellFilter.vd}</strong>
+            {' '}({formatNumber(filtered.length)} รายการ)
+          </span>
+          <button
+            onClick={() => setCellFilter(null)}
+            className="ml-auto flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-[var(--bg-alt)]"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <X size={12} /> ยกเลิก
+          </button>
+        </div>
+      )}
+
       {/* ── Product Table */}
       <div ref={tableRef} className="card p-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : activeFilterCount === 0 ? (
+          // ── Empty state — show only after the user picks at least one filter
+          <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+            <div className="p-4 rounded-full mb-4" style={{ backgroundColor: 'rgba(31,56,100,0.08)' }}>
+              <Filter size={28} style={{ color: 'var(--color-primary)' }} />
+            </div>
+            <h4 className="text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
+              เลือกเงื่อนไขเพื่อเริ่มดูรายการสินค้า
+            </h4>
+            <p className="text-xs max-w-md leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              ระบบไม่แสดงรายการ {formatNumber(vvItems.length)} รายการทั้งหมดในตอนเริ่มต้น เพื่อให้ทำงานเร็ว ·{' '}
+              <strong>กรองด้วยตัวเลือกด้านบน</strong> (Class / Group / Risk / ค้นหา / Days Left)
+              หรือ <strong style={{ color: 'var(--color-primary)' }}>คลิกที่จุดในกราฟ VV Matrix</strong> เพื่อดูเฉพาะรายการในช่องนั้น
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>ตัวเลือกด่วน:</span>
+              <button onClick={() => { setVvClass('C'); }}
+                className="text-xs px-2.5 py-1 rounded-full border transition-colors hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: VV_COLORS.C, color: VV_COLORS.C }}>
+                Class C – At Risk
+              </button>
+              <button onClick={() => { setRiskFlag('critical'); }}
+                className="text-xs px-2.5 py-1 rounded-full border transition-colors hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: '#7c3aed', color: '#7c3aed' }}>
+                🔴 Critical only
+              </button>
+              <button onClick={() => { setDaysMax(30); }}
+                className="text-xs px-2.5 py-1 rounded-full border transition-colors hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: '#ea580c', color: '#ea580c' }}>
+                Days Left ≤ 30
+              </button>
+            </div>
           </div>
         ) : (
           <div className="table-container" style={{ border: 'none', overflowX: 'auto' }}>
@@ -1120,7 +1213,7 @@ function VVMatrixTab() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(row => (
+                {paged.map(row => (
                   <tr key={mode === 'lot' ? `${row.item_code}|${row.warehouse}|${row.batch_num}` : row.item_code}
                     style={row.risk_flag === 'critical'    ? { backgroundColor: 'rgba(220,38,38,0.05)' } :
                            row.risk_flag === 'high_expiry' ? { backgroundColor: 'rgba(234,88,12,0.04)'  } : {}}>
@@ -1199,12 +1292,96 @@ function VVMatrixTab() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={mode === 'lot' ? 14 : 13} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={mode === 'lot' ? 14 : 13} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
+                    ไม่พบรายการที่ตรงกับเงื่อนไข — ลองปรับฟิลเตอร์หรือ Reset
+                  </td></tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
+
+        {/* Pagination footer — appears only when a filter is active and there are results */}
+        {activeFilterCount > 0 && !isLoading && filtered.length > 0 && (
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            total={filtered.length}
+            pageSize={PAGE_SIZE}
+            onChange={setPage}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Compact pagination footer — page indicator, jump-by-page buttons,
+ * range readout ("21 – 35 จาก 1,073"). Used by VV Matrix tab.
+ */
+function Pagination({ page, totalPages, total, pageSize, onChange }: {
+  page: number; totalPages: number; total: number; pageSize: number;
+  onChange: (next: number) => void;
+}) {
+  const startRow = page * pageSize + 1;
+  const endRow   = Math.min((page + 1) * pageSize, total);
+
+  // Compact page-number list with ellipses (...) for very large totals.
+  const visible: (number | '...')[] = [];
+  if (totalPages <= 7) {
+    for (let i = 0; i < totalPages; i++) visible.push(i);
+  } else {
+    visible.push(0);
+    if (page > 2) visible.push('...');
+    for (let i = Math.max(1, page - 1); i <= Math.min(totalPages - 2, page + 1); i++) visible.push(i);
+    if (page < totalPages - 3) visible.push('...');
+    visible.push(totalPages - 1);
+  }
+
+  return (
+    <div className="px-4 py-3 border-t flex flex-wrap items-center justify-between gap-3"
+         style={{ borderColor: 'var(--border)' }}>
+      <span className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
+        แสดง <strong style={{ color: 'var(--text)' }}>{formatNumber(startRow)}</strong>
+        {' '}–{' '}
+        <strong style={{ color: 'var(--text)' }}>{formatNumber(endRow)}</strong>
+        {' '}จาก <strong style={{ color: 'var(--text)' }}>{formatNumber(total)}</strong> รายการ
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onChange(Math.max(0, page - 1))}
+          disabled={page === 0}
+          className="px-2.5 py-1 rounded text-xs border transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+        >
+          ←
+        </button>
+        {visible.map((p, i) =>
+          p === '...' ? (
+            <span key={`gap-${i}`} className="px-2 text-xs" style={{ color: 'var(--text-muted)' }}>…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onChange(p)}
+              className="px-2.5 py-1 rounded text-xs border transition-colors min-w-[28px]"
+              style={p === page
+                ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#fff', fontWeight: 600 }
+                : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+              }
+            >
+              {p + 1}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => onChange(Math.min(totalPages - 1, page + 1))}
+          disabled={page >= totalPages - 1}
+          className="px-2.5 py-1 rounded text-xs border transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-alt)]"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+        >
+          →
+        </button>
       </div>
     </div>
   );
