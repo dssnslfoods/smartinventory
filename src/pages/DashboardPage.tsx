@@ -387,7 +387,7 @@ export function DashboardPage() {
         <KpiCard
           icon={<Clock size={18} />}
           label="Days Inventory"
-          value={financialKpi.dio == null ? 'N/A' : `${financialKpi.dio} วัน`}
+          value={financialKpi.dio == null ? 'N/A' : `${formatNumber(financialKpi.dio, 0)} วัน`}
           sublabel={`365 / Turnover · ${financialKpi.monthsCounted}mo data`}
           color={financialKpi.dio == null ? COLORS.muted : financialKpi.dio <= 90 ? COLORS.green : financialKpi.dio <= 180 ? COLORS.amber : COLORS.red}
           tooltipTitle="Days Inventory Outstanding (DIO)"
@@ -440,7 +440,7 @@ export function DashboardPage() {
           icon={<TrendingDown size={18} />}
           label="Dead Stock %"
           value={`${movementHealth.deadPct.toFixed(1)}%`}
-          sublabel={`${movementHealth.counts.dead_stock} items · ฿${formatCompact(movementHealth.values.dead_stock)}`}
+          sublabel={`${formatNumber(movementHealth.counts.dead_stock, 0)} items · ฿${formatCompact(movementHealth.values.dead_stock)}`}
           color={movementHealth.deadPct <= 5 ? COLORS.green : movementHealth.deadPct <= 15 ? COLORS.amber : COLORS.red}
           tooltipTitle="Dead Stock %"
           tooltip={<>
@@ -489,7 +489,7 @@ export function DashboardPage() {
                     {...tooltipStyle}
                     formatter={(v?: number | string, _name?: string, item?: any) => {
                       const pct = totalAgingValue > 0 ? ((Number(v) / totalAgingValue) * 100).toFixed(1) : '0';
-                      return [`฿${formatCompact(Number(v ?? 0))} (${pct}%) · ${item?.payload?.lots} lots`, item?.payload?.label];
+                      return [`฿${formatCompact(Number(v ?? 0))} (${pct}%) · ${formatNumber(item?.payload?.lots ?? 0, 0)} lots`, item?.payload?.label];
                     }}
                   />
                 </PieChart>

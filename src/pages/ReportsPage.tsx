@@ -691,7 +691,7 @@ function VVMatrixTab() {
               key={cls}
               title={`Class ${cls} – ${label}`}
               value={`${pct}%`}
-              sub={`${count} items · ฿${formatCompact(val)}`}
+              sub={`${formatNumber(count, 0)} items · ฿${formatCompact(val)}`}
               color={VV_COLORS[cls]}
               isActive={isActive}
               onClick={() => {
