@@ -71,8 +71,12 @@ export function ReportsPage() {
             <p className="text-xs mt-2 italic">ปรับเกณฑ์ A/B และค่า α ได้ที่ Settings → VV Matrix Configuration</p>
           </HelpSection>
           <HelpSection title="แท็บ Group Analysis">
-            วิเคราะห์ตามกลุ่มสินค้า — แต่ละกลุ่มมีของ Class A/B/C อย่างละกี่ตัว,
-            กลุ่มไหน Move เยอะ/น้อย, กลุ่มไหนของแพงสะสมเยอะ
+            วิเคราะห์ตามกลุ่มสินค้า โดยใช้ <strong>VV ระดับ lot</strong> (เพราะ validity เป็นเรื่องของ lot จริงๆ)
+            <ul className="list-disc ml-5 text-xs mt-1 space-y-1">
+              <li>แต่ละกลุ่มมีของ Class A/B/C กี่ <strong>lot</strong></li>
+              <li>กลุ่มไหน Move เยอะ/น้อย</li>
+              <li>กลุ่มไหนของแพงสะสมเยอะ + หมุนช้า (Cash trapped)</li>
+            </ul>
           </HelpSection>
           <HelpSection title="แท็บ Slow Moving">
             <HelpLegend items={[
@@ -2495,22 +2499,27 @@ function DeltaPill({ pct }: { pct: number }) {
 //   • Which groups are big in $ but slow to move? (cash trapped)
 //
 // Data sources:
-//   useStockOnHand()      → aggregate to item-level for VV scoring
+//   useLotDetail()        → lot-level data for VV scoring (REAL expiry per lot)
 //   useMonthlySummary(n)  → group × month movement for the period selector
 //   useSystemConfig()     → VV thresholds + alpha
+//
+// Why lot-level: validity is intrinsically per-lot. Two lots of the same SKU
+// can have wildly different expire dates → different validity scores → different
+// VV classes. Rolling up to SKU loses this information.
 type GroupRow = {
   group_name: string;
   group_code: number | null;
-  items_total: number;
-  items_a: number;
-  items_b: number;
-  items_c: number;
-  stock_value: number;
+  skus_total: number;       // unique item_code in group
+  lots_total: number;       // total lots in group (the analytical unit)
+  lots_a: number;
+  lots_b: number;
+  lots_c: number;
+  stock_value: number;      // sum of lot amounts
   in_value: number;
   out_value: number;
   net_value: number;
   tx_count: number;
-  turnover_ratio: number;   // out_value / avg_stock_value (period-annualized)
+  turnover_ratio: number;   // out_value / stock_value (period-annualized)
   movement_share: number;   // group out / total out
 };
 
@@ -2519,42 +2528,44 @@ function GroupAnalysisTab() {
   const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'c'>('out');
   const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_c'>('all');
 
-  const { data: stockData,      isLoading: stockLoading }   = useStockOnHand();
-  const { data: monthlyData,    isLoading: monthlyLoading } = useMonthlySummary(monthsBack);
-  const { data: sysConfig }                                 = useSystemConfig();
+  const { data: snap }                                       = useLatestLotSnapshot();
+  const { data: lotResult, isLoading: lotLoading }           = useLotDetail({
+    snapshotDate: snap, pageSize: 5000, page: 0,
+  });
+  const { data: monthlyData, isLoading: monthlyLoading }     = useMonthlySummary(monthsBack);
+  const { data: sysConfig }                                  = useSystemConfig();
   const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
   const alpha = Math.round(cfg.vv_alpha) as 1 | 2 | 3;
 
-  const isLoading = stockLoading || monthlyLoading;
+  const isLoading = lotLoading || monthlyLoading;
 
-  // Score items (item-mode VV — aggregate stock_value across warehouses per item)
-  const vvItems = useMemo<VVItem[]>(() => {
-    const all = stockData ?? [];
-    if (!all.length) return [];
-    const itemMap = new Map<string, VVInput>();
-    for (const s of all) {
-      const ex = itemMap.get(s.item_code);
-      if (ex) {
-        ex.stock_value += Number(s.stock_value);
-      } else {
-        itemMap.set(s.item_code, {
-          item_code:   s.item_code,
-          itemname:    s.itemname,
-          group_name:  s.group_name,
-          uom:         s.uom,
-          stock_value: Number(s.stock_value),
-          expire_date: s.expire_date ?? null,
-          fs_category: (s as any).fs_category ?? null,
-        });
-      }
-    }
-    return computeVVScores(Array.from(itemMap.values()), cfg, alpha);
-  }, [stockData, cfg, alpha]);
+  // Score EACH LOT individually — validity is per-lot by nature
+  const vvLots = useMemo<VVItem[]>(() => {
+    const lots = lotResult?.data ?? [];
+    if (!lots.length) return [];
+    const inputs: VVInput[] = lots
+      .filter(l => Number(l.qty) > 0)
+      .map(l => ({
+        item_code:   l.item_code,
+        itemname:    l.itemname,
+        group_name:  l.group_name,
+        uom:         l.uom,
+        stock_value: Number(l.amount),
+        expire_date: l.expire_date,            // ← REAL lot-level expire date
+        batch_num:   l.batch_num,
+        warehouse:   l.warehouse,
+        whs_name:    l.whs_name,
+        qty:         Number(l.qty),
+        fs_category: l.fs_category ?? null,
+      }));
+    return computeVVScores(inputs, cfg, alpha);
+  }, [lotResult, cfg, alpha]);
 
-  // Build group rollup
+  // Build group rollup at LOT level
   const groupRows: GroupRow[] = useMemo(() => {
-    // 1. VV class counts + stock value per group
-    type Acc = Omit<GroupRow, 'turnover_ratio' | 'movement_share'> & { _filled: boolean };
+    type Acc = Omit<GroupRow, 'turnover_ratio' | 'movement_share' | 'skus_total'> & {
+      _skus: Set<string>;
+    };
     const map = new Map<string, Acc>();
 
     const ensure = (group_name: string, group_code: number | null): Acc => {
@@ -2562,24 +2573,26 @@ function GroupAnalysisTab() {
       if (ex) return ex;
       const fresh: Acc = {
         group_name, group_code,
-        items_total: 0, items_a: 0, items_b: 0, items_c: 0,
+        lots_total: 0, lots_a: 0, lots_b: 0, lots_c: 0,
         stock_value: 0, in_value: 0, out_value: 0, net_value: 0, tx_count: 0,
-        _filled: false,
+        _skus: new Set<string>(),
       };
       map.set(group_name, fresh);
       return fresh;
     };
 
-    for (const it of vvItems) {
-      const row = ensure(it.group_name, null);
-      row.items_total += 1;
-      if (it.exp_class === 'A') row.items_a += 1;
-      else if (it.exp_class === 'B') row.items_b += 1;
-      else row.items_c += 1;
-      row.stock_value += it.stock_value;
+    // 1. Count lots by VV class per group + collect unique SKUs + stock value
+    for (const lot of vvLots) {
+      const row = ensure(lot.group_name, null);
+      row.lots_total += 1;
+      row._skus.add(lot.item_code);
+      if (lot.exp_class === 'A') row.lots_a += 1;
+      else if (lot.exp_class === 'B') row.lots_b += 1;
+      else row.lots_c += 1;
+      row.stock_value += lot.stock_value;
     }
 
-    // 2. Movement aggregation across selected period
+    // 2. Movement aggregation across selected period (still group-level — no lot in tx data)
     for (const m of (monthlyData ?? []) as MonthlySummaryRow[]) {
       const row = ensure(m.group_name, m.group_code);
       row.in_value  += Number(m.in_value);
@@ -2591,14 +2604,15 @@ function GroupAnalysisTab() {
 
     // 3. Compute turnover (annualized) + movement share
     const totalOut = Array.from(map.values()).reduce((s, r) => s + r.out_value, 0) || 1;
-    const yearsFactor = 12 / monthsBack;  // scale period-out to annual rate
+    const yearsFactor = 12 / monthsBack;
     return Array.from(map.values()).map(r => ({
       group_name: r.group_name,
       group_code: r.group_code,
-      items_total: r.items_total,
-      items_a: r.items_a,
-      items_b: r.items_b,
-      items_c: r.items_c,
+      skus_total: r._skus.size,
+      lots_total: r.lots_total,
+      lots_a: r.lots_a,
+      lots_b: r.lots_b,
+      lots_c: r.lots_c,
       stock_value: r.stock_value,
       in_value:   r.in_value,
       out_value:  r.out_value,
@@ -2607,21 +2621,21 @@ function GroupAnalysisTab() {
       turnover_ratio: r.stock_value > 0 ? (r.out_value * yearsFactor) / r.stock_value : 0,
       movement_share: (r.out_value / totalOut) * 100,
     }));
-  }, [vvItems, monthlyData, monthsBack]);
+  }, [vvLots, monthlyData, monthsBack]);
 
   // Filter + sort
   const filtered = useMemo(() => {
     let rows = groupRows;
-    if (showOnly === 'has_a') rows = rows.filter(r => r.items_a > 0);
-    else if (showOnly === 'has_c') rows = rows.filter(r => r.items_c > 0);
+    if (showOnly === 'has_a')      rows = rows.filter(r => r.lots_a > 0);
+    else if (showOnly === 'has_c') rows = rows.filter(r => r.lots_c > 0);
     return [...rows].sort((a, b) => {
       switch (sortKey) {
         case 'out':      return b.out_value - a.out_value;
         case 'in':       return b.in_value - a.in_value;
         case 'stock':    return b.stock_value - a.stock_value;
         case 'turnover': return b.turnover_ratio - a.turnover_ratio;
-        case 'a':        return b.items_a - a.items_a;
-        case 'c':        return b.items_c - a.items_c;
+        case 'a':        return b.lots_a - a.lots_a;
+        case 'c':        return b.lots_c - a.lots_c;
       }
     });
   }, [groupRows, sortKey, showOnly]);
@@ -2630,21 +2644,22 @@ function GroupAnalysisTab() {
   const totals = useMemo(() => {
     const t = filtered.reduce((acc, r) => ({
       groups: acc.groups + 1,
-      items_total: acc.items_total + r.items_total,
-      items_a: acc.items_a + r.items_a,
-      items_b: acc.items_b + r.items_b,
-      items_c: acc.items_c + r.items_c,
+      skus_total: acc.skus_total + r.skus_total,
+      lots_total: acc.lots_total + r.lots_total,
+      lots_a: acc.lots_a + r.lots_a,
+      lots_b: acc.lots_b + r.lots_b,
+      lots_c: acc.lots_c + r.lots_c,
       stock_value: acc.stock_value + r.stock_value,
       out_value: acc.out_value + r.out_value,
       in_value: acc.in_value + r.in_value,
-    }), { groups: 0, items_total: 0, items_a: 0, items_b: 0, items_c: 0, stock_value: 0, out_value: 0, in_value: 0 });
+    }), { groups: 0, skus_total: 0, lots_total: 0, lots_a: 0, lots_b: 0, lots_c: 0, stock_value: 0, out_value: 0, in_value: 0 });
 
     const topMover  = [...filtered].sort((a, b) => b.out_value - a.out_value)[0];
     const topValue  = [...filtered].sort((a, b) => b.stock_value - a.stock_value)[0];
     const fastest   = [...filtered].filter(r => r.stock_value > 0).sort((a, b) => b.turnover_ratio - a.turnover_ratio)[0];
     const slowest   = [...filtered].filter(r => r.stock_value > 0 && r.out_value > 0).sort((a, b) => a.turnover_ratio - b.turnover_ratio)[0];
-    const mostA     = [...filtered].sort((a, b) => b.items_a - a.items_a)[0];
-    const mostC     = [...filtered].sort((a, b) => b.items_c - a.items_c)[0];
+    const mostA     = [...filtered].sort((a, b) => b.lots_a - a.lots_a)[0];
+    const mostC     = [...filtered].sort((a, b) => b.lots_c - a.lots_c)[0];
 
     return { ...t, topMover, topValue, fastest, slowest, mostA, mostC };
   }, [filtered]);
@@ -2663,19 +2678,20 @@ function GroupAnalysisTab() {
 
   const handleExport = () => {
     exportToExcel(filtered.map(r => ({
-      'Group':               r.group_name,
-      'Group Code':          r.group_code ?? '',
-      'Items Total':         r.items_total,
-      'VV Class A':          r.items_a,
-      'VV Class B':          r.items_b,
-      'VV Class C':          r.items_c,
+      'Group':                   r.group_name,
+      'Group Code':              r.group_code ?? '',
+      'SKUs':                    r.skus_total,
+      'Lots Total':              r.lots_total,
+      'VV Class A (lots)':       r.lots_a,
+      'VV Class B (lots)':       r.lots_b,
+      'VV Class C (lots)':       r.lots_c,
       'Stock Value (฿)':         r.stock_value,
       [`In ${monthsBack}mo`]:    r.in_value,
       [`Out ${monthsBack}mo`]:   r.out_value,
       'Net':                     r.net_value,
-      'Tx Count':            r.tx_count,
-      'Turnover (Annual)':   Number(r.turnover_ratio.toFixed(2)),
-      'Movement Share %':    Number(r.movement_share.toFixed(2)),
+      'Tx Count':                r.tx_count,
+      'Turnover (Annual)':       Number(r.turnover_ratio.toFixed(2)),
+      'Movement Share %':        Number(r.movement_share.toFixed(2)),
     })), `Group_Analysis_${monthsBack}mo`);
   };
 
@@ -2684,6 +2700,15 @@ function GroupAnalysisTab() {
       <div className="card text-center py-20" style={{ color: 'var(--text-muted)' }}>
         <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
         กำลังโหลด...
+      </div>
+    );
+  }
+
+  if (!snap) {
+    return (
+      <div className="card text-center py-12" style={{ color: 'var(--text-muted)' }}>
+        <Layers size={32} className="mx-auto mb-3 opacity-40" />
+        <p>ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อนที่ Data Import</p>
       </div>
     );
   }
@@ -2753,7 +2778,7 @@ function GroupAnalysisTab() {
           icon={<FolderTree size={14} />}
           label="จำนวนกลุ่ม"
           value={formatNumber(totals.groups)}
-          sub={`${formatNumber(totals.items_total)} SKU รวม`}
+          sub={`${formatNumber(totals.skus_total)} SKU • ${formatNumber(totals.lots_total)} lots`}
           color="#1F3864"
         />
         <InsightCard
@@ -2788,7 +2813,7 @@ function GroupAnalysisTab() {
           icon={<Target size={14} />}
           label="Class A เยอะสุด / C เยอะสุด"
           value={`${totals.mostA?.group_name.split('-')[0].slice(0, 10) || '—'} / ${totals.mostC?.group_name.split('-')[0].slice(0, 10) || '—'}`}
-          sub={`A=${totals.mostA?.items_a ?? 0} • C=${totals.mostC?.items_c ?? 0}`}
+          sub={`A=${totals.mostA?.lots_a ?? 0} lots • C=${totals.mostC?.lots_c ?? 0} lots`}
           color="#d97706"
         />
       </div>
@@ -2828,10 +2853,10 @@ function GroupAnalysisTab() {
           </div>
         </div>
 
-        {/* Chart 2: VV class distribution by group (stacked) */}
+        {/* Chart 2: VV class distribution by group (stacked) — lot-level */}
         <div className="card">
           <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
-            VV Class Distribution by Group (Top {Math.min(TOP_N, chartData.length)})
+            VV Class Distribution by Group (Top {Math.min(TOP_N, chartData.length)}) — นับเป็น lot
           </h4>
           <div style={{ height: 360 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -2854,9 +2879,9 @@ function GroupAnalysisTab() {
                   labelFormatter={l => String(l)}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="items_a" name="Class A" stackId="vv" fill={VV_COLORS.A} radius={[0,0,0,0]} />
-                <Bar dataKey="items_b" name="Class B" stackId="vv" fill={VV_COLORS.B} />
-                <Bar dataKey="items_c" name="Class C" stackId="vv" fill={VV_COLORS.C} radius={[2,2,0,0]} />
+                <Bar dataKey="lots_a" name="Class A (lots)" stackId="vv" fill={VV_COLORS.A} radius={[0,0,0,0]} />
+                <Bar dataKey="lots_b" name="Class B (lots)" stackId="vv" fill={VV_COLORS.B} />
+                <Bar dataKey="lots_c" name="Class C (lots)" stackId="vv" fill={VV_COLORS.C} radius={[2,2,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2869,7 +2894,7 @@ function GroupAnalysisTab() {
           <FolderTree size={15} style={{ color: 'var(--text-muted)' }} />
           <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Group Performance</h4>
           <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>
-            {filtered.length} กลุ่ม • คลิกหัวคอลัมน์เพื่อเรียงลำดับ
+            {filtered.length} กลุ่ม • VV คำนวณจาก lot จริง • คลิกหัวคอลัมน์เพื่อเรียงลำดับ
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -2877,8 +2902,9 @@ function GroupAnalysisTab() {
             <thead>
               <tr style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-alt)' }}>
                 <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Group</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Items</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold uppercase">VV (A/B/C)</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase">SKUs</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase">Lots</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold uppercase">VV by Lot (A/B/C)</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase cursor-pointer hover:text-[var(--text)]" onClick={() => setSortKey('stock')}>
                   Stock Value{sortKey === 'stock' && ' ↓'}
                 </th>
@@ -2896,11 +2922,11 @@ function GroupAnalysisTab() {
             </thead>
             <tbody>
               {filtered.map(r => {
-                // Build A/B/C inline distribution bar
-                const total = r.items_total || 1;
-                const aPct = (r.items_a / total) * 100;
-                const bPct = (r.items_b / total) * 100;
-                const cPct = (r.items_c / total) * 100;
+                // Build A/B/C inline distribution bar (lot-level)
+                const total = r.lots_total || 1;
+                const aPct = (r.lots_a / total) * 100;
+                const bPct = (r.lots_b / total) * 100;
+                const cPct = (r.lots_c / total) * 100;
                 return (
                   <tr key={r.group_name} className="border-t hover:bg-[var(--bg-alt)]" style={{ borderColor: 'var(--border)' }}>
                     <td className="px-3 py-2 text-xs" style={{ color: 'var(--text)' }}>
@@ -2909,12 +2935,13 @@ function GroupAnalysisTab() {
                         <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{r.group_name.split('-').slice(1).join('-').trim()}</div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right text-xs tabular-nums">{formatNumber(r.items_total)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums">{formatNumber(r.skus_total)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums">{formatNumber(r.lots_total)}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1 justify-center">
-                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.A, color: '#fff' }}>{r.items_a}</span>
-                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.B, color: '#fff' }}>{r.items_b}</span>
-                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.C, color: '#fff' }}>{r.items_c}</span>
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.A, color: '#fff' }}>{r.lots_a}</span>
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.B, color: '#fff' }}>{r.lots_b}</span>
+                        <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold" style={{ backgroundColor: VV_COLORS.C, color: '#fff' }}>{r.lots_c}</span>
                       </div>
                       {/* tiny distribution bar */}
                       <div className="flex h-1 mt-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-alt)' }}>
@@ -2945,16 +2972,17 @@ function GroupAnalysisTab() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+                <tr><td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               )}
             </tbody>
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="border-t-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
                   <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text)' }}>รวม {totals.groups} กลุ่ม</td>
-                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">{formatNumber(totals.items_total)}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">{formatNumber(totals.skus_total)}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">{formatNumber(totals.lots_total)}</td>
                   <td className="px-3 py-2 text-center text-xs font-bold">
-                    A:{totals.items_a} / B:{totals.items_b} / C:{totals.items_c}
+                    A:{totals.lots_a} / B:{totals.lots_b} / C:{totals.lots_c}
                   </td>
                   <td className="px-3 py-2 text-right text-xs tabular-nums font-bold">฿{formatCompact(totals.stock_value)}</td>
                   <td className="px-3 py-2 text-right text-xs tabular-nums font-bold" style={{ color: '#16a34a' }}>฿{formatCompact(totals.in_value)}</td>
@@ -2972,8 +3000,13 @@ function GroupAnalysisTab() {
       <div className="card text-xs" style={{ color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>วิธีใช้รายงานนี้:</strong>
         <ul className="list-disc ml-5 mt-1 space-y-0.5">
-          <li><strong style={{ color: VV_COLORS.A }}>Class A</strong> = ของแพง & สด → กลุ่มที่มี A เยอะ = ของหลักของธุรกิจ</li>
-          <li><strong style={{ color: VV_COLORS.C }}>Class C</strong> = ของถูก / ของใกล้หมดอายุ → กลุ่มที่มี C เยอะ = ต้องเร่งระบาย</li>
+          <li>
+            <strong>VV นับเป็น lot</strong> — เพราะ 1 SKU อาจมีหลาย lot ที่ value/validity ต่างกัน
+            จึงให้คะแนนระดับ lot จะแม่นยำกว่า (เช่น SKU เดียวกันอาจมี 3 lot: 1 lot Class A, 1 lot Class B, 1 lot Class C)
+          </li>
+          <li><strong style={{ color: VV_COLORS.A }}>Class A (lots)</strong> = lot ที่ของแพง & สด → กลุ่มที่มี A เยอะ = ของหลักที่ขายดี</li>
+          <li><strong style={{ color: VV_COLORS.C }}>Class C (lots)</strong> = lot ที่ใกล้หมดอายุ หรือมูลค่าต่ำ → ต้องเร่งระบาย</li>
+          <li><strong>SKUs vs Lots</strong> — SKUs = จำนวนรหัสสินค้าไม่ซ้ำ • Lots = จำนวนล็อตรวม (1 SKU อาจมีหลาย lot)</li>
           <li><strong>Turnover</strong> = อัตราหมุนต่อปี — สูง=หมุนเร็ว (ดี), ต่ำ=ของค้าง</li>
           <li><strong>Move Share</strong> = สัดส่วน Out ของกลุ่มนี้ จากยอดรวม → เห็นว่ากลุ่มไหนคือ "ตัวขับเคลื่อน" ของธุรกิจ</li>
           <li><strong>เคสน่าสนใจ:</strong> กลุ่มที่มี Stock Value สูง + Turnover ต่ำ + Class C เยอะ = ของค้างที่ใกล้หมดอายุ ต้องเร่งระบาย</li>
