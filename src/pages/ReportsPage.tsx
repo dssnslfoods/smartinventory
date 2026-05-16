@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Target, RefreshCw, Download, Filter, Clock, Layers, Search, X,
   TrendingUp, TrendingDown, Minus, FolderTree,
@@ -323,6 +323,11 @@ function VVMatrixTab() {
   const [search, setSearch]           = useState('');
   const [warehouse, setWarehouse]     = useState('');
   const [fsCategory, setFsCategory]   = useState('');
+  // Ref to scroll to filtered table when a KPI card is clicked
+  const tableRef = useRef<HTMLDivElement>(null);
+  const scrollToTable = () => {
+    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
   const [daysMax, setDaysMax]         = useState<number | undefined>();
   const [riskFlag, setRiskFlag]       = useState<'' | 'critical' | 'high_expiry'>('');
   const [minStockValue, setMinStockValue] = useState<string>('');
@@ -661,56 +666,86 @@ function VVMatrixTab() {
         </div>
       </div>
 
-      {/* ── KPI Cards */}
+      {/* ── KPI Cards (clickable → filter the table below) ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {/* Avg Exp Score */}
-        <div className="card lg:col-span-1">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Exp Score</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
-            {summary.avgExpScore.toFixed(2)}
-          </p>
-          <p className="text-xs mt-1 tabular-nums" style={{ color: 'var(--text-muted)' }}>
-            Simple: {summary.avgSimScore.toFixed(2)}
-          </p>
-        </div>
+        {/* Avg Exp Score — click to reset all filters */}
+        <KpiClickCard
+          title="Avg Exp Score"
+          value={summary.avgExpScore.toFixed(2)}
+          sub={`Simple: ${summary.avgSimScore.toFixed(2)}`}
+          color="var(--color-primary)"
+          isActive={false}
+          onClick={() => { resetFilters(); scrollToTable(); }}
+          hint="คลิก → ล้างฟิลเตอร์ทั้งหมด"
+        />
 
-        {/* Class A / B / C — based on exp_class */}
+        {/* Class A / B / C — click to filter by that class */}
         {(['A', 'B', 'C'] as const).map(cls => {
           const count = cls === 'A' ? summary.countA : cls === 'B' ? summary.countB : summary.countC;
           const val   = cls === 'A' ? summary.valA   : cls === 'B' ? summary.valB   : summary.valC;
           const label = { A: 'Strategic', B: 'Core', C: 'At Risk' }[cls];
+          const pct   = summary.total ? ((count / summary.total) * 100).toFixed(0) : '0';
+          const isActive = vvClass === cls;
           return (
-            <div key={cls} className="card border-l-4" style={{ borderLeftColor: VV_COLORS[cls] }}>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Class {cls} – {label}</p>
-              <p className="text-2xl font-bold" style={{ color: VV_COLORS[cls] }}>
-                {summary.total ? ((count / summary.total) * 100).toFixed(0) : 0}%
-              </p>
-              <p className="text-xs mt-1 tabular-nums" style={{ color: 'var(--text-muted)' }}>
-                {count} items · ฿{formatCompact(val)}
-              </p>
-            </div>
+            <KpiClickCard
+              key={cls}
+              title={`Class ${cls} – ${label}`}
+              value={`${pct}%`}
+              sub={`${count} items · ฿${formatCompact(val)}`}
+              color={VV_COLORS[cls]}
+              isActive={isActive}
+              onClick={() => {
+                if (isActive) {
+                  setVvClass('');
+                } else {
+                  setVvClass(cls);
+                  setRiskFlag('');
+                }
+                scrollToTable();
+              }}
+              hint={isActive ? 'คลิกซ้ำ → ยกเลิกฟิลเตอร์' : `คลิก → กรอง Class ${cls}`}
+            />
           );
         })}
 
-        {/* Critical */}
-        <div className="card border-l-4" style={{ borderLeftColor: '#7c3aed' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Critical Items</p>
-          <p className="text-2xl font-bold" style={{ color: '#7c3aed' }}>{summary.criticalCount}</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            High value + near expiry
-          </p>
-        </div>
+        {/* Critical — click to filter by risk_flag = critical */}
+        <KpiClickCard
+          title="Critical Items"
+          value={String(summary.criticalCount)}
+          sub="High value + near expiry"
+          color="#7c3aed"
+          isActive={riskFlag === 'critical'}
+          onClick={() => {
+            if (riskFlag === 'critical') {
+              setRiskFlag('');
+            } else {
+              setRiskFlag('critical');
+              setVvClass('');
+            }
+            scrollToTable();
+          }}
+          hint={riskFlag === 'critical' ? 'คลิกซ้ำ → ยกเลิก' : 'คลิก → กรอง Critical เท่านั้น'}
+        />
 
-        {/* Value at Risk */}
-        <div className="card border-l-4" style={{ borderLeftColor: '#dc2626' }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Value at Risk</p>
-          <p className="text-xl font-bold tabular-nums" style={{ color: '#dc2626' }}>
-            ฿{formatCompact(summary.valC)}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            Class C inventory
-          </p>
-        </div>
+        {/* Value at Risk — click to filter Class C */}
+        <KpiClickCard
+          title="Value at Risk"
+          value={`฿${formatCompact(summary.valC)}`}
+          sub="Class C inventory"
+          color="#dc2626"
+          isActive={vvClass === 'C'}
+          onClick={() => {
+            if (vvClass === 'C') {
+              setVvClass('');
+            } else {
+              setVvClass('C');
+              setRiskFlag('');
+            }
+            scrollToTable();
+          }}
+          hint={vvClass === 'C' ? 'คลิกซ้ำ → ยกเลิก' : 'คลิก → กรอง Class C'}
+          smallValue
+        />
       </div>
 
       {/* ── Risk Alert Banner */}
@@ -1037,7 +1072,7 @@ function VVMatrixTab() {
       </div>
 
       {/* ── Product Table */}
-      <div className="card p-0">
+      <div ref={tableRef} className="card p-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
@@ -3235,6 +3270,56 @@ function ModeSelectorCard({
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Clickable KPI card — drives filter state on the VV Matrix tab ──
+function KpiClickCard({
+  title, value, sub, color, isActive, onClick, hint, smallValue,
+}: {
+  title: string;
+  value: string;
+  sub: string;
+  color: string;
+  isActive: boolean;
+  onClick: () => void;
+  hint?: string;
+  smallValue?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="card border-l-4 text-left transition-all hover:shadow-md cursor-pointer relative group"
+      style={{
+        borderLeftColor: color,
+        // Active state — colored ring + tinted background
+        ...(isActive
+          ? { boxShadow: `0 0 0 2px ${color}`, backgroundColor: `${color}0a` }
+          : {}),
+      }}
+      title={hint}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs flex-1" style={{ color: 'var(--text-muted)' }}>{title}</p>
+        {isActive && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0"
+                style={{ backgroundColor: color, color: '#fff' }}>
+            ACTIVE
+          </span>
+        )}
+      </div>
+      <p className={`${smallValue ? 'text-xl' : 'text-2xl'} font-bold tabular-nums mt-0.5`} style={{ color }}>
+        {value}
+      </p>
+      <p className="text-xs mt-1 tabular-nums" style={{ color: 'var(--text-muted)' }}>{sub}</p>
+      {/* Hint chip — visible on hover (or always when active) */}
+      {hint && (
+        <p className={`text-[10px] mt-1 italic transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+           style={{ color }}>
+          {hint}
+        </p>
+      )}
+    </button>
   );
 }
 
