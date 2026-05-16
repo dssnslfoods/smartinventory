@@ -345,7 +345,9 @@ function CostAnalyticsTab() {
   const { data: stockData = [],     isLoading: stockLoading }    = useStockOnHand({ isActive: true });
   const { data: turnoverData = [] } = useInventoryTurnover();
   const { data: slowData = [] }     = useSlowMoving();
-  const { data: monthlyTotal = [] } = useMonthlyTotal(12);
+  // Fetch 24 months so we can take the last 12 with actual data
+  // (Option A fix — anchor on data, not today)
+  const { data: monthlyTotal = [] } = useMonthlyTotal(24);
   const { data: monthlyMovement = [] } = useMovementMonthly({ months: 12 });
 
   const isLoading = stockLoading;
@@ -371,8 +373,12 @@ function CostAnalyticsTab() {
     }
     const variancePct = totalStdBasis > 0 ? (totalAbsVariance / totalStdBasis) * 100 : 0;
 
-    // COGS proxy: out value over last 12 months (absolute)
-    const cogs12mo = monthlyTotal.reduce((sum, m) => sum + Number(m.out_value ?? 0), 0);
+    // COGS proxy: last 12 months OF ACTUAL DATA (not a 12-month calendar
+    // window from today). Anchors on the data so stale imports don't
+    // artificially inflate DIO. monthlyTotal is ASC-ordered.
+    const last12 = monthlyTotal.slice(-12);
+    const cogs12mo = last12.reduce((sum, m) => sum + Number(m.out_value ?? 0), 0);
+    const monthsCounted = last12.length;
 
     // Inventory Turnover (annualized)
     const turnover = invValueMA > 0 ? cogs12mo / invValueMA : 0;
@@ -398,7 +404,7 @@ function CostAnalyticsTab() {
     return {
       invValueMA, invValueStd,
       variancePct,
-      cogs12mo, turnover, dio,
+      cogs12mo, turnover, dio, monthsCounted,
       carryingCostAnnual,
       deadValue, deadCount, slowValue, slowCount, deadPct,
     };
@@ -559,7 +565,7 @@ function CostAnalyticsTab() {
           icon={<TrendingUp size={14} />}
           label="Inventory Turnover"
           value={`${kpi.turnover.toFixed(2)}×`}
-          sub={`/ปี · COGS ${formatCompact(kpi.cogs12mo)}`}
+          sub={`${kpi.monthsCounted}mo data · COGS ${formatCompact(kpi.cogs12mo)}`}
           color={kpi.turnover >= 4 ? '#16a34a' : kpi.turnover >= 1 ? '#d97706' : '#dc2626'}
           tooltipTitle="Inventory Turnover (อัตราหมุนเวียนสต็อก)"
           tooltip={<>

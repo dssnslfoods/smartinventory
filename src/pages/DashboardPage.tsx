@@ -88,12 +88,30 @@ export function DashboardPage() {
   const { data: slowData = [] }                          = useSlowMoving();
   const { data: latestSnapshot }                         = useLatestLotSnapshot();
   const { data: lotAging = [] }                          = useLotAging(latestSnapshot);
-  const { data: monthlyTotal = [] }                      = useMonthlyTotal(12);
+  // Fetch a wider window (24 mo) so the Turnover/DIO calc below can pick
+  // the LAST 12 MONTHS OF ACTUAL DATA — anchored on the data's last month
+  // rather than today. Otherwise stale data (no recent imports) makes COGS
+  // undercount and DIO look unrealistically large.
+  const { data: monthlyTotal = [] }                      = useMonthlyTotal(24);
 
   // === Derived data ===
   const dateRange = useMemo(() => {
     if (!dataDateRange?.minDate || !dataDateRange?.maxDate) return null;
     return { min: dataDateRange.minDate, max: dataDateRange.maxDate };
+  }, [dataDateRange]);
+
+  // OPTION C: detect stale data so analytics (Turnover/DIO/Trends) come with
+  // an honest warning when the user forgot to import. Hidden when fresh.
+  const dataFreshness = useMemo(() => {
+    if (!dataDateRange?.maxDate) return null;
+    const last  = new Date(dataDateRange.maxDate);
+    const today = new Date();
+    const daysOld = Math.floor((today.getTime() - last.getTime()) / 86_400_000);
+    const status =
+      daysOld <= 7   ? 'fresh'   :
+      daysOld <= 30  ? 'recent'  :
+      daysOld <= 90  ? 'stale'   : 'very_stale';
+    return { daysOld, status, lastDate: dataDateRange.maxDate };
   }, [dataDateRange]);
 
   const movementTrend = useMemo(
@@ -105,14 +123,24 @@ export function DashboardPage() {
   );
 
   // ── Financial KPIs (Inventory Turnover, DIO, Carrying Cost) ────────────────
+  // OPTION A FIX: anchor the 12-month window on the data's LATEST month,
+  // not on today(). If the last import was 2 months ago, naive "12 months
+  // from today" would include 2 empty months → COGS undercounted by ~17%
+  // → DIO inflated. Slicing the last 12 entries with data fixes that.
   const financialKpi = useMemo(() => {
-    // Total inventory value (Moving Avg)
     const invValue = stockData.reduce((s, x) => s + Number(x.stock_value), 0);
-    // 12-month COGS proxy = sum of out_value over last 12 months
-    const cogs12mo = monthlyTotal.reduce((s, m) => s + Number(m.out_value ?? 0), 0);
+    // monthlyTotal is ordered ASC by month — take the last 12 entries
+    // (i.e. the most recent 12 months that actually have data)
+    const last12 = monthlyTotal.slice(-12);
+    const cogs12mo = last12.reduce((s, m) => s + Number(m.out_value ?? 0), 0);
     const turnover = invValue > 0 ? cogs12mo / invValue : 0;
     const dio = turnover > 0 ? Math.round(365 / turnover) : null;
-    return { invValue, cogs12mo, turnover, dio };
+    return {
+      invValue, cogs12mo, turnover, dio,
+      monthsCounted: last12.length,
+      windowStart:   last12[0]?.month ?? null,
+      windowEnd:     last12[last12.length - 1]?.month ?? null,
+    };
   }, [stockData, monthlyTotal]);
 
   // ── Stock Movement Health (Active / Slow / Dead) ───────────────────────────
@@ -272,6 +300,49 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {/* ====== Data Freshness Warning ====== */}
+      {dataFreshness && dataFreshness.status !== 'fresh' && (
+        <div
+          className="card flex items-center gap-3"
+          style={{
+            borderLeft: `4px solid ${
+              dataFreshness.status === 'recent'      ? COLORS.amber :
+              dataFreshness.status === 'stale'       ? COLORS.orange :
+                                                       COLORS.red
+            }`,
+            backgroundColor:
+              dataFreshness.status === 'recent'      ? 'rgba(217,119,6,0.04)' :
+              dataFreshness.status === 'stale'       ? 'rgba(230,81,0,0.05)'  :
+                                                       'rgba(220,38,38,0.05)',
+          }}
+        >
+          <AlertTriangle
+            size={20}
+            style={{
+              color: dataFreshness.status === 'recent' ? COLORS.amber
+                    : dataFreshness.status === 'stale' ? COLORS.orange : COLORS.red,
+              flexShrink: 0,
+            }}
+          />
+          <div className="flex-1 text-sm" style={{ color: 'var(--text)' }}>
+            <strong>
+              {dataFreshness.status === 'recent'      ? 'ข้อมูลค่อนข้างเก่า · ' :
+               dataFreshness.status === 'stale'       ? 'ข้อมูลเก่า · '          :
+                                                        'ข้อมูลเก่ามาก · '       }
+            </strong>
+            ธุรกรรมล่าสุดในระบบคือ <strong>{formatDate(dataFreshness.lastDate)}</strong>
+            {' '}— ห่างจากวันนี้ <strong>{dataFreshness.daysOld} วัน</strong>
+            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
+              · Turnover / DIO / Trends คำนวณจากข้อมูลที่มีอยู่จริง ไม่ใช่ปฏิทินจากวันนี้
+            </span>
+          </div>
+          <span className="text-xs px-3 py-1.5 rounded-full font-medium flex-shrink-0"
+            style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+            แนะนำให้ Import ข้อมูลใหม่
+          </span>
+        </div>
+      )}
+
       {/* ====== Section 2: Executive Health KPI Strip (6 cards) ====== */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
@@ -290,12 +361,20 @@ export function DashboardPage() {
           icon={<RefreshCw size={18} />}
           label="Inventory Turnover"
           value={kpiLoading ? '...' : `${financialKpi.turnover.toFixed(2)}×`}
-          sublabel={`/ปี · COGS ฿${formatCompact(financialKpi.cogs12mo)}`}
+          sublabel={`${financialKpi.monthsCounted} mo · COGS ฿${formatCompact(financialKpi.cogs12mo)}`}
           color={financialKpi.turnover >= 4 ? COLORS.green : financialKpi.turnover >= 1 ? COLORS.amber : COLORS.red}
           tooltipTitle="Inventory Turnover"
           tooltip={<>
             <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
               Turnover = COGS / Inventory
+            </p>
+            <p className="mb-2">
+              <strong>Window:</strong> {financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูล{' '}
+              {financialKpi.windowStart && financialKpi.windowEnd && (
+                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  ({formatDate(financialKpi.windowStart)} – {formatDate(financialKpi.windowEnd)})
+                </span>
+              )}
             </p>
             <ul className="list-disc ml-4 space-y-0.5">
               <li>🟢 ≥ 4×/ปี — ดี (อาหาร)</li>
@@ -308,10 +387,16 @@ export function DashboardPage() {
           icon={<Clock size={18} />}
           label="Days Inventory"
           value={financialKpi.dio == null ? 'N/A' : `${financialKpi.dio} วัน`}
-          sublabel="365 / Turnover"
+          sublabel={`365 / Turnover · ${financialKpi.monthsCounted}mo data`}
           color={financialKpi.dio == null ? COLORS.muted : financialKpi.dio <= 90 ? COLORS.green : financialKpi.dio <= 180 ? COLORS.amber : COLORS.red}
           tooltipTitle="Days Inventory Outstanding (DIO)"
-          tooltip="ของอยู่ในคลังเฉลี่ยกี่วันก่อนถูกขายออก · อาหารควร ≤ 90 วัน"
+          tooltip={<>
+            <p className="mb-2">ของอยู่ในคลังเฉลี่ยกี่วันก่อนถูกขายออก · อาหารควร ≤ 90 วัน</p>
+            <p>
+              คำนวณจาก <strong>{financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูลจริง</strong>{' '}
+              (anchor ตามวันที่ข้อมูล ไม่ใช่ปฏิทินจากวันนี้)
+            </p>
+          </>}
         />
         <KpiCard
           icon={<Package size={18} />}
