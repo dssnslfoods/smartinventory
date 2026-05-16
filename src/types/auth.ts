@@ -81,6 +81,7 @@ export const PERMISSIONS = {
   MENU_IMPORT:      'menu.admin.import',
   MENU_SETTINGS:    'menu.admin.settings',
   MENU_USERS:       'menu.admin.users',
+  MENU_AUDIT:       'menu.admin.audit',
 
   // Actions (granular)
   ACTION_IMPORT_EXECUTE: 'action.import.execute',
@@ -130,6 +131,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       'action.settings.edit',
       'action.thresholds.edit',
       'menu.admin.users',
+      'menu.admin.audit',
     ],
   },
 ];
@@ -148,6 +150,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'menu.admin.import':          'เข้าหน้า Data Import',
   'menu.admin.settings':        'เข้าหน้า Settings',
   'menu.admin.users':           'เข้าหน้า User Management',
+  'menu.admin.audit':           'เข้าหน้า Audit Log',
   'action.import.execute':      'นำเข้าข้อมูล (Import)',
   'action.import.clear':        'ลบข้อมูลทั้งหมด (Clear All)',
   'action.settings.edit':       'แก้ไข Settings',
@@ -216,6 +219,6 @@ export const FEATURE_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   },
   {
     label: 'Admin Tools',
-    keys: ['menu.admin.import', 'menu.admin.settings', 'menu.admin.users'],
+    keys: ['menu.admin.import', 'menu.admin.settings', 'menu.admin.users', 'menu.admin.audit'],
   },
 ];

@@ -22,6 +22,7 @@ const pageTitles: Record<string, string> = {
   '/admin/settings':         'Settings',
   '/admin/users':            'User Management',
   '/admin/permissions':      'Role Permissions',
+  '/admin/audit':            'Audit Log',
 };
 
 export function Header() {

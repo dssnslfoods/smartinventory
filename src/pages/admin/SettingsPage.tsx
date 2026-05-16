@@ -5,6 +5,7 @@ import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 import { PasswordConfirmModal } from '@/components/PasswordConfirmModal';
 import { useSystemConfig, useItemGroups } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
+import { recordAudit } from '@/lib/auditLog';
 import { useQueryClient } from '@tanstack/react-query';
 
 export function SettingsPage() {
@@ -183,13 +184,47 @@ export function SettingsPage() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const performClearAllData = async () => {
-    await supabase.from('inventory_lots').delete().neq('id', 0);
-    await supabase.from('inventory_transactions').delete().neq('id', 0);
-    await supabase.from('stock_thresholds').delete().neq('id', 0);
-    await supabase.from('items').delete().neq('item_code', '');
-    await supabase.from('system_config').update({ value: '' }).eq('key', 'last_sync_at');
+    // Count what we're about to delete so the audit log captures scope
+    const [{ count: lotsCount }, { count: txCount }, { count: itemsCount }] = await Promise.all([
+      supabase.from('inventory_lots').select('*', { count: 'exact', head: true }),
+      supabase.from('inventory_transactions').select('*', { count: 'exact', head: true }),
+      supabase.from('items').select('*', { count: 'exact', head: true }),
+    ]);
 
-    queryClient.invalidateQueries();
+    try {
+      await supabase.from('inventory_lots').delete().neq('id', 0);
+      await supabase.from('inventory_transactions').delete().neq('id', 0);
+      await supabase.from('stock_thresholds').delete().neq('id', 0);
+      await supabase.from('items').delete().neq('item_code', '');
+      await supabase.from('system_config').update({ value: '' }).eq('key', 'last_sync_at');
+
+      // Record success
+      await recordAudit({
+        action:   'CLEAR_ALL_DATA_FROM_SETTINGS',
+        resource: 'inventory_lots + inventory_transactions + stock_thresholds + items',
+        payload:  {
+          deleted_counts: {
+            lots:         lotsCount  ?? 0,
+            transactions: txCount    ?? 0,
+            items:        itemsCount ?? 0,
+          },
+          source_page: 'Settings → Danger Zone',
+        },
+        status: 'success',
+      });
+
+      queryClient.invalidateQueries();
+    } catch (err) {
+      // Record failure too so we know who attempted what
+      await recordAudit({
+        action:   'CLEAR_ALL_DATA_FROM_SETTINGS',
+        resource: 'inventory_lots + inventory_transactions + stock_thresholds + items',
+        status:   'failed',
+        error_message: err instanceof Error ? err.message : String(err),
+        payload:  { source_page: 'Settings → Danger Zone' },
+      });
+      throw err;
+    }
   };
 
   return (
