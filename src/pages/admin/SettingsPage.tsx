@@ -118,14 +118,32 @@ export function SettingsPage() {
     setVvError('');
     setVvSaving(true);
     try {
-      await Promise.all(
-        Object.entries(vv).map(([k, v]) =>
-          supabase.from('system_config').upsert({ key: `vv_${k}`, value: String(v) }, { onConflict: 'key' })
-        )
+      // Build all rows as one batch — much faster + atomic + easier to error-handle
+      // than firing 18 parallel upserts.
+      const rows = Object.entries(vv).map(([k, v]) => ({
+        key:   `vv_${k}`,
+        value: String(v),
+      }));
+
+      // Race the network request against a 15-second timeout so the UI never
+      // hangs indefinitely on a stuck connection.
+      const upsert = supabase
+        .from('system_config')
+        .upsert(rows, { onConflict: 'key' });
+
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout (15s) — กรุณาลองอีกครั้ง')), 15_000),
       );
+
+      const { error } = await Promise.race([upsert, timeout]) as Awaited<typeof upsert>;
+      if (error) throw error;
+
       queryClient.invalidateQueries({ queryKey: ['systemConfig'] });
       setVvSaved(true);
       setTimeout(() => setVvSaved(false), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setVvError(`บันทึกไม่สำเร็จ: ${msg}`);
     } finally {
       setVvSaving(false);
     }
@@ -150,6 +168,8 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['itemGroups'] });
       setShelfSaved(p => ({ ...p, [groupCode]: true }));
       setTimeout(() => setShelfSaved(p => ({ ...p, [groupCode]: false })), 2000);
+    } catch (err) {
+      alert(`บันทึกไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setShelfSaving(p => ({ ...p, [groupCode]: false }));
     }
@@ -160,10 +180,13 @@ export function SettingsPage() {
     if (!val || val <= 0) return;
     setGlobalShelfSaving(true);
     try {
-      await supabase
+      const { error } = await supabase
         .from('system_config')
         .upsert({ key: 'default_shelf_life_days', value: String(val) }, { onConflict: 'key' });
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['systemConfig'] });
+    } catch (err) {
+      alert(`บันทึกไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setGlobalShelfSaving(false);
     }
