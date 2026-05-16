@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Mail, Lock, Eye, EyeOff, Shield, Box, Zap, ArrowRight, Globe, Check, AlertCircle,
@@ -158,9 +158,91 @@ function BrandMark({ size = 36 }: { size?: number }) {
 }
 
 // ─── Warehouse map background ─────────────────────────────────────────────
+/**
+ * Sparse network of warehouse pins with magnetic mouse-follow.
+ *
+ * When the cursor enters the SVG bounds, each pin within MAX_RADIUS
+ * (in viewBox units) is gently displaced toward the cursor. Edges
+ * follow the displaced positions so the curves bend naturally with
+ * the network. Mouse leaves the area → pins ease back to home.
+ *
+ * Movement is rAF-throttled and uses CSS transitions for smoothing
+ * (no spring physics — easing handles the perceived "weight" fine).
+ */
 function WarehouseMap() {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [mouse, setMouse] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    let pending: MouseEvent | null = null;
+
+    const flush = () => {
+      raf = 0;
+      const svg = svgRef.current;
+      const ev = pending;
+      pending = null;
+      if (!svg || !ev) return;
+      const rect = svg.getBoundingClientRect();
+      // Bail when mouse is outside the SVG so pins snap home
+      if (
+        ev.clientX < rect.left || ev.clientX > rect.right ||
+        ev.clientY < rect.top  || ev.clientY > rect.bottom
+      ) {
+        setMouse(null);
+        return;
+      }
+      // Convert viewport coords to viewBox (0-100) coords. The SVG uses
+      // preserveAspectRatio="xMidYMid meet" so we have to account for the
+      // aspect-ratio "letterboxing" when the container isn't square.
+      const containerAspect = rect.width / rect.height;
+      let usedW = rect.width, usedH = rect.height, offX = 0, offY = 0;
+      if (containerAspect > 1) {
+        // Wider than tall → SVG is centered horizontally with side gutters
+        usedW = rect.height;
+        offX  = (rect.width - usedW) / 2;
+      } else {
+        usedH = rect.width;
+        offY  = (rect.height - usedH) / 2;
+      }
+      const mx = ((ev.clientX - rect.left - offX) / usedW) * 100;
+      const my = ((ev.clientY - rect.top  - offY) / usedH) * 100;
+      setMouse({ x: mx, y: my });
+    };
+
+    const handler = (e: MouseEvent) => {
+      pending = e;
+      if (!raf) raf = requestAnimationFrame(flush);
+    };
+
+    window.addEventListener('mousemove', handler, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', handler);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  /**
+   * Inverse-distance magnetic pull.
+   *   dist == 0  → max pull (factor = 0.35)
+   *   dist >= 22 → no pull  (factor = 0)
+   */
+  function getOffset(pin: Pin): { x: number; y: number } {
+    if (!mouse) return { x: 0, y: 0 };
+    const dx = mouse.x - pin.x;
+    const dy = mouse.y - pin.y;
+    const dist = Math.hypot(dx, dy);
+    const MAX_RADIUS = 22;
+    if (dist > MAX_RADIUS) return { x: 0, y: 0 };
+    const factor = (1 - dist / MAX_RADIUS) * 0.35;
+    return { x: dx * factor, y: dy * factor };
+  }
+
+  const offsets = PINS.map(getOffset);
+
   return (
     <svg
+      ref={svgRef}
       className="absolute inset-0 w-full h-full pointer-events-none"
       viewBox="0 0 100 100"
       preserveAspectRatio="xMidYMid meet"
@@ -182,29 +264,40 @@ function WarehouseMap() {
         </radialGradient>
       </defs>
 
-      {/* Edges (sparse Bezier curves) */}
+      {/* Edges — endpoints follow the displaced pin positions */}
       {EDGES.map(([a, b], i) => {
         const p1 = PINS[a], p2 = PINS[b];
-        const mx = (p1.x + p2.x) / 2;
-        const my = (p1.y + p2.y) / 2 - 3;
+        const o1 = offsets[a], o2 = offsets[b];
+        const x1 = p1.x + o1.x, y1 = p1.y + o1.y;
+        const x2 = p2.x + o2.x, y2 = p2.y + o2.y;
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2 - 3;
         return (
           <path
             key={i}
-            d={`M ${p1.x} ${p1.y} Q ${mx} ${my} ${p2.x} ${p2.y}`}
+            d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`}
             stroke="url(#edge)"
             strokeWidth="0.18"
             fill="none"
             opacity="0.7"
+            style={{ transition: 'd 280ms cubic-bezier(0.2, 0.65, 0.25, 1)' }}
           />
         );
       })}
 
-      {/* Pins */}
+      {/* Pins — wrapped in <g> so CSS transitions can ease the translate */}
       {PINS.map((p, i) => {
-        const isHQ = p.hq;
+        const isHQ  = p.hq;
         const delay = ((i * 0.35) % 3).toFixed(2);
+        const o     = offsets[i];
         return (
-          <g key={i}>
+          <g
+            key={i}
+            style={{
+              transform: `translate(${o.x}px, ${o.y}px)`,
+              transition: 'transform 280ms cubic-bezier(0.2, 0.65, 0.25, 1)',
+            }}
+          >
             <circle
               cx={p.x} cy={p.y} r={isHQ ? 3 : 2}
               fill={isHQ ? 'url(#pinGlowHQ)' : 'url(#pinGlow)'}
