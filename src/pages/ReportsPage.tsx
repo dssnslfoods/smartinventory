@@ -18,6 +18,7 @@ import { formatNumber, formatDate, formatCompact } from '@/utils/format';
 import { exportToExcel } from '@/utils/export';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
+import { InfoTooltip } from '@/components/InfoTooltip';
 
 // ── Color palettes ─────────────────────────────────────────────────────────────
 const VV_COLORS   = { A: '#16a34a', B: '#d97706', C: '#dc2626' } as const;
@@ -1230,55 +1231,71 @@ function SlowMovingTab() {
   const [status, setStatus]       = useState('');
   const [warehouse, setWhs]       = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
+  /** "FEFO Violations only" toggle — surfaces SKUs that look healthy by
+   *  movement but have aging lots stuck behind newer ones. */
+  const [fefoOnly, setFefoOnly]   = useState(false);
 
-  const { data, isLoading } = useSlowMoving({
+  const { data: rawData, isLoading } = useSlowMoving({
     movementStatus: status    || undefined,
     warehouse:      warehouse || undefined,
     groupName:      groupCode ? ITEM_GROUPS[groupCode] : undefined,
   });
 
+  // Apply FEFO filter client-side (RPC view doesn't expose it as a filter param)
+  const data = useMemo(() => {
+    if (!fefoOnly) return rawData;
+    return (rawData ?? []).filter(r => r.fefo_violation);
+  }, [rawData, fefoOnly]);
+
   const summary = useMemo(() => {
-    const all = data ?? [];
+    const all = rawData ?? [];   // strip *unfiltered* totals (so cards always show full picture)
     return {
       dead:    all.filter(r => r.movement_status === 'dead_stock').length,
       slow:    all.filter(r => r.movement_status === 'slow_moving').length,
       normal:  all.filter(r => r.movement_status === 'normal').length,
       deadVal: all.filter(r => r.movement_status === 'dead_stock').reduce((s, r) => s + Number(r.stock_value), 0),
       slowVal: all.filter(r => r.movement_status === 'slow_moving').reduce((s, r) => s + Number(r.stock_value), 0),
+      // FEFO violation count + value at risk (across all statuses)
+      fefoCount: all.filter(r => r.fefo_violation).length,
+      fefoVal:   all.filter(r => r.fefo_violation).reduce((s, r) => s + Number(r.stock_value), 0),
     };
-  }, [data]);
+  }, [rawData]);
 
   const handleExport = () => {
     exportToExcel((data ?? []).map(r => ({
-      'Item Code':      r.item_code,
-      'Item Name':      r.itemname,
-      'Group':          r.group_name,
-      'Warehouse':      r.warehouse,
-      'Current Stock':  Number(r.current_stock),
-      'UOM':            r.uom,
-      'Stock Value':    Number(r.stock_value),
-      'Last Out Date':  r.last_out_date ?? 'Never',
-      'Days Since Out': r.days_since_last_out ?? 'N/A',
-      'Status':         r.movement_status,
+      'Item Code':          r.item_code,
+      'Item Name':          r.itemname,
+      'Group':              r.group_name,
+      'Warehouse':          r.warehouse,
+      'Current Stock':      Number(r.current_stock),
+      'UOM':                r.uom,
+      'Stock Value':        Number(r.stock_value),
+      'Last Out Date':      r.last_out_date ?? 'Never',
+      'Days Since Out':     r.days_since_last_out ?? 'N/A',
+      'Status':             r.movement_status,
+      'Oldest Lot In Date': r.oldest_lot_in_date ?? '',
+      'Oldest Lot Age':     r.oldest_lot_age_days ?? '',
+      'Lot Count':          r.lot_count,
+      'FEFO Violation':     r.fefo_violation ? 'YES' : 'No',
     })), 'Slow_Moving_Items');
   };
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.dead_stock }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Dead Stock (≥180d / never)</p>
-          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.dead_stock }}>{summary.dead}</p>
+          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.dead_stock }}>{formatNumber(summary.dead, 0)}</p>
           <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.deadVal)}</p>
         </div>
         <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.slow_moving }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Slow Moving (90–179 days)</p>
-          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.slow_moving }}>{summary.slow}</p>
+          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.slow_moving }}>{formatNumber(summary.slow, 0)}</p>
           <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.slowVal)}</p>
         </div>
         <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.normal }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Active (&lt;90 days)</p>
-          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.normal }}>{summary.normal}</p>
+          <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.normal }}>{formatNumber(summary.normal, 0)}</p>
         </div>
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>At-Risk Inventory Value</p>
@@ -1286,6 +1303,37 @@ function SlowMovingTab() {
             ฿{formatCompact(summary.deadVal + summary.slowVal)}
           </p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Dead + Slow stock combined</p>
+        </div>
+        {/* FEFO Violation card — surfaces SKUs where old lots aren't being picked */}
+        <div className="card border-l-4" style={{ borderLeftColor: '#7c3aed' }}>
+          <p className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+            ⚠️ FEFO Violations
+            <InfoTooltip title="FEFO Violation">
+              <p className="mb-2">
+                SKU ที่มี <strong>lot อายุ ≥ 180 วัน</strong> ทั้งที่มี <strong>lot ใหม่กว่า</strong> ในคลังเดียวกัน
+              </p>
+              <p className="mb-2">→ แสดงว่าทีมหยิบของไม่ตามหลัก FEFO (First-Expired-First-Out)</p>
+              <p className="mb-2">
+                <strong>เคสน่าสนใจ:</strong> SKU ที่ Status = Normal แต่มี FEFO Violation
+                = ขายของใหม่ ปล่อยของเก่าค้าง
+              </p>
+              <div className="rounded p-2 text-[11px] mt-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p className="font-mono mb-1.5 pb-1.5 border-b" style={{ color: 'var(--text)', borderColor: 'var(--border)' }}>
+                  oldest_lot_age ≥ 180d AND newer_lots_exist
+                </p>
+                <div className="flex justify-between font-semibold" style={{ color: 'var(--text)' }}>
+                  <span>FEFO violations</span>
+                  <span className="font-mono tabular-nums">{formatNumber(summary.fefoCount)} items</span>
+                </div>
+                <div className="flex justify-between font-semibold mt-0.5" style={{ color: 'var(--text)' }}>
+                  <span>Value at risk</span>
+                  <span className="font-mono tabular-nums">฿{formatNumber(summary.fefoVal, 0)}</span>
+                </div>
+              </div>
+            </InfoTooltip>
+          </p>
+          <p className="text-2xl font-bold" style={{ color: '#7c3aed' }}>{formatNumber(summary.fefoCount, 0)}</p>
+          <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.fefoVal)}</p>
         </div>
       </div>
 
@@ -1308,6 +1356,18 @@ function SlowMovingTab() {
               <option key={code} value={code}>{name}</option>
             ))}
           </select>
+          {/* FEFO Violations toggle */}
+          <button
+            onClick={() => setFefoOnly(v => !v)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
+            style={fefoOnly
+              ? { backgroundColor: '#7c3aed', borderColor: '#7c3aed', color: '#fff' }
+              : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+            }
+            title="กรองเฉพาะ SKU ที่มี FEFO violation"
+          >
+            ⚠️ FEFO Violations only
+          </button>
           <button onClick={handleExport} className="btn btn-secondary ml-auto">
             <Download size={16} /> Export
           </button>
@@ -1333,17 +1393,29 @@ function SlowMovingTab() {
                   <th className="text-right">Stock Value</th>
                   <th>Last Out</th>
                   <th className="text-right">Days Since Out</th>
+                  <th className="text-right">Oldest Lot</th>
                 </tr>
               </thead>
               <tbody>
                 {(data ?? []).map((row, i) => (
                   <tr key={`${row.item_code}-${row.warehouse}-${i}`}>
                     <td>
-                      <span className="badge text-white text-xs"
-                        style={{ backgroundColor: SLOW_COLORS[row.movement_status] }}>
-                        {row.movement_status === 'dead_stock' ? 'Dead' :
-                         row.movement_status === 'slow_moving' ? 'Slow' : 'Active'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge text-white text-xs"
+                          style={{ backgroundColor: SLOW_COLORS[row.movement_status] }}>
+                          {row.movement_status === 'dead_stock' ? 'Dead' :
+                           row.movement_status === 'slow_moving' ? 'Slow' : 'Active'}
+                        </span>
+                        {row.fefo_violation && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                            style={{ backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
+                            title="FEFO Violation — มี lot เก่าค้าง ทั้งที่มี lot ใหม่กว่า"
+                          >
+                            ⚠️ FEFO
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>
                       {row.item_code}
@@ -1362,12 +1434,31 @@ function SlowMovingTab() {
                     </td>
                     <td className="text-right tabular-nums font-semibold"
                       style={{ color: row.movement_status === 'dead_stock' ? SLOW_COLORS.dead_stock : 'var(--text)' }}>
-                      {row.days_since_last_out !== null ? `${row.days_since_last_out}d` : '∞'}
+                      {row.days_since_last_out !== null ? `${formatNumber(row.days_since_last_out, 0)}d` : '∞'}
+                    </td>
+                    <td className="text-right tabular-nums text-sm">
+                      {row.oldest_lot_age_days != null ? (
+                        <span style={{
+                          color: row.oldest_lot_age_days >= 180 ? '#7c3aed'
+                               : row.oldest_lot_age_days >= 90  ? '#d97706'
+                               :                                   'var(--text-muted)',
+                          fontWeight: row.oldest_lot_age_days >= 180 ? 600 : 400,
+                        }}>
+                          {formatNumber(row.oldest_lot_age_days, 0)}d
+                          {row.lot_count > 1 && (
+                            <span className="text-[10px] ml-1" style={{ color: 'var(--text-muted)' }}>
+                              ({formatNumber(row.lot_count)} lots)
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
                 {(data ?? []).length === 0 && (
-                  <tr><td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={10} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
                 )}
               </tbody>
             </table>
