@@ -105,9 +105,11 @@ export function CreateUserModal({ fixedCompany, companies = [], allowedRoles, in
               </div>
             </div>
 
-            <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
-              * แนะนำให้ผู้ใช้เปลี่ยนรหัสผ่านหลัง login ครั้งแรก
-            </p>
+            <div className="px-3 py-2 rounded-lg text-xs leading-relaxed"
+                 style={{ backgroundColor: 'rgba(234,88,12,0.08)', borderLeft: '3px solid #ea580c', color: '#9a3412' }}>
+              <strong>⚠ ผู้ใช้ใหม่จะถูกบังคับให้เปลี่ยนรหัสผ่านในการ login ครั้งแรก</strong>
+              {' '}— รหัสผ่านด้านบนเป็นเพียงรหัสชั่วคราว ระบบจะให้ผู้ใช้กำหนดรหัสผ่านของตัวเองทันทีหลัง login สำเร็จ
+            </div>
 
             <button
               onClick={onClose}

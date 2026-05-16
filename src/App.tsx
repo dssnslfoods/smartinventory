@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { ForcedPasswordChangeGate } from '@/components/ForcedPasswordChangeGate';
 
 // ─── Eager-loaded (always-on critical path) ─────────────────────────────────
 // LoginPage stays eager so the very first paint is fast for unauthenticated
@@ -165,6 +166,7 @@ function App() {
             element={
               <ProtectedRoute>
                 <ActiveUserRoute>
+                  <ForcedPasswordChangeGate>
                   <AppLayout>
                     <Suspense fallback={<PageLoader />}>
                       <Routes>
@@ -190,6 +192,7 @@ function App() {
                       </Routes>
                     </Suspense>
                   </AppLayout>
+                  </ForcedPasswordChangeGate>
                 </ActiveUserRoute>
               </ProtectedRoute>
             }

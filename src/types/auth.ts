@@ -41,6 +41,10 @@ export interface UserProfile {
   full_name:  string | null;
   email:      string | null;
   is_active:  boolean;
+  /** TRUE after admin-issued credentials (create or reset). User is forced to
+   *  set a new password before they can use the app. Cleared by the
+   *  clear_must_change_password() RPC after successful self-change. */
+  must_change_password: boolean;
   created_at: string;
   updated_at: string;
   // Joined

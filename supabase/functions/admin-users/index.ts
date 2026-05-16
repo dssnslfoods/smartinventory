@@ -5,7 +5,12 @@
 // Operations:
 //   POST  /admin-users { action: "create", email, password, full_name, role, company_id }
 //   POST  /admin-users { action: "reset-password", user_id, password }
+//   POST  /admin-users { action: "bulk-reset-password", user_ids: string[], password }
 //   POST  /admin-users { action: "delete", user_id }   (super_admin only)
+//
+// On `create` and any reset action, the target's must_change_password flag is
+// flipped to TRUE so the React app forces them to set a new password on next
+// login.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -83,6 +88,9 @@ Deno.serve(async (req: Request) => {
     if (action === 'reset-password') {
       return await handleResetPassword(admin, callerRole, caller.company_id, body);
     }
+    if (action === 'bulk-reset-password') {
+      return await handleBulkResetPassword(admin, callerRole, caller.company_id, body);
+    }
     if (action === 'delete') {
       return await handleDelete(admin, callerRole, callerId, body);
     }
@@ -140,17 +148,18 @@ async function handleCreate(
 
   const newUserId = created.user.id;
 
-  // 2. Upsert profile (handle_new_user trigger may have inserted defaults)
+  // 2. Upsert profile — initial password is admin-issued, so force-change on first login.
   const { error: profileErr } = await admin
     .from('user_profiles')
     .upsert(
       {
-        id:         newUserId,
+        id:                    newUserId,
         role,
-        company_id: companyId,
-        full_name:  fullName,
+        company_id:            companyId,
+        full_name:             fullName,
         email,
-        is_active:  true,
+        is_active:             true,
+        must_change_password:  true,
       },
       { onConflict: 'id' },
     );
@@ -164,7 +173,7 @@ async function handleCreate(
   return json({ ok: true, user_id: newUserId });
 }
 
-// ── Action: reset password ──────────────────────────────────────────────────
+// ── Action: reset password (single user) ────────────────────────────────────
 
 async function handleResetPassword(
   admin: ReturnType<typeof createClient>,
@@ -194,10 +203,74 @@ async function handleResetPassword(
     }
   }
 
+  // 1. Update auth password
   const { error } = await admin.auth.admin.updateUserById(userId, { password });
   if (error) return json({ error: error.message }, 400);
 
+  // 2. Mark profile so the user must change pwd on next login
+  await admin.from('user_profiles')
+    .update({ must_change_password: true, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+
   return json({ ok: true });
+}
+
+// ── Action: bulk reset password (many users, one shared password) ──────────
+
+async function handleBulkResetPassword(
+  admin: ReturnType<typeof createClient>,
+  callerRole: Role,
+  callerCompanyId: string | null,
+  body: Record<string, unknown>,
+) {
+  const ids      = body.user_ids;
+  const password = String(body.password ?? '');
+  if (!Array.isArray(ids) || ids.length === 0) return json({ error: 'user_ids must be a non-empty array' }, 400);
+  if (password.length < 8)                     return json({ error: 'Password must be ≥ 8 chars' }, 400);
+  if (ids.length > 100)                        return json({ error: 'Maximum 100 users per bulk reset' }, 400);
+
+  const userIds: string[] = ids.map(String);
+
+  // Admins can only bulk-reset within their own company; super_admins cannot
+  // accidentally target other super_admins (must use the singular endpoint).
+  let targets: { id: string; role: string; company_id: string | null }[] = [];
+  {
+    const { data, error } = await admin
+      .from('user_profiles')
+      .select('id, role, company_id')
+      .in('id', userIds);
+    if (error) return json({ error: error.message }, 500);
+    targets = data ?? [];
+  }
+  if (targets.length === 0) return json({ error: 'No valid target users found' }, 404);
+
+  if (callerRole === 'admin') {
+    const outOfScope = targets.filter(t => t.company_id !== callerCompanyId);
+    if (outOfScope.length > 0) {
+      return json({ error: 'Admin may only reset users in their own company' }, 403);
+    }
+    const superAdminHits = targets.filter(t => t.role === 'super_admin');
+    if (superAdminHits.length > 0) {
+      return json({ error: 'Admin may not reset super_admin password' }, 403);
+    }
+  }
+
+  // Run resets in parallel — record per-user failures rather than aborting the batch.
+  const results = await Promise.all(
+    targets.map(async t => {
+      const { error: aErr } = await admin.auth.admin.updateUserById(t.id, { password });
+      if (aErr) return { id: t.id, ok: false, error: aErr.message };
+      const { error: pErr } = await admin.from('user_profiles')
+        .update({ must_change_password: true, updated_at: new Date().toISOString() })
+        .eq('id', t.id);
+      if (pErr) return { id: t.id, ok: false, error: pErr.message };
+      return { id: t.id, ok: true };
+    }),
+  );
+
+  const success = results.filter(r => r.ok).length;
+  const failed  = results.filter(r => !r.ok);
+  return json({ ok: failed.length === 0, success, failed_count: failed.length, failed });
 }
 
 // ── Action: delete user (super_admin only) ──────────────────────────────────

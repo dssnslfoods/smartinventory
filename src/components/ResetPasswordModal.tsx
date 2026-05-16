@@ -113,9 +113,17 @@ export function ResetPasswordModal({ mode, targetUserId, targetEmail, onClose }:
                 </div>
               )}
 
-              <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
-                * แนะนำให้เปลี่ยนรหัสผ่านอีกครั้งหลัง login
-              </p>
+              {mode === 'admin' ? (
+                <div className="px-3 py-2 rounded-lg text-xs leading-relaxed"
+                     style={{ backgroundColor: 'rgba(234,88,12,0.08)', borderLeft: '3px solid #ea580c', color: '#9a3412' }}>
+                  <strong>⚠ ผู้ใช้จะถูกบังคับให้เปลี่ยนรหัสผ่านในการ login ครั้งถัดไป</strong>
+                  {' '}— รหัสผ่านนี้ใช้ได้เพียงครั้งเดียวเพื่อเข้าสู่ระบบ จากนั้นระบบจะให้ผู้ใช้กำหนดรหัสผ่านของตัวเอง
+                </div>
+              ) : (
+                <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                  รหัสผ่านของคุณถูกเปลี่ยนเรียบร้อยแล้ว
+                </p>
+              )}
               <button onClick={onClose} className="w-full py-2 rounded-lg text-sm bg-[var(--color-primary)] text-white">
                 ปิด
               </button>

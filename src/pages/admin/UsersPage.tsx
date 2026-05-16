@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Loader2, Users, Save, X, UserPlus, KeyRound } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, AlertTriangle } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { cn, formatDateTime } from '@/utils/format';
@@ -8,6 +8,7 @@ import type { UserProfile, UserRole } from '@/types/auth';
 import { ROLE_LABELS, ROLE_COLORS } from '@/types/auth';
 import { CreateUserModal } from '@/components/CreateUserModal';
 import { ResetPasswordModal } from '@/components/ResetPasswordModal';
+import { BulkResetPasswordModal } from '@/components/BulkResetPasswordModal';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
 
@@ -29,7 +30,15 @@ function useCompanyUsers(companyId: string | null) {
 
 // ── Inline-edit row ───────────────────────────────────────────────────────────
 
-function UserRow({ user, onSaved }: { user: UserProfile; onSaved: () => void }) {
+function UserRow({
+  user, selected, onToggleSelect, onSaved, canSelect,
+}: {
+  user: UserProfile;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+  onSaved: () => void;
+  canSelect: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [role, setRole] = useState<UserRole>(user.role);
   const [active, setActive] = useState(user.is_active);
@@ -56,12 +65,39 @@ function UserRow({ user, onSaved }: { user: UserProfile; onSaved: () => void }) 
   const inputStyle = { backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' };
 
   return (
-    <tr className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+    <tr className="border-b last:border-0 transition-colors"
+        style={{
+          borderColor: 'var(--border)',
+          backgroundColor: selected ? 'rgba(31,56,100,0.06)' : undefined,
+        }}>
+      <td className="px-3 py-3 w-10">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelect(user.id)}
+          disabled={!canSelect}
+          title={canSelect ? 'เลือกสำหรับ bulk action' : 'ไม่สามารถเลือก super_admin ได้'}
+          className="rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-30"
+        />
+      </td>
       <td className="px-4 py-3">
-        <div className="font-medium text-sm" style={{ color: 'var(--text)' }}>{user.email ?? '—'}</div>
-        {user.full_name && (
-          <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{user.full_name}</div>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="font-medium text-sm truncate" style={{ color: 'var(--text)' }}>{user.email ?? '—'}</div>
+            {user.full_name && (
+              <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{user.full_name}</div>
+            )}
+          </div>
+          {user.must_change_password && (
+            <span
+              title="ผู้ใช้นี้จะถูกบังคับให้เปลี่ยนรหัสผ่านในการ login ครั้งถัดไป"
+              className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+              style={{ backgroundColor: 'rgba(234,88,12,0.12)', color: '#9a3412' }}
+            >
+              <AlertTriangle size={10} /> รอเปลี่ยนรหัสผ่าน
+            </span>
+          )}
+        </div>
       </td>
 
       <td className="px-4 py-3">
@@ -149,7 +185,7 @@ function UserRow({ user, onSaved }: { user: UserProfile; onSaved: () => void }) 
           mode="admin"
           targetUserId={user.id}
           targetEmail={user.email ?? ''}
-          onClose={() => setShowReset(false)}
+          onClose={() => { setShowReset(false); onSaved(); }}
         />
       )}
     </tr>
@@ -162,14 +198,48 @@ export function UsersPage() {
   const qc = useQueryClient();
   const { company } = useAuthStore();
   const { data: users = [], isLoading } = useCompanyUsers(company?.id ?? null);
-  const [search, setSearch]       = useState('');
+  const [search, setSearch]         = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showBulkReset, setShowBulkReset] = useState(false);
+  /** ids of selected rows (excludes super_admins which can't be bulk-reset by admin) */
+  const [selected, setSelected]     = useState<Set<string>>(new Set());
 
-  const filtered = users.filter(u =>
+  const filtered = useMemo(() => users.filter(u =>
     !search ||
     u.email?.toLowerCase().includes(search.toLowerCase()) ||
     u.full_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  ), [users, search]);
+
+  const canSelect = (u: UserProfile) => u.role !== 'super_admin';
+  const selectableInView = filtered.filter(canSelect);
+  const allSelected = selectableInView.length > 0 && selectableInView.every(u => selected.has(u.id));
+  const someSelected = selectableInView.some(u => selected.has(u.id)) && !allSelected;
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        selectableInView.forEach(u => next.delete(u.id));
+        return next;
+      });
+    } else {
+      setSelected(prev => {
+        const next = new Set(prev);
+        selectableInView.forEach(u => next.add(u.id));
+        return next;
+      });
+    }
+  };
+
+  const selectedUsers = users.filter(u => selected.has(u.id));
 
   return (
     <div>
@@ -196,15 +266,24 @@ export function UsersPage() {
               <li>เลือก Role ที่ต้องการ</li>
               <li>กด "สร้างผู้ใช้" — ระบบจะสุ่มรหัสผ่านให้</li>
               <li>คัดลอก credentials ส่งให้ผู้ใช้นำไป login ครั้งแรก</li>
+              <li><strong>ผู้ใช้ใหม่จะถูกบังคับให้เปลี่ยนรหัสผ่านในครั้งแรกที่ login</strong></li>
+            </ol>
+          </HelpSection>
+          <HelpSection title="Bulk Reset Password (Reset แบบกลุ่ม)">
+            <ol className="list-decimal ml-5 text-xs space-y-1">
+              <li>ติ๊กเลือกผู้ใช้หลายรายการในตาราง (หรือเลือกทั้งหมดที่หัวคอลัมน์)</li>
+              <li>กดปุ่ม "Reset Password (N)" ใน toolbar ที่ปรากฏขึ้นด้านบน</li>
+              <li>กำหนดรหัสผ่านชั่วคราวร่วม (ระบบสุ่มให้แล้ว — ปรับได้)</li>
+              <li>ผู้ใช้ทุกคนจะถูกบังคับให้เปลี่ยนรหัสผ่านเองในการ login ครั้งถัดไป</li>
             </ol>
           </HelpSection>
           <HelpSection title="Reset Password / Edit Role">
-            กดไอคอน 🔑 = Reset Password, ปุ่ม "Edit" = แก้ Role + Active/Inactive
+            กดไอคอน 🔑 = Reset Password เฉพาะคน, ปุ่ม "Edit" = แก้ Role + Active/Inactive
           </HelpSection>
           <HelpSection title="🔒 ข้อจำกัด">
             <ul className="list-disc ml-5 text-xs space-y-1">
               <li>Admin สร้าง super_admin ไม่ได้</li>
-              <li>Admin reset password ของ super_admin ไม่ได้</li>
+              <li>Admin reset password ของ super_admin ไม่ได้ (ทั้งเดี่ยวและกลุ่ม)</li>
               <li>การลบผู้ใช้ทำได้เฉพาะ Super Admin</li>
             </ul>
           </HelpSection>
@@ -233,6 +312,34 @@ export function UsersPage() {
         />
       </div>
 
+      {/* Bulk action toolbar — sticky-feel banner that appears when ≥1 row selected */}
+      {selected.size > 0 && (
+        <div className="mb-3 flex items-center gap-3 px-4 py-2.5 rounded-lg border"
+             style={{
+               backgroundColor: 'rgba(31,56,100,0.06)',
+               borderColor: 'var(--color-primary)',
+             }}>
+          <KeyRound size={15} style={{ color: 'var(--color-primary)' }} />
+          <span className="text-sm" style={{ color: 'var(--text)' }}>
+            เลือกแล้ว <strong>{selected.size}</strong> ผู้ใช้
+          </span>
+          <button
+            onClick={() => setShowBulkReset(true)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+          >
+            <KeyRound size={13} /> Reset Password ({selected.size})
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border hover:bg-[var(--bg-alt)]"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            <X size={12} /> ล้าง
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-xl border overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         {isLoading ? (
@@ -248,6 +355,16 @@ export function UsersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+                <th className="px-3 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected; }}
+                    onChange={toggleSelectAll}
+                    title="เลือก / ยกเลิกการเลือกทั้งหมดในรายการที่เห็น (ยกเว้น super_admin)"
+                    className="rounded cursor-pointer"
+                  />
+                </th>
                 {['Email / ชื่อ', 'Role', 'สถานะ', 'เข้าร่วม', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-3 text-left font-medium text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                     {h}
@@ -260,7 +377,10 @@ export function UsersPage() {
                 <UserRow
                   key={u.id}
                   user={u}
+                  selected={selected.has(u.id)}
+                  onToggleSelect={toggleSelect}
                   onSaved={() => qc.invalidateQueries({ queryKey: ['admin_users', company?.id] })}
+                  canSelect={canSelect(u)}
                 />
               ))}
             </tbody>
@@ -270,6 +390,7 @@ export function UsersPage() {
 
       <p className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
         {filtered.length} / {users.length} users
+        {selected.size > 0 && <> · เลือกแล้ว {selected.size}</>}
       </p>
 
       {showCreate && company && (
@@ -278,6 +399,17 @@ export function UsersPage() {
           allowedRoles={['executive', 'supervisor', 'staff']}
           invalidateKeys={[['admin_users', company.id]]}
           onClose={() => setShowCreate(false)}
+        />
+      )}
+
+      {showBulkReset && (
+        <BulkResetPasswordModal
+          targets={selectedUsers.map(u => ({ id: u.id, email: u.email, full_name: u.full_name }))}
+          onClose={() => setShowBulkReset(false)}
+          onComplete={() => {
+            qc.invalidateQueries({ queryKey: ['admin_users', company?.id] });
+            setSelected(new Set());
+          }}
         />
       )}
     </div>
