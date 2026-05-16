@@ -16,6 +16,7 @@ import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula } from '@/components/HelpButton';
+import { InfoTooltip } from '@/components/InfoTooltip';
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 const TABS = [
@@ -549,6 +550,9 @@ function CostAnalyticsTab() {
         </div>
       </div>
 
+      {/* ── Comprehensive explanation card (collapsible) ── */}
+      <ExplanationCard carryingRate={carryingRate} />
+
       {/* Top KPI Strip — 6 cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <RatioCard
@@ -557,7 +561,18 @@ function CostAnalyticsTab() {
           value={`${kpi.turnover.toFixed(2)}×`}
           sub={`/ปี · COGS ${formatCompact(kpi.cogs12mo)}`}
           color={kpi.turnover >= 4 ? '#16a34a' : kpi.turnover >= 1 ? '#d97706' : '#dc2626'}
-          hint="ยิ่งสูง = ของหมุนเร็ว"
+          tooltipTitle="Inventory Turnover (อัตราหมุนเวียนสต็อก)"
+          tooltip={<>
+            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              Turnover = COGS (12 เดือน) / Inventory Value
+            </p>
+            <p className="mb-2">บอกว่าสต็อก "หมุนกี่รอบต่อปี" — ยิ่งสูง = ของขายออกเร็ว</p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>🟢 ≥ 4×/ปี = ดี (มาตรฐานอาหาร)</li>
+              <li>🟠 1-4× = ปานกลาง</li>
+              <li>🔴 &lt; 1× = ของค้างนาน (เสี่ยงหมดอายุ)</li>
+            </ul>
+          </>}
         />
         <RatioCard
           icon={<Clock size={14} />}
@@ -565,7 +580,18 @@ function CostAnalyticsTab() {
           value={kpi.dio < 999 ? `${Math.round(kpi.dio)} วัน` : 'N/A'}
           sub="365 / Turnover"
           color={kpi.dio <= 90 ? '#16a34a' : kpi.dio <= 180 ? '#d97706' : '#dc2626'}
-          hint="ของอยู่ในคลังเฉลี่ยกี่วัน"
+          tooltipTitle="Days Inventory Outstanding"
+          tooltip={<>
+            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              DIO = 365 / Turnover Ratio
+            </p>
+            <p className="mb-2">ของอยู่ในคลังเฉลี่ย <strong>กี่วัน</strong> ก่อนถูกขายออก</p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>🟢 ≤ 90 วัน = ดี (สำหรับอาหาร)</li>
+              <li>🟠 90-180 วัน = ระวัง</li>
+              <li>🔴 &gt; 180 วัน = ของค้างจริง</li>
+            </ul>
+          </>}
         />
         <RatioCard
           icon={<DollarSign size={14} />}
@@ -573,7 +599,12 @@ function CostAnalyticsTab() {
           value={`฿${formatCompact(kpi.invValueMA)}`}
           sub="เงินจมในคลัง"
           color="#1F3864"
-          hint="มูลค่ารวม (Moving Avg)"
+          tooltipTitle="Working Capital in Inventory"
+          tooltip={<>
+            <p className="mb-2"><strong>มูลค่ารวม Moving Average</strong> ของสินค้าทุกตัวในคลัง</p>
+            <p className="mb-2">= "เงินสด" ที่บริษัท <strong>จมไว้ในของ</strong> ตอนนี้</p>
+            <p>ยิ่งสูง → ยิ่งเสีย Carrying Cost ต่อปี (ดูการ์ดถัดไป)</p>
+          </>}
         />
         <RatioCard
           icon={<TrendingDown size={14} />}
@@ -581,7 +612,20 @@ function CostAnalyticsTab() {
           value={`฿${formatCompact(kpi.carryingCostAnnual)}`}
           sub={`/ปี @ ${(carryingRate * 100).toFixed(0)}%`}
           color="#dc2626"
-          hint="ค่าแบกของสต็อกต่อปี"
+          tooltipTitle="Carrying Cost (ต้นทุนแบกของสต็อก)"
+          tooltip={<>
+            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              Carrying Cost = Inventory × Rate
+            </p>
+            <p className="mb-2"><strong>ต้นทุนแอบแฝง</strong>ที่บริษัทเสียทุกปี เพียงเพราะมีของในคลัง — รวม:</p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>💵 ดอกเบี้ย / Opportunity Cost</li>
+              <li>🏭 ค่าเช่าคลัง + ตู้แช่</li>
+              <li>🛡️ ประกัน + ภาษี</li>
+              <li>🗑️ ของเสีย / หมดอายุ</li>
+            </ul>
+            <p className="mt-2"><strong>ดู Card อธิบายด้านบนสำหรับรายละเอียด</strong></p>
+          </>}
         />
         <RatioCard
           icon={<AlertTriangle size={14} />}
@@ -589,7 +633,17 @@ function CostAnalyticsTab() {
           value={`${kpi.deadPct.toFixed(1)}%`}
           sub={`${kpi.deadCount} items · ฿${formatCompact(kpi.deadValue)}`}
           color={kpi.deadPct <= 5 ? '#16a34a' : kpi.deadPct <= 15 ? '#d97706' : '#dc2626'}
-          hint="ไม่ขยับ ≥ 180 วัน"
+          tooltipTitle="Dead Stock"
+          tooltip={<>
+            <p className="mb-2">สินค้าที่ <strong>ไม่มีการเคลื่อนไหวเลย ≥ 180 วัน</strong></p>
+            <p className="mb-2">= ของค้างคลังจริง — เสียพื้นที่ + เสีย Carrying Cost</p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>🟢 ≤ 5% = สุขภาพดี</li>
+              <li>🟠 5-15% = เริ่มเสี่ยง</li>
+              <li>🔴 &gt; 15% = ต้องเร่งระบาย</li>
+            </ul>
+            <p className="mt-2"><strong>Action:</strong> ดูที่หน้า Reports → Slow Moving</p>
+          </>}
         />
         <RatioCard
           icon={<Layers size={14} />}
@@ -597,7 +651,19 @@ function CostAnalyticsTab() {
           value={`${kpi.variancePct.toFixed(1)}%`}
           sub="|MA − Std| / Std"
           color={kpi.variancePct <= 5 ? '#16a34a' : kpi.variancePct <= 15 ? '#d97706' : '#dc2626'}
-          hint="ความต่าง MA vs Std"
+          tooltipTitle="Cost Variance (ต้นทุน MA vs Std)"
+          tooltip={<>
+            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              Variance = |MA − Std| / Std × 100
+            </p>
+            <p className="mb-2">ความแตกต่างระหว่าง <strong>Moving Avg</strong> vs <strong>Std Cost</strong></p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>🟢 ≤ 5% = ใกล้เคียง — Std Cost ยังใช้ได้</li>
+              <li>🟠 5-15% = เริ่มห่าง — ควรพิจารณาอัปเดต</li>
+              <li>🔴 &gt; 15% = ห่างไกล — ต้องอัปเดต Std Cost</li>
+            </ul>
+            <p className="mt-2">ถ้าสูง = ราคาตลาดเปลี่ยนเยอะ การคำนวณบัญชีจะคลาดเคลื่อน</p>
+          </>}
         />
       </div>
 
@@ -617,8 +683,19 @@ function CostAnalyticsTab() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Cost Composition Donut */}
         <div className="card">
-          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+          <h4 className="text-sm font-semibold mb-3 flex items-center gap-1" style={{ color: 'var(--text)' }}>
             💰 Cost Composition by Group
+            <InfoTooltip title="Cost Composition คืออะไร?">
+              <p className="mb-2">
+                Donut นี้แสดง <strong>สัดส่วนมูลค่าสต็อก</strong> ของแต่ละกลุ่มสินค้า — บอกว่า "เงินจม" อยู่กลุ่มไหนมากที่สุด
+              </p>
+              <p className="mb-2"><strong>วิธีอ่าน:</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>ส่วนใหญ่ของวงกลม = กลุ่มที่กิน working capital สูงสุด</li>
+                <li>กลุ่มไหน "ใหญ่" แสดงว่ามีของมูลค่าสูงสะสมเยอะ</li>
+              </ul>
+              <p className="mt-2"><strong>ใช้ตัดสินใจ:</strong> ถ้าวงกลมส่วนใหญ่เป็น FRM (วัตถุดิบ) แต่ขายดีน้อย → ต้องลดสต็อก</p>
+            </InfoTooltip>
           </h4>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -647,8 +724,23 @@ function CostAnalyticsTab() {
 
         {/* Turnover by Group */}
         <div className="card">
-          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+          <h4 className="text-sm font-semibold mb-3 flex items-center gap-1" style={{ color: 'var(--text)' }}>
             🔄 Inventory Turnover by Group
+            <InfoTooltip title="Inventory Turnover คืออะไร?">
+              <p className="mb-2">
+                อัตรา "หมุนเวียน" สต็อก = <strong>กี่ครั้งต่อปี</strong> ที่ของถูกขายและเติมใหม่
+              </p>
+              <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                Turnover = ยอดจ่ายออก (COGS) / มูลค่าสต็อกเฉลี่ย
+              </p>
+              <p className="mb-2"><strong>เกณฑ์อ่านสีกราฟ:</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>🟢 <strong>≥ 4×/ปี</strong> — ของหมุนเวียนดี (ของอยู่ในคลังไม่เกิน 3 เดือน)</li>
+                <li>🟠 <strong>1-4×/ปี</strong> — ปานกลาง</li>
+                <li>🔴 <strong>&lt; 1×/ปี</strong> — ของค้าง (อยู่ในคลังเกิน 1 ปี!)</li>
+              </ul>
+              <p className="mt-2"><strong>มาตรฐาน Food Service:</strong> ควร ≥ 4×/ปี ขึ้นไป (เพราะอาหารหมดอายุ)</p>
+            </InfoTooltip>
           </h4>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -682,8 +774,19 @@ function CostAnalyticsTab() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Stock Health Stack */}
         <div className="card">
-          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+          <h4 className="text-sm font-semibold mb-3 flex items-center gap-1" style={{ color: 'var(--text)' }}>
             ⚡ Active vs Slow vs Dead by Group
+            <InfoTooltip title="สุขภาพสต็อก 3 ระดับ">
+              <p className="mb-2">
+                แท่ง stacked แสดง <strong>มูลค่าสต็อก</strong> ของแต่ละกลุ่ม แบ่งตามการเคลื่อนไหวล่าสุด:
+              </p>
+              <ul className="list-disc ml-4 space-y-1 mb-2">
+                <li>🟢 <strong>Active</strong> — เคลื่อนไหวภายใน 90 วันที่ผ่านมา (สุขภาพดี)</li>
+                <li>🟠 <strong>Slow Moving</strong> — เคลื่อนไหวล่าสุด 90-179 วันที่แล้ว (เริ่มเสี่ยง)</li>
+                <li>🔴 <strong>Dead Stock</strong> — ไม่มีการเคลื่อนไหว ≥ 180 วัน (ของค้าง!)</li>
+              </ul>
+              <p><strong>ใช้ตัดสินใจ:</strong> กลุ่มที่มีแท่ง 🔴 แดงเยอะ = ต้องเร่ง <strong>write-off</strong> หรือ <strong>clearance</strong> ก่อนหมดอายุ</p>
+            </InfoTooltip>
           </h4>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -706,8 +809,22 @@ function CostAnalyticsTab() {
 
         {/* Monthly In/Out + Net Trend */}
         <div className="card">
-          <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+          <h4 className="text-sm font-semibold mb-3 flex items-center gap-1" style={{ color: 'var(--text)' }}>
             📈 Monthly In/Out + Net Cost Flow
+            <InfoTooltip title="Cash Flow ของสต็อก">
+              <p className="mb-2">กราฟนี้แสดง <strong>การไหลของเงิน 12 เดือน</strong> ผ่านสต็อก:</p>
+              <ul className="list-disc ml-4 space-y-1 mb-2">
+                <li>🟢 <strong>แท่งเขียว (In)</strong> — มูลค่าที่ "รับเข้า" คลัง (สั่งซื้อ/ส่งคืน)</li>
+                <li>🔴 <strong>แท่งแดง (Out)</strong> — มูลค่าที่ "จ่ายออก" (ขาย/ใช้งาน)</li>
+                <li>🔵 <strong>เส้นน้ำเงิน (Net)</strong> — ผลต่าง = In − Out</li>
+              </ul>
+              <p className="mb-2"><strong>วิธีอ่าน:</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>Net เป็น <strong>บวก</strong> → สต็อกเพิ่มเดือนนั้น</li>
+                <li>Net เป็น <strong>ลบ</strong> → ขายของออกมากกว่ารับเข้า</li>
+                <li>เดือนที่แท่งสูงทั้งคู่ → ฤดูกาล (เช่น Q4 ปลายปี)</li>
+              </ul>
+            </InfoTooltip>
           </h4>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -733,8 +850,20 @@ function CostAnalyticsTab() {
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
           <DollarSign size={15} style={{ color: 'var(--text-muted)' }} />
-          <h4 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+          <h4 className="text-sm font-semibold flex items-center gap-1" style={{ color: 'var(--text)' }}>
             Top 15 — เงินจมมากที่สุด (Value × Slow Turnover)
+            <InfoTooltip title="วิธีคำนวณ Holding Score">
+              <p className="mb-2">รายการเรียงตาม "ระดับความเสี่ยงเงินจม" สูงสุดด้านบน</p>
+              <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                Hold Score = Inv Value × (1 / Turnover)
+              </p>
+              <p className="mb-2"><strong>แปลว่า:</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>ของแพง + หมุนช้า → อันดับสูง (priority สูง)</li>
+                <li>ของถูก + หมุนเร็ว → อันดับล่าง</li>
+              </ul>
+              <p className="mt-2"><strong>คอลัมน์ Annual Carry</strong> = ค่าใช้จ่ายต่อปีที่เสียไปกับการ "เก็บ" SKU นี้ (ไม่ใช่ค่าซื้อ — ค่า hidden cost)</p>
+            </InfoTooltip>
           </h4>
           <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>
             ของแพง × หมุนช้า = priority 1 ของการระบาย
@@ -809,21 +938,237 @@ function CostAnalyticsTab() {
 }
 
 // ── Ratio Card ───────────────────────────────────────────────────────────────
-function RatioCard({ icon, label, value, sub, color, hint }: {
+function RatioCard({ icon, label, value, sub, color, hint, tooltipTitle, tooltip }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   sub: string;
   color: string;
   hint?: string;
+  tooltipTitle?: string;
+  tooltip?: React.ReactNode;
 }) {
   return (
     <div className="card border-l-4" style={{ borderLeftColor: color }} title={hint}>
       <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-        {icon}<span>{label}</span>
+        {icon}<span className="flex-1">{label}</span>
+        {tooltip && (
+          <InfoTooltip title={tooltipTitle ?? label} size={12}>
+            {tooltip}
+          </InfoTooltip>
+        )}
       </div>
       <div className="mt-1 text-xl font-bold tabular-nums" style={{ color }}>{value}</div>
       <div className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>{sub}</div>
+    </div>
+  );
+}
+
+// ── Explanation Card — collapsible deep-dive into Cost Analytics concepts ────
+function ExplanationCard({ carryingRate }: { carryingRate: number }) {
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try { return sessionStorage.getItem('cost-analytics-explain') !== '0'; }
+    catch { return true; }
+  });
+  const toggle = () => {
+    setExpanded(prev => {
+      const next = !prev;
+      try { sessionStorage.setItem('cost-analytics-explain', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+
+  return (
+    <div className="card p-0 overflow-hidden" style={{ borderLeft: '4px solid #2E75B6' }}>
+      <button
+        onClick={toggle}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-[var(--bg-alt)] transition-colors"
+        style={{ borderBottom: expanded ? '1px solid var(--border)' : 'none' }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-base">📚</span>
+          <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+            ทำความเข้าใจ Cost Analytics
+          </span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(46,117,182,0.1)', color: '#2E75B6' }}>
+            อ่านก่อนใช้
+          </span>
+        </div>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {expanded ? '▲ ย่อ' : '▼ ขยาย'}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="p-4 space-y-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+          {/* What is Carrying Cost */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              💰 Carrying Cost Rate คืออะไร? (ใจกลางของรายงานนี้)
+            </h5>
+            <p className="mb-2">
+              <strong>Carrying Cost</strong> = <strong>ต้นทุนการ "เก็บของไว้ในคลัง" ต่อปี</strong> — เป็น <strong>% ของมูลค่าสต็อก</strong>{' '}
+              ที่บริษัท "จ่ายไปฟรีๆ" ทุกปีเพียงเพราะมีของอยู่
+            </p>
+            <div className="p-3 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              <p className="font-mono text-[11px] mb-1" style={{ color: 'var(--text)' }}>
+                Carrying Cost = Inventory Value × Carrying Rate (%/ปี)
+              </p>
+              <p className="text-[11px]">
+                ตัวอย่าง: คลังมีของ ฿100M + Rate 22% = <strong style={{ color: '#dc2626' }}>เสีย ฿22M/ปี โดยไม่ได้ขาย!</strong>
+              </p>
+            </div>
+          </section>
+
+          {/* Components */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              🧩 Carrying Cost ประกอบด้วยอะไรบ้าง?
+            </h5>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr style={{ color: 'var(--text)', backgroundColor: 'var(--bg-alt)' }}>
+                    <th className="text-left px-2 py-1.5">ต้นทุน</th>
+                    <th className="text-left px-2 py-1.5">% โดยประมาณ</th>
+                    <th className="text-left px-2 py-1.5">คำอธิบาย</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-2 py-1.5">💵 Cost of Capital</td>
+                    <td className="px-2 py-1.5">6–12%</td>
+                    <td className="px-2 py-1.5">ดอกเบี้ย / Opportunity Cost — เงินจมในของถ้าไม่จม เอาไปลงทุนได้</td>
+                  </tr>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-2 py-1.5">🏭 Storage</td>
+                    <td className="px-2 py-1.5">2–5%</td>
+                    <td className="px-2 py-1.5">ค่าเช่าคลัง, ค่าไฟตู้แช่, ค่าน้ำ, ค่าทำความสะอาด</td>
+                  </tr>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-2 py-1.5">🛡️ Insurance</td>
+                    <td className="px-2 py-1.5">1–3%</td>
+                    <td className="px-2 py-1.5">ประกันคลัง, ประกันของหาย/ไฟไหม้</td>
+                  </tr>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-2 py-1.5">💸 Taxes</td>
+                    <td className="px-2 py-1.5">1–2%</td>
+                    <td className="px-2 py-1.5">ภาษีโรงเรือน, ภาษีทรัพย์สิน</td>
+                  </tr>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="px-2 py-1.5">⚙️ Handling</td>
+                    <td className="px-2 py-1.5">2–5%</td>
+                    <td className="px-2 py-1.5">ค่าจ้างพนักงานคลัง, ค่าไฟฟ้า forklift, ค่าซ่อมบำรุง</td>
+                  </tr>
+                  <tr className="border-t" style={{ borderColor: 'var(--border)', backgroundColor: 'rgba(220,38,38,0.05)' }}>
+                    <td className="px-2 py-1.5"><strong>🗑️ Risk (สำคัญสำหรับอาหาร!)</strong></td>
+                    <td className="px-2 py-1.5"><strong>5–15%</strong></td>
+                    <td className="px-2 py-1.5"><strong>ของเสีย, หมดอายุ, ตกรุ่น, ขโมย, write-off</strong></td>
+                  </tr>
+                  <tr className="border-t-2 font-bold" style={{ borderColor: 'var(--border)', color: 'var(--text)' }}>
+                    <td className="px-2 py-1.5">รวม</td>
+                    <td className="px-2 py-1.5">15–40%</td>
+                    <td className="px-2 py-1.5">= Carrying Cost Rate</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* When to use which rate */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              🎯 ควรใช้ Rate ไหน?
+            </h5>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="p-3 rounded" style={{ backgroundColor: 'rgba(22,163,74,0.06)', borderLeft: '3px solid #16a34a' }}>
+                <p className="font-semibold mb-1" style={{ color: '#16a34a' }}>15% / ปี (Low)</p>
+                <ul className="list-disc ml-4 space-y-0.5">
+                  <li>สินค้าแห้ง (น้ำตาล, แป้ง, เครื่องปรุง)</li>
+                  <li>บรรจุภัณฑ์</li>
+                  <li>ของที่ไม่ค่อยเสีย</li>
+                </ul>
+                <p className="mt-1 text-[10px]"><strong>เพราะ:</strong> ไม่ต้องตู้แช่ + ความเสี่ยง write-off ต่ำ</p>
+              </div>
+              <div className="p-3 rounded" style={{ backgroundColor: 'rgba(46,117,182,0.06)', borderLeft: '3px solid #2E75B6' }}>
+                <p className="font-semibold mb-1" style={{ color: '#2E75B6' }}>22% / ปี (Industry Average) ⭐</p>
+                <ul className="list-disc ml-4 space-y-0.5">
+                  <li>ของกระป๋อง / Processed</li>
+                  <li>ของแช่เย็น</li>
+                  <li>Food Service ทั่วไป (เหมาะกับ NSL)</li>
+                </ul>
+                <p className="mt-1 text-[10px]"><strong>เพราะ:</strong> ค่าตู้แช่ + ความเสี่ยงปานกลาง</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Real example */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              📊 ตัวอย่างจากข้อมูลจริง (Rate {(carryingRate * 100).toFixed(0)}%)
+            </h5>
+            <div className="p-3 rounded text-[11px]" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              <p>คลังมี Working Capital ~฿3,496M (ตัวเลขจริง NSL)</p>
+              <p className="font-mono mt-1">฿3,496M × {(carryingRate * 100).toFixed(0)}% = <strong style={{ color: '#dc2626' }}>฿{Math.round(3496 * carryingRate)}M / ปี</strong></p>
+              <p className="mt-1">
+                → บริษัทเสีย <strong style={{ color: '#dc2626' }}>~฿{Math.round(3496 * carryingRate / 365)}M ต่อวัน</strong> เพียงเพื่อ "เก็บของ"
+              </p>
+            </div>
+          </section>
+
+          {/* KPI explanations */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              📐 อัตราส่วนสำคัญในรายงานนี้
+            </h5>
+            <div className="space-y-2">
+              <div>
+                <p style={{ color: 'var(--text)' }}><strong>1. Inventory Turnover (อัตราหมุนเวียน)</strong></p>
+                <p className="ml-4">= ยอดจ่ายออก / มูลค่าสต็อก · ยิ่งสูงยิ่งดี · มาตรฐานอาหาร ≥ 4×/ปี</p>
+              </div>
+              <div>
+                <p style={{ color: 'var(--text)' }}><strong>2. Days Inventory (DIO)</strong></p>
+                <p className="ml-4">= 365 / Turnover · ของอยู่ในคลังเฉลี่ยกี่วัน · อาหารควร ≤ 90 วัน</p>
+              </div>
+              <div>
+                <p style={{ color: 'var(--text)' }}><strong>3. Working Capital</strong></p>
+                <p className="ml-4">= มูลค่ารวม Moving Avg · "เงินจม" ในคลังตอนนี้</p>
+              </div>
+              <div>
+                <p style={{ color: 'var(--text)' }}><strong>4. Dead Stock %</strong></p>
+                <p className="ml-4">= ของไม่ขยับ 180 วัน / รวม · KPI สำคัญ ควร &lt; 5%</p>
+              </div>
+              <div>
+                <p style={{ color: 'var(--text)' }}><strong>5. Cost Variance %</strong></p>
+                <p className="ml-4">= |MA − Std| / Std × 100 · ถ้าสูงแสดงว่าราคาขึ้นลงเยอะ ควรอัปเดต Std Cost</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Decision examples */}
+          <section>
+            <h5 className="text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
+              💡 ใช้รายงานนี้ตัดสินใจอะไรได้บ้าง?
+            </h5>
+            <ul className="list-disc ml-5 space-y-1">
+              <li>
+                <strong>การสั่งซื้อ:</strong> Supplier เสนอ discount 10% ถ้าซื้อ 2 เท่า — คุ้มหรือไม่?
+                <p className="ml-4 text-[10px]">ถ้า DIO เพิ่ม 6 เดือน → Carrying Cost เพิ่ม {(carryingRate * 50).toFixed(1)}% → <strong>ไม่คุ้ม</strong></p>
+              </li>
+              <li>
+                <strong>การ Write-off:</strong> Dead Stock ฿1M เก็บไว้ปีหน้า = +฿{Math.round(1000 * carryingRate)}K Carry Cost
+                → <strong>Write-off ตอนนี้ถูกกว่า</strong>
+              </li>
+              <li>
+                <strong>การลด Stock:</strong> ลด Inventory 20% = ลด Carrying Cost 20% (ตามไปด้วย)
+              </li>
+              <li>
+                <strong>การหา "เงินจม":</strong> ดูตาราง "Top 15 — เงินจมมากที่สุด" ด้านล่าง = priority list การระบาย
+              </li>
+            </ul>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

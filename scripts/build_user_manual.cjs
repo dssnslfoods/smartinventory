@@ -443,11 +443,114 @@ const alertsSection = () => [
 
 const valuationSection = () => [
   h1('7. Cost & Valuation (ต้นทุนและมูลค่า)'),
-  para('แสดงมูลค่าสต็อกแยกตามคลังและกลุ่มสินค้า เพื่อใช้ในการรายงานบัญชีหรือผู้บริหาร'),
-  bullet('สรุปมูลค่ารวมแต่ละคลัง'),
-  bullet('สรุปมูลค่ารวมแต่ละกลุ่มสินค้า'),
-  bullet('Top 20 สินค้าที่มีมูลค่าสูงสุด'),
-  bullet('ส่งออก Excel เพื่อนำไปใช้รายงานต่อ'),
+  para('หน้านี้แบ่งเป็น 2 แท็บ:'),
+  bullet('Overview — มูลค่าสต็อก (Moving Avg / Std Cost) + breakdown รายคลัง/รายกลุ่ม'),
+  bullet('Cost Analytics — อัตราส่วนทางการเงินที่สำคัญสำหรับผู้บริหาร'),
+  spacer(),
+
+  h2('7.1 แท็บ Overview'),
+  para('มุมมองภาพรวมมูลค่าสต็อก'),
+  buildTable([
+    { label: 'KPI Card', weight: 0.32 },
+    { label: 'สูตร', weight: 0.40 },
+    { label: 'ตัวอย่าง', weight: 0.28 },
+  ], [
+    ['Inventory Value (MA)',   'Σ (qty × moving_avg)',         '฿3,496M'],
+    ['Inventory Value (Std)',  'Σ (qty × std_cost)',           '฿3,528M'],
+    ['Variance (MA vs STD)',   'MA − Std',                     '−฿32M'],
+  ]),
+  bullet('Value by Item Group — กราฟแท่งแนวนอน (MA vs Std)'),
+  bullet('Transaction Value Trend — Area chart 12 เดือน'),
+  bullet('Value by Warehouse — ตารางมูลค่าแต่ละคลัง'),
+  bullet('Top Price Variance — รายการที่ MA ห่างจาก Std มากที่สุด'),
+  bullet('Export Excel — รายตัวสินค้าพร้อม Variance %'),
+  spacer(),
+
+  h2('7.2 แท็บ Cost Analytics (ใหม่) — อัตราส่วนทางการเงิน'),
+  para('รวมอัตราส่วนที่ผู้บริหารและ CFO ใช้ตัดสินใจระดับกลยุทธ์'),
+  spacer(),
+
+  h3('7.2.1 6 KPI หลัก'),
+  buildTable([
+    { label: 'KPI', weight: 0.27 },
+    { label: 'สูตร', weight: 0.38 },
+    { label: 'เกณฑ์อ่าน (Food Service)', weight: 0.35 },
+  ], [
+    ['Inventory Turnover',  'COGS (12mo) / Inventory Value',     '🟢 ≥ 4×/ปี · 🟠 1-4× · 🔴 <1×'],
+    ['Days Inventory (DIO)','365 / Turnover',                    '🟢 ≤90d · 🟠 90-180 · 🔴 >180'],
+    ['Working Capital',     'Σ inventory value (MA)',            'มูลค่ารวมตอนนี้'],
+    ['Carrying Cost (Est)', 'Inventory × Rate%/ปี',              'ดูหัวข้อ 7.3'],
+    ['Dead Stock %',        'Dead value / Total inventory',      '🟢 ≤5% · 🟠 5-15% · 🔴 >15%'],
+    ['Cost Variance %',     '|MA − Std| / Std × 100',            '🟢 ≤5% · 🟠 5-15% · 🔴 >15%'],
+  ]),
+  spacer(),
+
+  h3('7.2.2 กราฟทั้ง 4 ตัว'),
+  bullet('💰 Cost Composition Donut — สัดส่วนมูลค่าสต็อกของแต่ละกลุ่ม → เห็นว่าเงินจมอยู่กลุ่มไหน'),
+  bullet('🔄 Inventory Turnover by Group — แท่งแสดงอัตราหมุนต่อปี (color-coded)'),
+  bullet('⚡ Active vs Slow vs Dead by Group — Stacked bar แสดงสุขภาพสต็อกแต่ละกลุ่ม'),
+  bullet('📈 Monthly In/Out + Net Cost Flow — แท่งรายเดือน + เส้นสุทธิ'),
+  spacer(),
+
+  h3('7.2.3 ตาราง Top 15 — เงินจมมากที่สุด'),
+  para('จัดอันดับ "Hold Score" = Inventory Value × (1 / Turnover) → ของแพง × หมุนช้า ขึ้นบนสุด'),
+  bullet('แสดง 8 คอลัมน์: # · Item Code · Name · Group · Inv Value · Turnover · DIO · Annual Carry'),
+  bullet('คอลัมน์ "Annual Carry" = มูลค่า × Carrying Rate ที่เลือก'),
+  bullet('Color-coded Turnover: 🟢 ≥4× · 🟠 1-4× · 🔴 <1×'),
+  spacer(),
+
+  h2('7.3 Carrying Cost Rate — คืออะไรและคำนวณอย่างไร'),
+  para('เป็นแก่นกลางของ Cost Analytics — ผู้ใช้ต้องเข้าใจ'),
+  spacer(),
+
+  callout('💰 Carrying Cost Rate (อัตราต้นทุนการเก็บของ)',
+    ['= ต้นทุน "ที่บริษัทเสียไปฟรีๆ" ทุกปี เพียงเพราะมีของอยู่ในคลัง',
+     'แสดงเป็น % ของมูลค่าสต็อก/ปี',
+     '',
+     'ตัวอย่าง: คลังมีของ ฿100M + Rate 22% = เสีย ฿22M/ปี โดยไม่ได้ขายของ'],
+    'EAF1FB'),
+  spacer(),
+
+  h3('7.3.1 Carrying Cost ประกอบด้วยอะไร (6 ต้นทุนซ่อน)'),
+  buildTable([
+    { label: 'ประเภทต้นทุน', weight: 0.25 },
+    { label: '% โดยประมาณ', weight: 0.15 },
+    { label: 'รายละเอียด', weight: 0.60 },
+  ], [
+    ['💵 Cost of Capital',    '6–12%', 'ดอกเบี้ย / Opportunity Cost — เงินที่จมในของ ถ้าไม่จม เอาไปลงทุนอื่นได้'],
+    ['🏭 Storage',            '2–5%',  'ค่าเช่าคลัง · ค่าไฟ · ค่าตู้แช่ · ค่าน้ำ · ค่าทำความสะอาด'],
+    ['🛡️ Insurance',          '1–3%',  'ประกันคลัง · ประกันของหาย/ไฟไหม้'],
+    ['💸 Taxes',              '1–2%',  'ภาษีโรงเรือน · ภาษีทรัพย์สิน'],
+    ['⚙️ Handling',           '2–5%',  'ค่าจ้างพนักงานคลัง · ค่าไฟ forklift · ค่าซ่อมบำรุง'],
+    ['🗑️ Risk (อาหารสำคัญ!)', '5–15%', 'ของเสีย · หมดอายุ · ตกรุ่น · ขโมย · write-off'],
+    ['รวม',                   '15–40%','= Carrying Cost Rate'],
+  ]),
+  spacer(),
+
+  h3('7.3.2 ควรใช้ Rate ไหน'),
+  para('ระบบให้เลือก 2 option:'),
+  buildTable([
+    { label: 'Rate', weight: 0.20 },
+    { label: 'เหมาะกับ', weight: 0.40 },
+    { label: 'เหตุผล', weight: 0.40 },
+  ], [
+    ['15% (Low)',            'แห้ง · ของไม่เสีย · บรรจุภัณฑ์ · เครื่องเทศ', 'ไม่ต้องตู้แช่ + ความเสี่ยง write-off ต่ำ'],
+    ['22% (Industry Avg) ⭐', 'Food Service ทั่วไป · ของกระป๋อง · แช่เย็น',  'ค่าตู้แช่ + ความเสี่ยงปานกลาง'],
+  ]),
+  spacer(),
+
+  h3('7.3.3 ตัวอย่างการใช้ตัดสินใจ'),
+  para('Carrying Cost ช่วยตอบคำถามผู้บริหารหลายอย่าง:'),
+  bullet('การสั่งซื้อ: Supplier เสนอ discount 10% ถ้าซื้อ 2× — คุ้มหรือไม่? → ถ้า DIO เพิ่ม 6 เดือน → +11% Carrying → ไม่คุ้ม'),
+  bullet('การ Write-off: Dead Stock ฿1M เก็บอีก 1 ปี = +฿220K Carry Cost → Write-off ตอนนี้ถูกกว่า'),
+  bullet('การลด Stock: ลดสต็อก 20% = ลด Carrying Cost 20%/ปี'),
+  bullet('การหา "เงินจม": ดู Top 15 Holding Cost → priority list การระบาย'),
+  spacer(),
+
+  callout('🎯 สรุป',
+    ['Carrying Cost = ต้นทุนที่บริษัทเสียไป "ฟรีๆ" ต่อปี เพื่อแลกกับ "การมีของในคลัง"',
+     'ยิ่งของอยู่นาน ยิ่งเสียมาก — KPI หลักของการบริหารสต็อกสมัยใหม่'],
+    'E8F8EF'),
 ];
 
 // ── Section 8 (NEW) — Lot Inventory ─────────────────────────────────────────
