@@ -1083,41 +1083,40 @@ function VVMatrixTab() {
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
+          <div className="table-container" style={{ border: 'none', overflowX: 'auto' }}>
+            <table className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: 36 }} />
-                <col style={{ width: 72 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 190 }} />
-                <col style={{ width: 55 }} />
-                <col style={{ width: 95 }} />
-                <col style={{ width: 95 }} />
-                <col style={{ width: 72 }} />
-                <col style={{ width: 88 }} />
-                <col style={{ width: 88 }} />
-                <col style={{ width: 68 }} />
-                <col style={{ width: 82 }} />
-                <col style={{ width: 90 }} />
-                <col />
+                <col style={{ width: '3%'  }} />                       {/* # */}
+                <col style={{ width: '5%'  }} />                       {/* Class */}
+                <col style={{ width: mode === 'lot' ? '9%'  : '10%' }} />{/* Item Code */}
+                {mode === 'lot' && <col style={{ width: '11%' }} />}    {/* Batch/Whs */}
+                <col style={{ width: mode === 'lot' ? '14%' : '18%' }} />{/* Item Name */}
+                <col style={{ width: '6%'  }} />                       {/* Grp */}
+                <col style={{ width: '8%'  }} />                       {/* Stock Value */}
+                <col style={{ width: '9%'  }} />                       {/* Expiry (date + days) */}
+                <col style={{ width: '8%'  }} />                       {/* V score */}
+                <col style={{ width: '8%'  }} />                       {/* Validity score */}
+                <col style={{ width: '6%'  }} />                       {/* Simple */}
+                <col style={{ width: '7%'  }} />                       {/* Exp Score */}
+                <col style={{ width: '7%'  }} />                       {/* Risk */}
+                <col />                                                {/* Recommendation */}
               </colgroup>
               <thead>
                 <tr>
-                  <th className="text-center">#</th>
-                  <th>Class</th>
-                  <th>Item Code</th>
-                  {mode === 'lot' && <th>Batch / Whs</th>}
-                  <th>Item Name</th>
-                  <th>Grp</th>
-                  <th className="text-right">Stock Value</th>
-                  <th>Expire Date</th>
-                  <th className="text-right">Days Left</th>
-                  <th className="text-right">Value</th>
-                  <th className="text-right">Validity</th>
-                  <th className="text-right">Simple</th>
-                  <th className="text-right">Exp Score</th>
-                  <th>Risk</th>
-                  <th>Recommendation</th>
+                  <th className="px-2 py-2 text-center">#</th>
+                  <th className="px-1 py-2">Cls</th>
+                  <th className="px-2 py-2">รหัส</th>
+                  {mode === 'lot' && <th className="px-2 py-2">Batch / Whs</th>}
+                  <th className="px-2 py-2">ชื่อสินค้า</th>
+                  <th className="px-1 py-2">กลุ่ม</th>
+                  <th className="px-2 py-2 text-right">มูลค่า</th>
+                  <th className="px-2 py-2 text-right">หมดอายุ</th>
+                  <th className="px-2 py-2 text-right">V</th>
+                  <th className="px-2 py-2 text-right">Vd</th>
+                  <th className="px-1 py-2 text-right">Simp</th>
+                  <th className="px-2 py-2 text-right">Exp</th>
+                  <th className="px-2 py-2">Risk</th>
+                  <th className="px-2 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1125,83 +1124,82 @@ function VVMatrixTab() {
                   <tr key={mode === 'lot' ? `${row.item_code}|${row.warehouse}|${row.batch_num}` : row.item_code}
                     style={row.risk_flag === 'critical'    ? { backgroundColor: 'rgba(220,38,38,0.05)' } :
                            row.risk_flag === 'high_expiry' ? { backgroundColor: 'rgba(234,88,12,0.04)'  } : {}}>
-                    <td className="text-center text-xs tabular-nums font-semibold" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-2 py-2 text-center text-xs tabular-nums font-semibold" style={{ color: 'var(--text-muted)' }}>
                       {row.priority_rank}
                     </td>
-                    <td>
+                    <td className="px-1 py-2">
                       <div className="flex flex-col gap-0.5">
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded text-white text-xs font-bold"
                           style={{ backgroundColor: VV_COLORS[row.exp_class] }}>
                           {row.exp_class}
                         </span>
                         {row.vv_class !== row.exp_class && (
-                          <span className="text-xs leading-none px-1 rounded"
+                          <span className="text-[10px] leading-none px-1 rounded"
                             style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-alt)' }}>
                             {row.vv_class}↑
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="font-mono text-xs font-medium whitespace-nowrap" style={{ color: 'var(--color-primary-light)' }}>
+                    <td className="px-2 py-2 font-mono text-xs font-medium truncate" style={{ color: 'var(--color-primary-light)' }} title={row.item_code}>
                       {row.item_code}
                     </td>
                     {mode === 'lot' && (
-                      <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
-                        <div className="font-mono text-[11px] truncate" style={{ maxWidth: 140 }} title={row.batch_num}>{row.batch_num}</div>
-                        <div className="text-[10px]">{row.warehouse}</div>
+                      <td className="px-2 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        <div className="font-mono text-[11px] truncate" title={row.batch_num}>{row.batch_num}</div>
+                        <div className="text-[10px] truncate" title={row.whs_name ?? row.warehouse}>{row.warehouse}</div>
                       </td>
                     )}
-                    <td className="text-xs" style={{ overflow: 'hidden' }}>
-                      <span className="block truncate" style={{ maxWidth: 180 }} title={row.itemname}>{row.itemname}</span>
+                    <td className="px-2 py-2 text-xs truncate" title={row.itemname}>
+                      {row.itemname}
                     </td>
-                    <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-1 py-2 text-[11px] truncate" style={{ color: 'var(--text-muted)' }} title={row.group_name}>
                       {row.group_name.split('-')[0].trim()}
                     </td>
-                    <td className="text-right tabular-nums text-xs whitespace-nowrap">฿{formatCompact(row.stock_value)}</td>
-                    <td className="text-xs tabular-nums whitespace-nowrap"
-                      style={{ color: row.remaining_days !== null && row.remaining_days <= 30 ? '#dc2626' : 'var(--text-muted)' }}>
-                      {row.expire_date ? formatDate(row.expire_date) : '—'}
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">฿{formatCompact(row.stock_value)}</td>
+                    <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
+                      <div style={{ color: row.remaining_days !== null && row.remaining_days <= 30 ? '#dc2626' : 'var(--text-muted)' }}>
+                        {row.expire_date ? formatDate(row.expire_date) : '—'}
+                      </div>
+                      <div className="tabular-nums font-semibold text-[11px]">
+                        {row.remaining_days !== null ? (
+                          <span style={{ color: row.remaining_days <= 0 ? '#dc2626' : row.remaining_days <= 30 ? '#ea580c' : row.remaining_days <= 90 ? '#d97706' : 'var(--text)' }}>
+                            {row.remaining_days > 0 ? `${row.remaining_days}d` : 'Expired'}
+                          </span>
+                        ) : '—'}
+                      </div>
                     </td>
-                    <td className="text-right tabular-nums text-xs font-semibold whitespace-nowrap">
-                      {row.remaining_days !== null ? (
-                        <span style={{ color: row.remaining_days <= 0 ? '#dc2626' : row.remaining_days <= 30 ? '#ea580c' : row.remaining_days <= 90 ? '#d97706' : 'var(--text)' }}>
-                          {row.remaining_days > 0 ? `${row.remaining_days}d` : 'Expired'}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td><ScoreBar score={row.value_score} color={VV_COLORS[row.exp_class]} /></td>
-                    <td><ScoreBar score={row.validity_score} color={VV_COLORS[row.exp_class]} /></td>
-                    <td className="text-right tabular-nums text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-2 py-2"><ScoreBar score={row.value_score} color={VV_COLORS[row.exp_class]} /></td>
+                    <td className="px-2 py-2"><ScoreBar score={row.validity_score} color={VV_COLORS[row.exp_class]} /></td>
+                    <td className="px-1 py-2 text-right tabular-nums text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
                       {row.final_score.toFixed(1)}
                     </td>
-                    <td className="text-right tabular-nums whitespace-nowrap">
+                    <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
                       <span className="font-bold text-sm" style={{ color: VV_COLORS[row.exp_class] }}>
                         {row.exp_score.toFixed(2)}
                       </span>
                     </td>
-                    <td>
+                    <td className="px-2 py-2">
                       {row.risk_flag === 'critical' && (
-                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
                           style={{ backgroundColor: 'rgba(124,58,237,0.1)', color: '#7c3aed' }}>
-                          CRITICAL
+                          CRIT
                         </span>
                       )}
                       {row.risk_flag === 'high_expiry' && (
-                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
                           style={{ backgroundColor: 'rgba(234,88,12,0.1)', color: '#ea580c' }}>
-                          HIGH RISK
+                          HIGH
                         </span>
                       )}
                     </td>
-                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      <span className="block truncate" style={{ maxWidth: 200 }} title={row.recommendation}>
-                        {row.recommendation}
-                      </span>
+                    <td className="px-2 py-2 text-xs truncate" style={{ color: 'var(--text-muted)' }} title={row.recommendation}>
+                      {row.recommendation}
                     </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={14} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={mode === 'lot' ? 14 : 13} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
                 )}
               </tbody>
             </table>
@@ -1630,49 +1628,59 @@ function TurnoverTab() {
             <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
+          <div className="table-container" style={{ border: 'none', overflowX: 'auto' }}>
+            <table className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '12%' }} />  {/* Item Code */}
+                <col style={{ width: '30%' }} />  {/* Item Name */}
+                <col style={{ width: '10%' }} />  {/* Group */}
+                <col style={{ width: '12%' }} />  {/* Annual COGS */}
+                <col style={{ width: '12%' }} />  {/* Stock Value */}
+                <col style={{ width: '9%'  }} />  {/* Turnover */}
+                <col style={{ width: '8%'  }} />  {/* Days on Hand */}
+                <col style={{ width: '7%'  }} />  {/* Active Months */}
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Item Code</th>
-                  <th>Item Name</th>
-                  <th>Group</th>
-                  <th className="text-right">Annual COGS</th>
-                  <th className="text-right">Stock Value</th>
-                  <th className="text-right">Turnover</th>
-                  <th className="text-right">Days on Hand</th>
-                  <th className="text-right">Active Months</th>
+                  <th className="px-2 py-2">รหัส</th>
+                  <th className="px-2 py-2">ชื่อสินค้า</th>
+                  <th className="px-2 py-2">กลุ่ม</th>
+                  <th className="px-2 py-2 text-right">COGS ปี</th>
+                  <th className="px-2 py-2 text-right">มูลค่า</th>
+                  <th className="px-2 py-2 text-right">Turnover</th>
+                  <th className="px-2 py-2 text-right">DoH</th>
+                  <th className="px-2 py-2 text-right">เดือน</th>
                 </tr>
               </thead>
               <tbody>
                 {(data ?? []).map((row) => (
                   <tr key={row.item_code}>
-                    <td className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>
+                    <td className="px-2 py-2 font-mono text-xs font-medium truncate" style={{ color: 'var(--color-primary-light)' }} title={row.item_code}>
                       {row.item_code}
                     </td>
-                    <td className="text-sm" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td className="px-2 py-2 text-xs truncate" title={row.itemname}>
                       {row.itemname}
                     </td>
-                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-2 py-2 text-[11px] truncate" style={{ color: 'var(--text-muted)' }} title={row.group_name ?? ''}>
                       {(row.group_name ?? '').split('-')[0]}
                     </td>
-                    <td className="text-right tabular-nums text-sm">฿{formatCompact(Number(row.annual_cogs))}</td>
-                    <td className="text-right tabular-nums text-sm">฿{formatCompact(Number(row.current_stock_value))}</td>
-                    <td className="text-right tabular-nums font-bold">
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">฿{formatCompact(Number(row.annual_cogs))}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">฿{formatCompact(Number(row.current_stock_value))}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-bold whitespace-nowrap">
                       {row.turnover_ratio !== null ? (
                         <span style={{ color: Number(row.turnover_ratio) >= summary.avg ? '#2E7D32' : '#C62828' }}>
                           {Number(row.turnover_ratio).toFixed(1)}×
                         </span>
                       ) : '—'}
                     </td>
-                    <td className="text-right tabular-nums">
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">
                       {row.days_on_hand !== null ? (
                         <span style={{ color: Number(row.days_on_hand) > summary.avgDoh * 1.5 ? '#C62828' : 'var(--text)' }}>
                           {Number(row.days_on_hand)}d
                         </span>
                       ) : '—'}
                     </td>
-                    <td className="text-right tabular-nums text-sm" style={{ color: 'var(--text-muted)' }}>
+                    <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
                       {row.active_months}mo
                     </td>
                   </tr>
