@@ -198,15 +198,15 @@ const tocSection = () => [
     ['2', 'การเข้าสู่ระบบ'],
     ['3', 'หน้า Dashboard'],
     ['4', 'Stock On-Hand (สต็อกคงเหลือ)'],
-    ['5', 'Movement History (ประวัติการเคลื่อนไหว)'],
-    ['6', 'Low Stock Alerts (แจ้งเตือนสต็อกต่ำ) + Expiring Lots'],
+    ['5', 'Movement History (ประวัติการเคลื่อนไหว) + Waterfall'],
+    ['6', 'Low Stock Alerts + Expiring Lots'],
     ['7', 'Cost & Valuation (ต้นทุนและมูลค่า)'],
-    ['8', 'Lot Inventory (สต็อกตาม Lot) — ใหม่'],
-    ['9', 'Management Reports — VV Matrix · Slow Moving · Turnover · Reorder · FEFO'],
+    ['8', 'Lot Inventory (สต็อกตาม Lot) + Aging Matrix'],
+    ['9', 'Management Reports — VV Matrix · Group Analysis · Trends · Slow Moving · Turnover · FEFO'],
     ['10', 'Data Import (นำเข้าข้อมูล)'],
     ['11', 'Settings (ตั้งค่า)'],
     ['12', 'User Management (จัดการผู้ใช้)'],
-    ['13', 'แนวคิด VV Matrix แบบละเอียด'],
+    ['13', 'แนวคิด VV Matrix แบบละเอียด (3 Modes)'],
     ['14', 'ภาคผนวก'],
   ].map(([num, title]) => new Paragraph({
     spacing: { after: 80 },
@@ -334,10 +334,13 @@ const stockOnHandSection = () => [
 ];
 
 const movementSection = () => [
-  h1('5. Movement History (ประวัติการเคลื่อนไหว)'),
-  para('บันทึกทุกธุรกรรมรับเข้า/จ่ายออก/โอน ระหว่างคลัง'),
+  h1('5. Movement History (ประวัติการเคลื่อนไหว) + Waterfall'),
+  para('บันทึกทุกธุรกรรมรับเข้า/จ่ายออก/โอน ระหว่างคลัง — มี 2 แท็บ'),
+  bullet('Transactions — ตารางรายการ + กราฟแนวโน้มรายเดือน'),
+  bullet('Waterfall — ดูภาพรวมการไหลของมูลค่าสินค้าเป็นเดือนหรือไตรมาส (ใหม่)'),
+  spacer(),
 
-  h2('5.1 ตัวกรอง'),
+  h2('5.1 แท็บ Transactions — ตัวกรอง'),
   bullet('ช่วงวันที่ (จาก-ถึง)'),
   bullet('คลังสินค้า'),
   bullet('กลุ่มสินค้า'),
@@ -364,6 +367,43 @@ const movementSection = () => [
     ['69',  'Landed Cost',         'Cost',       'ปรับต้นทุนนำเข้า'],
     ['162', 'Inventory Revaluation','Cost',      'ปรับมูลค่าสต็อก'],
   ]),
+  spacer(),
+
+  h2('5.3 แท็บ Waterfall (ใหม่) — Cash Flow ของสต็อก'),
+  para('Waterfall chart แสดงการไหลของมูลค่าสินค้าเข้า/ออกในแต่ละช่วงเวลา — เหมือนงบ Cash Flow แต่เป็นมูลค่าสต็อก'),
+  spacer(),
+
+  h3('ตัวควบคุม'),
+  bullet('ช่วงวันที่ — เลือกเดือนเริ่ม-สิ้นสุด (month picker)'),
+  bullet('Granularity — รายเดือน / รายไตรมาส'),
+  bullet('Mode — "แยก In/Out" (2 แท่ง/ช่วง) หรือ "รวม Net" (1 แท่ง/ช่วง)'),
+  bullet('Metric — มูลค่า ฿ / จำนวน Qty'),
+  spacer(),
+
+  h3('สิ่งที่เห็นในกราฟ'),
+  bullet('แท่งเขียวลอย = In (มูลค่ารับเข้า) — ดันยอดสะสมขึ้น'),
+  bullet('แท่งแดงลอย = Out (มูลค่าจ่ายออก) — ลดยอดสะสม'),
+  bullet('แท่งน้ำเงินใหญ่ทางขวา = ยอดสุทธิรวม (Net)'),
+  bullet('เส้นประน้ำเงิน (step) = Running Total ตามเวลา'),
+  spacer(),
+
+  h3('Use Cases ของผู้บริหาร'),
+  buildTable([
+    { label: 'คำถาม', weight: 0.50 },
+    { label: 'วิธีตั้งค่ากราฟ', weight: 0.50 },
+  ], [
+    ['เปรียบเทียบ Q1 ปีนี้ กับ Q4 ปีที่แล้ว',     'ช่วง 6 เดือน · รายไตรมาส'],
+    ['เดือนไหนใช้สินค้ามากที่สุด?',                'รายเดือน · แยก In/Out · ดูแท่งแดง'],
+    ['กำไรขาดทุนสต็อกปีนี้?',                       'รายเดือน 12 เดือน · รวม Net'],
+    ['การไหลของเงิน 24 เดือนเป็นอย่างไร?',         'รายเดือน · ดูเส้นยอดสะสม'],
+  ]),
+  spacer(),
+
+  callout('💡 ภาพรวมที่ Waterfall ตอบได้ดี',
+    ['• "เดือนที่ Net ติดลบเยอะ" → ใช้สต็อกมากกว่ารับเข้า → ของหดในคลัง',
+     '• "Running Total ลดลงเรื่อยๆ" → คลังกำลังว่าง → ต้องเร่งสั่ง',
+     '• "Q-ไหน Out สูงผิดปกติ" → ฤดูกาล / โปรโมชั่น → วางแผนล่วงหน้าได้'],
+    'EAF1FB'),
 ];
 
 const alertsSection = () => [
@@ -431,7 +471,23 @@ const lotInventorySection = () => [
   bullet('Export Excel ตามที่กรองอยู่'),
   spacer(),
 
-  h2('8.3 โครงสร้างข้อมูล Lot'),
+  h2('8.3 Aging Matrix (ใน Reports → FEFO Pick List)'),
+  para('ตารางสรุประดับ aging-bucket แสดง Items, Lots, Total Value, Share ของแต่ละช่วงวันหมดอายุ'),
+  bullet('Matrix นิ่งเสมอ — แสดงภาพรวมทั้งหมดของคลัง ไม่หดตามฟิลเตอร์'),
+  bullet('คลิกแถวเพื่อกรอง "เฉพาะช่วงนั้น" (exact bucket — ไม่ใช่ ≤X วัน)'),
+  bullet('แถวที่กำลังกรองอยู่จะมีเส้นขอบซ้ายและป้าย "กรองอยู่"'),
+  bullet('คลิกแถวเดิมซ้ำ หรือกดปุ่ม "ล้างฟิลเตอร์ช่วง" เพื่อยกเลิก'),
+  spacer(),
+
+  callout('🎯 วิธีใช้ Aging Matrix อ่านสุขภาพคลัง',
+    ['ถ้า "หมดอายุแล้ว" share สูง → ของจมในคลังต้องเร่ง Write-off',
+     'ถ้า "≤ 30 วัน" share สูง → ต้องเร่งโปรโมชั่น/ลดราคา',
+     'การกระจายแบบ "พีระมิด" (ใกล้หมด<กลาง<ไกล) = สุขภาพดี',
+     'แบบ "นาฬิกาทราย" (หมดอายุ+ของใหม่เยอะ ตรงกลางขาด) = วิกฤต'],
+    'FFF3CD'),
+  spacer(),
+
+  h2('8.4 โครงสร้างข้อมูล Lot'),
   buildTable([
     { label: 'ฟิลด์',       weight: 0.25 },
     { label: 'ความหมาย',    weight: 0.45 },
@@ -450,7 +506,7 @@ const lotInventorySection = () => [
   ]),
   spacer(),
 
-  h2('8.4 Snapshot vs Transactional'),
+  h2('8.5 Snapshot vs Transactional'),
   para('ข้อมูล Lot เป็นแบบ "Snapshot" — เก็บภาพรวมของสต็อก ณ วันที่กำหนด (ToDate) ไม่ใช่ tracking การเคลื่อนไหวรายธุรกรรม'),
   bullet('การ Import lot ครั้งใหม่ที่ ToDate เดียวกัน → ระบบจะ "ทับ" snapshot เดิม'),
   bullet('การ Import lot ที่ ToDate ต่างกัน → ระบบเก็บ snapshot หลายชุดเป็นประวัติ'),
@@ -464,49 +520,166 @@ const lotInventorySection = () => [
 
 const reportsSection = () => [
   h1('9. Management Reports'),
-  para('รวมรายงานเชิงวิเคราะห์ที่ใช้ตัดสินใจระดับบริหาร เปิดได้จากเมนู Reports — มี 5 แท็บ'),
+  para('รวมรายงานเชิงวิเคราะห์ที่ใช้ตัดสินใจระดับบริหาร เปิดได้จากเมนู Reports — มี 6 แท็บ'),
+  buildTable([
+    { label: 'แท็บ', weight: 0.20 },
+    { label: 'จุดประสงค์', weight: 0.55 },
+    { label: 'ใช้บ่อย', weight: 0.25 },
+  ], [
+    ['VV Matrix',         'จัดอันดับ A/B/C ของสินค้า ด้วย Value × Validity (3 modes)', 'รายสัปดาห์'],
+    ['Group Analysis',    'วิเคราะห์ตามกลุ่มสินค้า — A/B/C ระดับ lot × ยอด Move',     'รายเดือน'],
+    ['Trends & Compare',  'เปรียบเทียบ MoM / QoQ / YoY + Anomaly detection',           'รายเดือน'],
+    ['Slow Moving',       'หา Dead Stock / Slow Moving',                                'รายเดือน'],
+    ['Inventory Turnover','อัตราหมุนเวียน (Turnover Ratio) ต่อปี',                       'รายไตรมาส'],
+    ['FEFO Pick List',    'ลำดับการหยิบ lot ตามวันหมดอายุ + Aging Matrix',              'รายวัน'],
+  ]),
+  spacer(),
 
-  h2('9.1 Slow Moving Items'),
+  // ── 9.1 VV Matrix ──────────────────────────────────────────────────────────
+  h2('9.1 VV Matrix — Value × Validity'),
+  para('เครื่องมือคัดกรองสินค้าที่มีความเสี่ยง พิจารณา 2 มิติพร้อมกัน:'),
+  bullet('Value Score (1–5) — อันดับมูลค่าสต็อก (top X% = score 5)'),
+  bullet('Validity Score (1–5) — ตามจำนวนวันก่อนหมดอายุ'),
+  paraMixed([
+    'สูตร: ',
+    { text: 'Final Score = ValueScore × (ValidityScore / 5)^α', bold: true, color: COLOR_PRIMARY },
+  ]),
+  para('ค่า α ปรับได้ที่ Settings (1=Linear, 2=Moderate, 3=Aggressive — แนะนำ α=3 สำหรับอาหาร)', { italics: true }),
+  spacer(),
+
+  h3('3 Analysis Modes (ใหม่)'),
+  para('VV Matrix มี 3 mode ให้เลือก แต่ละ mode ตอบคำถามต่างกัน — ผู้ใช้เลือกตามคำถามที่ต้องการตอบ'),
+  buildTable([
+    { label: 'Mode', weight: 0.22 },
+    { label: 'วิธีคิด',  weight: 0.40 },
+    { label: 'เหมาะใช้กับ', weight: 0.38 },
+  ], [
+    ['🧾 By Lot',
+     '1 lot = 1 หน่วยให้คะแนน (1 SKU กระจาย A/B/C ได้พร้อมกัน)',
+     'FEFO Pick · Write-off · GMP/HACCP audit'],
+    ['⚠️ Item — Worst-Case',
+     'Validity = lot ที่ใกล้หมดที่สุด · Value = ผลรวม',
+     'Risk Alert · หยุดสั่ง SKU เสี่ยง · Food safety'],
+    ['⚖️ Item — Weighted',
+     'Validity = ถ่วงน้ำหนักด้วยมูลค่า lot',
+     'Pricing · เจรจา Supplier · Budget'],
+  ]),
+  spacer(),
+
+  callout('💡 Lot-Based เป็นพื้นฐานของทุก mode',
+    ['• ระบบใช้ inventory_lots.expire_date จาก lot จริง — ไม่ใช่ placeholder จาก items',
+     '• Item modes รวม lot ขึ้นมา แต่ "ความจริง" คือ Lot mode',
+     '• แนะนำ: ใช้ Lot mode เป็นหลัก สลับไป Item modes เมื่อต้องการสรุประดับ SKU'],
+    'E8F8EF'),
+  spacer(),
+
+  h3('ฟิลเตอร์ในหน้า VV Matrix'),
+  bullet('Class: A / B / C'),
+  bullet('Group: 4 กลุ่มหลัก'),
+  bullet('FS Category: 25 หมวด NSL'),
+  bullet('Warehouse (Lot mode เท่านั้น)'),
+  bullet('Risk Flag: Critical / High Expiry'),
+  bullet('Days Left ≤ N — quick chips (7/30/60/90/180)'),
+  bullet('Min Stock Value'),
+  bullet('Search'),
+  spacer(),
+
+  h3('การอ่าน Scatter Chart'),
+  para('แต่ละจุดในกราฟอาจเป็น "หลายรายการที่มีคะแนนเดียวกัน" — ระบบ:'),
+  bullet('ขนาดจุด = จำนวนสินค้าที่อยู่ตำแหน่งนั้น (sqrt scale)'),
+  bullet('เลขในจุด = จำนวนรายการ (เมื่อ > 1)'),
+  bullet('Tooltip → แสดง 5 ตัวอย่าง + count รวม'),
+  bullet('สี: A=เขียว B=ส้ม C=แดง'),
+  spacer(),
+
+  // ── 9.2 Group Analysis ─────────────────────────────────────────────────────
+  h2('9.2 Group Analysis (ใหม่)'),
+  para('วิเคราะห์ตามกลุ่มสินค้า — ตอบคำถามผู้บริหารระดับกลุ่ม โดยใช้ VV ระดับ lot'),
+  spacer(),
+
+  h3('คำถามที่ตอบได้'),
+  buildTable([
+    { label: 'คำถาม', weight: 0.55 },
+    { label: 'ดูที่ไหน', weight: 0.45 },
+  ], [
+    ['กลุ่มไหน Move เยอะที่สุด?',           'KPI "กลุ่มที่ Move มากสุด" + ตารางเรียงตาม Out'],
+    ['กลุ่มไหนมีของแพง (Class A) เยอะ?',     'กราฟ VV Class Distribution'],
+    ['กลุ่มไหนมีของใกล้หมด (Class C) เยอะ?', 'กรอง "มี Class C" + ดูคอลัมน์ C lots'],
+    ['กลุ่มไหนหมุนช้า — ของค้าง?',           'คอลัมน์ Turnover สีแดง (<1x/ปี)'],
+    ['กลุ่มไหนคือตัวขับเคลื่อนยอด?',         'Move Share %'],
+  ]),
+  spacer(),
+
+  h3('คอลัมน์ในตาราง Group Performance'),
+  bullet('SKUs — จำนวนรหัสสินค้าไม่ซ้ำในกลุ่ม'),
+  bullet('Lots — จำนวนล็อตทั้งหมด (analytical unit)'),
+  bullet('VV by Lot (A/B/C) — chip + แถบสัดส่วน'),
+  bullet('Stock Value — ผลรวมมูลค่าคลัง'),
+  bullet('In / Out — มูลค่ารับ-จ่ายในช่วง 6/12/24 เดือน'),
+  bullet('Turnover — อัตราหมุนต่อปี (annualized)'),
+  bullet('Move Share — % สัดส่วนการใช้สินค้าจากยอดรวม'),
+  spacer(),
+
+  callout('🎯 Use Case สำคัญ',
+    ['กลุ่มที่ Stock Value สูง + Turnover ต่ำ + Class C เยอะ',
+     '= ของค้างใกล้หมดอายุ → เร่งระบาย / ลดการสั่ง'],
+    'FFF3CD'),
+  spacer(),
+
+  // ── 9.3 Trends & Compare ───────────────────────────────────────────────────
+  h2('9.3 Trends & Compare (ใหม่)'),
+  para('Deep-dive analysis สำหรับการเปรียบเทียบช่วงเวลา — MoM, QoQ, YoY'),
+  spacer(),
+
+  h3('Period Selector'),
+  bullet('เลือกเดือน — เป็นเดือนหลักที่จะวิเคราะห์'),
+  bullet('Toggle: MoM (เดือนก่อนหน้า) / QoQ (ไตรมาสก่อนหน้า) / YoY (ปีก่อนหน้า)'),
+  spacer(),
+
+  h3('สิ่งที่แสดง'),
+  bullet('4 Delta Cards: Out / In / Net / Tx + อัตราการเปลี่ยน % พร้อมลูกศร'),
+  bullet('Bar Chart 24 เดือนล่าสุด — In vs Out'),
+  bullet('YoY Anchor Table — เดือนเดียวกัน 3 ปีย้อนหลัง'),
+  bullet('Group Comparison Table — แต่ละกลุ่มขยับขึ้น/ลงเทียบ baseline'),
+  bullet('Anomaly Callout — เดือนที่ Out เบี่ยงจากค่าเฉลี่ย 6 เดือนเกิน 50%'),
+  spacer(),
+
+  h3('ตัวอย่างการใช้งาน'),
+  buildTable([
+    { label: 'คำถาม', weight: 0.45 },
+    { label: 'วิธีตั้งค่า', weight: 0.55 },
+  ], [
+    ['เดือนนี้โตเทียบเดือนก่อนหรือไม่?',          'เลือกเดือนปัจจุบัน + MoM'],
+    ['ไตรมาสนี้เทียบไตรมาสก่อน?',                 'เลือกเดือนสุดท้ายของ Q + QoQ'],
+    ['มี.ค.26 โตจาก มี.ค.25 เท่าไร?',              'เลือก มี.ค.26 + YoY'],
+    ['เดือนไหนผิดปกติในรอบปี?',                    'ดู Anomaly Callout'],
+  ]),
+  spacer(),
+
+  // ── 9.4 Slow Moving ────────────────────────────────────────────────────────
+  h2('9.4 Slow Moving Items'),
   para('รายการสินค้าที่ไม่มีการจ่ายออกมานานหรือมีอัตราหมุนเวียนต่ำ'),
   bullet('Dead Stock — ไม่มีการเคลื่อนไหวเลยใน 180 วัน'),
   bullet('Slow Moving — เคลื่อนไหวบ้างแต่นาน ๆ ครั้ง'),
   bullet('Normal — มีการเคลื่อนไหวสม่ำเสมอ'),
   spacer(),
 
-  h2('9.2 Inventory Turnover'),
+  // ── 9.5 Inventory Turnover ─────────────────────────────────────────────────
+  h2('9.5 Inventory Turnover'),
   para('อัตราการหมุนเวียนสต็อกต่อปี (Annual COGS / Average Inventory Value)'),
   bullet('Turnover Ratio สูง = สินค้าหมุนเร็ว ดี'),
   bullet('Days on Hand = 365 / Turnover Ratio'),
+  bullet('Color-coded: เขียว ≥ 4x · ส้ม 1–4x · แดง < 1x (ของค้าง)'),
   spacer(),
 
-  h2('9.3 Reorder Suggestions'),
-  para('แสดงสินค้าที่ควรสั่งซื้อพร้อมจำนวนแนะนำที่ควรสั่ง — คำนวณจาก Min/Max Level และอัตราการใช้'),
-  spacer(),
-
-  h2('9.4 VV Matrix (มี toggle "By Item" / "By Lot")'),
-  para('เครื่องมือคัดกรองสินค้าที่มีความเสี่ยง โดยพิจารณา 2 มิติพร้อมกัน:'),
-  bullet('Value Score (1–5) — ตามมูลค่าสต็อก (top X% = score 5)'),
-  bullet('Validity Score (1–5) — ตามจำนวนวันก่อนหมดอายุ'),
-  para('คะแนนรวมจะถูกคำนวณด้วยสูตร Exponential Score = ValueScore × (ValidityScore / 5)^α', { bold: true }),
-  para('โดยค่า α สามารถปรับได้ที่ Settings (1=Linear, 2=Moderate, 3=Aggressive)', { italics: true }),
-  spacer(),
-  para('ผลลัพธ์จะแบ่งเป็น Class A/B/C ตามเกณฑ์ที่ Admin ตั้งไว้ — ดูรายละเอียดในบทที่ 13'),
-  spacer(),
-
-  callout('🆕 By Lot mode',
-    ['Toggle ด้านบนสุดของแท็บ — เปลี่ยนการคำนวณจาก "ระดับสินค้ารวม" เป็น "ระดับ lot"',
-     'ใน By Lot mode แต่ละ lot ได้คะแนนของตัวเอง โดยใช้ expire_date ของ lot นั้นโดยตรง',
-     'เพิ่มคอลัมน์ Batch / Warehouse ในตาราง · Export filename เปลี่ยนเป็น VV_Matrix_By_Lot',
-     'เหมาะมากกับ NSL Food Service เพราะสินค้าอาหารแต่ละ lot มีความสด/ความเสี่ยงต่างกันชัดเจน'],
-    'E8F8EF'),
-  spacer(),
-
-  h2('9.5 FEFO Pick List (ใหม่)'),
-  para('First-Expired First-Out — รายการลำดับการหยิบของออกจากคลัง โดยให้ lot ที่ใกล้หมดอายุที่สุดถูกหยิบก่อน'),
-  bullet('แสดงแต่ละ (สินค้า × คลัง) เป็นกล่อง พร้อม lot ทั้งหมดเรียงจาก expire_date น้อย → มาก'),
-  bullet('ลำดับ "Pick #1 ↓" คือ lot ที่ควรหยิบก่อน'),
-  bullet('กลุ่มสินค้าที่มี lot ใกล้หมดอายุที่สุดจะลอยขึ้นมาบนสุดเสมอ'),
-  bullet('Export Excel เพื่อแจกให้ทีมคลังใช้หยิบของจริง'),
+  // ── 9.6 FEFO Pick List ─────────────────────────────────────────────────────
+  h2('9.6 FEFO Pick List + Aging Matrix'),
+  para('First-Expired First-Out — ลำดับการหยิบ lot ตามวันหมดอายุน้อย → มาก'),
+  bullet('Aging Matrix ด้านบน: สรุปจำนวน lot/มูลค่า ตามช่วง aging'),
+  bullet('คลิกแถว Matrix = กรอง "เฉพาะช่วงนั้น" (ดูบทที่ 8.3)'),
+  bullet('ตารางด้านล่าง: แต่ละ (สินค้า × คลัง) → lot ทั้งหมดเรียง FEFO'),
+  bullet('ฟิลเตอร์ครบ: Class · Lots count · Days ≤ · Min Value · มี Expired · เรียง'),
+  bullet('Export Excel เพื่อแจกทีมคลังใช้หยิบของจริง'),
 ];
 
 const importSection = () => [
@@ -742,21 +915,93 @@ const vvMatrixSection = () => [
   bullet('Re-run รายงานทุกสัปดาห์เพื่อตามดูสินค้าที่ "ตก class" จาก B ไป C'),
   spacer(),
 
-  h2('13.5 VV Matrix แบบ By Lot vs By Item'),
-  para('ระบบรองรับ 2 โหมดที่ toggle ได้ในหน้า Reports → VV Matrix'),
-  buildTable([
-    { label: 'มิติเปรียบเทียบ',   weight: 0.30 },
-    { label: 'By Item (เดิม)',      weight: 0.35 },
-    { label: 'By Lot (ใหม่)',       weight: 0.35 },
-  ], [
-    ['Granularity',                'รวมสต็อกของสินค้าทุก lot/คลัง',                    'แยกแต่ละ lot ของสินค้า'],
-    ['Expire Date ที่ใช้',          'ค่าจาก items.expire_date (ค่าเดียวต่อสินค้า)',       'expire_date ของแต่ละ lot จริง ๆ'],
-    ['Cost ที่ใช้',                 'moving_avg ของสินค้า',                              'unit_cost ของแต่ละ lot (= Amount/Qty)'],
-    ['ความแม่นยำ',                 'ปานกลาง — ข้อมูลถูก aggregate',                     'สูง — เห็น lot ที่ใกล้หมดอายุชัดเจน'],
-    ['เหมาะกับ',                   'สรุปภาพรวมระดับบริหาร',                            'ตัดสินใจรายธุรกรรม / FEFO / โปรโมชั่น'],
+  h2('13.5 VV Matrix — 3 Analysis Modes (ใหม่)'),
+  para('ระบบรองรับ 3 mode ในการคำนวณ VV Matrix — สลับได้ที่ปุ่ม Toggle ด้านบนของหน้า Reports → VV Matrix แต่ละ mode ตอบคำถามต่างกัน'),
+  spacer(),
+
+  callout('💡 หลักคิดสำคัญที่ต้องเข้าใจ',
+    ['Validity และ Value ของแต่ละ lot ต่างกันโดยธรรมชาติ — 1 SKU อาจมี 3 lot ที่หมดอายุไม่พร้อมกัน และมีต้นทุนต่างกัน',
+     'การคิด "เป็น Item" ต้องเลือกกฎ aggregate — มี 2 ทางเลือก (Worst-Case vs Weighted)',
+     'การคิด "เป็น Lot" คือความจริงที่แม่นยำที่สุด — เพราะ Action จริงเกิดที่ระดับ lot เสมอ'],
+    'EAF1FB'),
+  spacer(),
+
+  h3('13.5.1 By Lot (Default ใหม่)'),
+  para('แต่ละ lot คำนวณคะแนนของตัวเอง — เป็นความจริงที่แม่นยำที่สุด'),
+  bullet('1 lot = 1 หน่วยให้คะแนน'),
+  bullet('1 SKU อาจกระจายอยู่ใน Class A/B/C ได้พร้อมกัน'),
+  bullet('Validity Score คำนวณจาก expire_date ของแต่ละ lot โดยตรง'),
+  bullet('Value Score = rank ของ amount (qty × unit_cost) ของแต่ละ lot'),
+  paraMixed([
+    { text: '✅ เหมาะกับ: ', bold: true },
+    'FEFO Pick List · การ Write-off lot หมดอายุ · GMP/HACCP audit · การแจ้งเตือนระดับ batch',
   ]),
   spacer(),
-  para('แนะนำ: ใช้ By Lot เป็นหลักเมื่อต้องการแม่นยำ ใช้ By Item เมื่อต้องการภาพรวม', { italics: true }),
+
+  h3('13.5.2 Item — Worst-Case (Conservative)'),
+  para('รวมเป็น SKU โดยใช้คะแนน Validity ของ lot ที่ใกล้หมดที่สุด'),
+  paraMixed([
+    'สูตร: ',
+    { text: 'Validity Score = min(lot validity scores)  •  Value Score = rank(Σ stock value)', bold: true, color: COLOR_PRIMARY },
+  ]),
+  bullet('ปรัชญา: "ถ้ามี lot ใดเสี่ยง → SKU นี้เสี่ยง"'),
+  bullet('Conservative — ตื่นตัวต่อความเสี่ยง ไม่พลาดของหมดอายุ'),
+  bullet('อาจเตือนเกินจริง — SKU ที่มี lot ใหม่ ฿100K + lot เก่า ฿100 จะถูกตัดเป็น Class C'),
+  paraMixed([
+    { text: '✅ เหมาะกับ: ', bold: true },
+    'Risk Alert · การหยุดสั่งซื้อ SKU เสี่ยง · Food safety · Quarterly review',
+  ]),
+  spacer(),
+
+  h3('13.5.3 Item — Weighted (Realistic)'),
+  para('รวมเป็น SKU โดยถ่วงน้ำหนัก validity ของแต่ละ lot ด้วยมูลค่า'),
+  paraMixed([
+    'สูตร: ',
+    { text: 'Validity Score = Σ(lot_days × lot_value) / Σ(lot_value)  •  Value Score = rank(Σ stock value)', bold: true, color: COLOR_PRIMARY },
+  ]),
+  bullet('ปรัชญา: "ความสดของเงินที่จมใน SKU นี้โดยเฉลี่ย"'),
+  bullet('Realistic — สะท้อนภาพรวมยุติธรรม'),
+  bullet('lot ใกล้หมดที่มูลค่าน้อยจะถูกบดบัง — ใช้คู่ Worst-Case mode'),
+  paraMixed([
+    { text: '✅ เหมาะกับ: ', bold: true },
+    'การตั้งราคา/ส่วนลด · Pricing strategy · การเจรจา Supplier · การวางงบประมาณ',
+  ]),
+  spacer(),
+
+  h3('13.5.4 ตัวอย่างเปรียบเทียบ — SKU เดียวกัน 3 mode'),
+  para('สมมติ SKU "F7000100206 Smoked Salmon" มี 3 lot:'),
+  buildTable([
+    { label: 'Lot', weight: 0.20 },
+    { label: 'มูลค่า', weight: 0.20 },
+    { label: 'วันหมด', weight: 0.20 },
+    { label: 'Days Left', weight: 0.20 },
+    { label: 'Validity', weight: 0.20 },
+  ], [
+    ['Lot A', '฿100,000', 'มี.ค. 27', '+335 วัน', '5'],
+    ['Lot B', '฿20,000',  'มิ.ย. 26', '+45 วัน',  '3'],
+    ['Lot C', '฿5,000',   'พ.ค. 26', '−10 วัน',  '1'],
+  ]),
+  spacer(),
+  para('Value Score (rank) สมมติได้ 4 → ทุก mode ใช้ค่านี้เหมือนกัน'),
+  buildTable([
+    { label: 'Mode', weight: 0.30 },
+    { label: 'Validity ที่ใช้', weight: 0.30 },
+    { label: 'Exp Score (α=3)', weight: 0.20 },
+    { label: 'Class', weight: 0.20 },
+  ], [
+    ['By Lot (Lot A)',      '5',     '4 × (5/5)³ = 4.00',  'A'],
+    ['By Lot (Lot B)',      '3',     '4 × (3/5)³ = 0.86',  'C'],
+    ['By Lot (Lot C)',      '1',     '4 × (1/5)³ = 0.03',  'C'],
+    ['Item Worst-Case',     '1 (min)', '4 × (1/5)³ = 0.03', 'C'],
+    ['Item Weighted',       '~4.76 (ถ่วงโดยมูลค่า)', '4 × (4.76/5)³ ≈ 3.45', 'B'],
+  ]),
+  spacer(),
+  callout('🎯 บทเรียนจากตัวอย่างนี้',
+    ['• By Lot: เห็น lot C เป็น C → ต้อง Action ทันที (write-off?)',
+     '• Item Worst: SKU ตกเป็น C ทั้งตัว → ตื่นตัวต่อความเสี่ยง',
+     '• Item Weighted: SKU ได้ B → สะท้อนว่ายังมีของดีอยู่เยอะ — เหมาะกับการตัดสินใจการตั้งราคา',
+     '• ใช้ทั้ง 3 mode เป็นมุมมองที่ส่งเสริมกัน — ไม่ใช่แทนกัน'],
+    'EAF1FB'),
 ];
 
 const appendixSection = () => [
