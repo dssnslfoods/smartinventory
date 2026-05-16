@@ -637,7 +637,7 @@ function CostAnalyticsTab() {
           icon={<AlertTriangle size={14} />}
           label="Dead Stock"
           value={`${kpi.deadPct.toFixed(1)}%`}
-          sub={`${kpi.deadCount} items · ฿${formatCompact(kpi.deadValue)}`}
+          sub={`${formatNumber(kpi.deadCount, 0)} items · ฿${formatCompact(kpi.deadValue)}`}
           color={kpi.deadPct <= 5 ? '#16a34a' : kpi.deadPct <= 15 ? '#d97706' : '#dc2626'}
           tooltipTitle="Dead Stock"
           tooltip={<>
