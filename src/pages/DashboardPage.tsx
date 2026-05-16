@@ -14,7 +14,12 @@ import {
   useDataDateRange,
   useSlowMoving,
   useLatestLotSnapshot, useLotAging, useMonthlyTotal,
+  useLotDetail, useSystemConfig,
 } from '@/hooks/useSupabaseQuery';
+import {
+  computeVVScores, parseVVConfig, summarizeVV,
+  type VVInput,
+} from '@/lib/vvMatrix';
 import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
   formatThaiMonthRange, formatCompact,
@@ -92,6 +97,11 @@ export function DashboardPage() {
   // rather than today. Otherwise stale data (no recent imports) makes COGS
   // undercount and DIO look unrealistically large.
   const { data: monthlyTotal = [] }                      = useMonthlyTotal(24);
+  // VV Matrix overview — uses lot-level scoring (the canonical mode)
+  const { data: lotResult }                              = useLotDetail({
+    snapshotDate: latestSnapshot, pageSize: 5000, page: 0,
+  });
+  const { data: sysConfig }                              = useSystemConfig();
 
   // === Derived data ===
   const dateRange = useMemo(() => {
@@ -190,6 +200,31 @@ export function DashboardPage() {
       expiredValue: expired.value,
     };
   }, [agingData]);
+
+  // ── VV Matrix Overview (lot-level scoring — canonical) ──────────────────
+  const vvSummary = useMemo(() => {
+    const lots = lotResult?.data ?? [];
+    if (!lots.length) return null;
+    const cfg = parseVVConfig(sysConfig);
+    const alpha = Math.round(cfg.vv_alpha) as 1 | 2 | 3;
+    const inputs: VVInput[] = lots
+      .filter(l => Number(l.qty) > 0)
+      .map(l => ({
+        item_code:   l.item_code,
+        itemname:    l.itemname,
+        group_name:  l.group_name,
+        uom:         l.uom,
+        stock_value: Number(l.amount),
+        expire_date: l.expire_date,
+        batch_num:   l.batch_num,
+        warehouse:   l.warehouse,
+        whs_name:    l.whs_name,
+        qty:         Number(l.qty),
+        fs_category: l.fs_category ?? null,
+      }));
+    const scored = computeVVScores(inputs, cfg, alpha);
+    return { ...summarizeVV(scored, 5), alpha, cfg };
+  }, [lotResult, sysConfig]);
 
   // ── Inventory Value by Group ───────────────────────────────────────────────
   const stockByGroup = useMemo(() => {
@@ -624,6 +659,237 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ====== Section 3b: VV Matrix Overview ====== */}
+      {vvSummary && (
+        <div className="space-y-4">
+          {/* Header strip explaining the section */}
+          <div className="card flex items-center gap-3"
+               style={{ borderLeft: `4px solid ${COLORS.purple}`,
+                        background: 'linear-gradient(135deg, rgba(124,58,237,0.05) 0%, rgba(124,58,237,0.02) 100%)' }}>
+            <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(124,58,237,0.1)' }}>
+              <Target size={20} style={{ color: COLORS.purple }} />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-sm" style={{ color: 'var(--text)' }}>
+                VV Matrix Overview <span className="text-xs font-normal" style={{ color: 'var(--text-muted)' }}>(Value × Validity)</span>
+              </h3>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                จัดอันดับสินค้าตามมูลค่า × ความสด · {formatNumber(vvSummary.total)} lots · α={vvSummary.alpha}
+              </p>
+            </div>
+            <InfoTooltip title="VV Matrix คืออะไร">
+              <p className="mb-2">
+                <strong>Value × Validity Matrix</strong> — เครื่องมือจัดอันดับสินค้าโดยรวม
+                <strong> มูลค่า</strong> และ <strong>วันก่อนหมดอายุ</strong> เข้าด้วยกัน
+              </p>
+              <CalcBlock formula="Exp Score = Value × (Validity/5)^α">
+                <CalcLine label="α (ใช้ในระบบ)" value={`${vvSummary.alpha}`} />
+                <CalcLine label="Class A เกณฑ์" value={`Score ≥ ${vvSummary.cfg.exp_class_a}`} muted />
+                <CalcLine label="Class B เกณฑ์" value={`Score ≥ ${vvSummary.cfg.exp_class_b}`} muted />
+                <CalcLine label="Class C เกณฑ์" value={`Score < ${vvSummary.cfg.exp_class_b}`} muted />
+              </CalcBlock>
+              <p>คำนวณที่ระดับ <strong>Lot</strong> (1 lot = 1 หน่วยให้คะแนน) — ดูรายละเอียดเต็มที่ Reports → VV Matrix</p>
+            </InfoTooltip>
+          </div>
+
+          {/* KPI Strip — 4 cards (Class A · Class B · Class C · Critical) */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard
+              icon={<TrendingUp size={18} />}
+              label="Class A — Strategic"
+              value={`${vvSummary.pct.A.toFixed(0)}%`}
+              sublabel={`${formatNumber(vvSummary.counts.A)} lots · ฿${formatCompact(vvSummary.values.A)}`}
+              color={COLORS.green}
+              tooltipTitle="Class A — Strategic"
+              tooltip={<>
+                <p className="mb-2">สินค้า <strong>มูลค่าสูง + ความสดสูง</strong> — ของหลักของธุรกิจ</p>
+                <CalcBlock formula="Exp Score ≥ 3.5 (default)">
+                  <CalcLine label="จำนวน" value={`${formatNumber(vvSummary.counts.A)} lots`} bold />
+                  <CalcLine label="มูลค่า" value={`฿${formatNumber(vvSummary.values.A, 0)}`} bold />
+                  <CalcLine label="% ของรวม" value={`${vvSummary.pct.A.toFixed(2)}%`} />
+                </CalcBlock>
+                <p className="mt-2"><strong>Action:</strong> รักษา availability · Push growth</p>
+              </>}
+            />
+            <KpiCard
+              icon={<Activity size={18} />}
+              label="Class B — Core"
+              value={`${vvSummary.pct.B.toFixed(0)}%`}
+              sublabel={`${formatNumber(vvSummary.counts.B)} lots · ฿${formatCompact(vvSummary.values.B)}`}
+              color={COLORS.amber}
+              tooltipTitle="Class B — Core"
+              tooltip={<>
+                <p className="mb-2">สินค้า <strong>ระดับกลาง</strong> — Monitor + Optimize</p>
+                <CalcBlock formula="Exp Score ≥ 1.5 (default)">
+                  <CalcLine label="จำนวน" value={`${formatNumber(vvSummary.counts.B)} lots`} bold />
+                  <CalcLine label="มูลค่า" value={`฿${formatNumber(vvSummary.values.B, 0)}`} bold />
+                  <CalcLine label="% ของรวม" value={`${vvSummary.pct.B.toFixed(2)}%`} />
+                </CalcBlock>
+                <p className="mt-2"><strong>Action:</strong> Monitor / Optimize pricing</p>
+              </>}
+            />
+            <KpiCard
+              icon={<TrendingDown size={18} />}
+              label="Class C — At Risk"
+              value={`${vvSummary.pct.C.toFixed(0)}%`}
+              sublabel={`${formatNumber(vvSummary.counts.C)} lots · ฿${formatCompact(vvSummary.values.C)}`}
+              color={COLORS.red}
+              tooltipTitle="Class C — At Risk"
+              tooltip={<>
+                <p className="mb-2">
+                  สินค้า <strong>ของถูกหรือใกล้หมดอายุ</strong> — ต้องเร่งระบายเพื่อปลดล็อกเงินสด
+                </p>
+                <CalcBlock formula="Exp Score < 1.5 (default)">
+                  <CalcLine label="จำนวน" value={`${formatNumber(vvSummary.counts.C)} lots`} bold />
+                  <CalcLine label="Value at Risk" value={`฿${formatNumber(vvSummary.classCValue, 0)}`} bold />
+                  <CalcLine label="% ของรวม" value={`${vvSummary.pct.C.toFixed(2)}%`} />
+                </CalcBlock>
+                <p className="mt-2"><strong>Action:</strong> ลดราคา · โปรโมชั่น · Clearance</p>
+              </>}
+            />
+            <KpiCard
+              icon={<AlertTriangle size={18} />}
+              label="🔴 Critical Items"
+              value={formatNumber(vvSummary.criticalCount)}
+              sublabel={`฿${formatCompact(vvSummary.criticalValue)} · ต้อง Action ด่วน`}
+              color={COLORS.purple}
+              tooltipTitle="Critical Items"
+              tooltip={<>
+                <p className="mb-2">
+                  สินค้า <strong>มูลค่าสูง × ใกล้หมดอายุ</strong> — เร่งด่วนที่สุด
+                </p>
+                <CalcBlock formula="Value Score ≥ 4 AND Validity Score ≤ 2">
+                  <CalcLine label="Critical items" value={`${formatNumber(vvSummary.criticalCount)} lots`} bold />
+                  <CalcLine label="มูลค่าที่เสี่ยง" value={`฿${formatNumber(vvSummary.criticalValue, 0)}`} bold />
+                  <CalcLine label="High Risk (รวม Critical)" value={`${formatNumber(vvSummary.highRiskCount)} lots`} muted />
+                </CalcBlock>
+                <p className="mt-2"><strong>Action:</strong> URGENT SALE — ดู Reports → VV Matrix → กรอง Critical</p>
+              </>}
+            />
+          </div>
+
+          {/* Donut + Critical Items list */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* Donut */}
+            <div className="card lg:col-span-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Target size={16} style={{ color: COLORS.purple }} />
+                <h3 className="font-semibold" style={{ color: 'var(--text)' }}>การกระจาย VV Class</h3>
+                <InfoTooltip title="VV Class Distribution">
+                  <p className="mb-2">สัดส่วน <strong>จำนวน lot</strong> ในแต่ละ Class</p>
+                  <p>🟢 A = ดาวเด่น · 🟠 B = กลาง · 🔴 C = ต้องระบาย</p>
+                  <p className="mt-2 text-[10px] italic">นับโดย <strong>จำนวน</strong> ไม่ใช่มูลค่า · ดูมูลค่าใน KPI cards ด้านบน</p>
+                </InfoTooltip>
+              </div>
+              <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>By lot count</p>
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'A — Strategic', value: vvSummary.counts.A, color: COLORS.green },
+                        { name: 'B — Core',      value: vvSummary.counts.B, color: COLORS.amber },
+                        { name: 'C — At Risk',   value: vvSummary.counts.C, color: COLORS.red },
+                      ].filter(x => x.value > 0)}
+                      dataKey="value" nameKey="name"
+                      cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2}
+                    >
+                      <Cell fill={COLORS.green} />
+                      <Cell fill={COLORS.amber} />
+                      <Cell fill={COLORS.red} />
+                    </Pie>
+                    <Tooltip
+                      {...tooltipStyle}
+                      formatter={(v?: number | string, name?: string) => {
+                        const pct = vvSummary.total > 0 ? ((Number(v) / vvSummary.total) * 100).toFixed(1) : '0';
+                        return [`${formatNumber(Number(v ?? 0))} lots (${pct}%)`, name];
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+                <div className="text-center p-1.5 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.green }} />
+                    <span style={{ color: 'var(--text-muted)' }}>A</span>
+                  </div>
+                  <div className="font-semibold tabular-nums mt-0.5" style={{ color: COLORS.green }}>
+                    {vvSummary.pct.A.toFixed(0)}%
+                  </div>
+                </div>
+                <div className="text-center p-1.5 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.amber }} />
+                    <span style={{ color: 'var(--text-muted)' }}>B</span>
+                  </div>
+                  <div className="font-semibold tabular-nums mt-0.5" style={{ color: COLORS.amber }}>
+                    {vvSummary.pct.B.toFixed(0)}%
+                  </div>
+                </div>
+                <div className="text-center p-1.5 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS.red }} />
+                    <span style={{ color: 'var(--text-muted)' }}>C</span>
+                  </div>
+                  <div className="font-semibold tabular-nums mt-0.5" style={{ color: COLORS.red }}>
+                    {vvSummary.pct.C.toFixed(0)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Top 5 Critical Items */}
+            <div className="card lg:col-span-3">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle size={16} style={{ color: COLORS.purple }} />
+                <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 5 Critical Items</h3>
+                <InfoTooltip title="Critical Items">
+                  <p className="mb-2">รายการที่ต้อง <strong>เร่งระบายด่วนที่สุด</strong></p>
+                  <p>เกณฑ์: Value Score ≥ 4 AND Validity Score ≤ 2 · เรียงตามมูลค่า</p>
+                </InfoTooltip>
+              </div>
+              <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+                High value × Near expiry — ลำดับตามมูลค่า
+              </p>
+              {vvSummary.topCritical.length === 0 ? (
+                <EmptyChart icon={<AlertTriangle size={28} />} text="ไม่มี Critical items 🎉" />
+              ) : (
+                <div className="space-y-2">
+                  {vvSummary.topCritical.map((row, idx) => (
+                    <div key={`${row.item_code}-${idx}`} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                        style={{ backgroundColor: COLORS.purple, color: '#fff' }}
+                      >{idx + 1}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="text-xs font-mono" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</span>
+                          {row.batch_num && (
+                            <span className="text-[10px] font-mono px-1 rounded" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+                              {row.batch_num.slice(0, 12)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs truncate" style={{ color: 'var(--text)' }}>{row.itemname}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-bold tabular-nums" style={{ color: 'var(--text)' }}>฿{formatCompact(row.stock_value)}</p>
+                        <p className="text-[10px] tabular-nums" style={{ color: COLORS.red }}>
+                          {row.remaining_days != null
+                            ? (row.remaining_days < 0 ? `หมดแล้ว ${Math.abs(row.remaining_days)} วัน` : `เหลือ ${row.remaining_days} วัน`)
+                            : 'ไม่ระบุ'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ====== Section 4: Movement Trend ====== */}
       <div className="card relative">
