@@ -289,7 +289,9 @@ export function LoginPage() {
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
   const [showPassword, setShowPwd]  = useState(false);
-  const [remember, setRemember]     = useState(true);
+  // Default OFF — user must opt in. Session is cleared on tab/browser close
+  // unless they tick "จดจำอุปกรณ์นี้" before signing in.
+  const [remember, setRemember]     = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   // Real-time public stats for the bottom ticker (safe pre-auth aggregates)
@@ -312,8 +314,8 @@ export function LoginPage() {
     setSubmitting(true);
 
     // Remember-this-device toggle:
-    // Default (checked) → persistent localStorage (default Supabase behavior).
-    // Unchecked → clear session on tab/browser close.
+    // Default (UNchecked) → clear session on tab/browser close. The user
+    // must explicitly tick the box to keep the session in localStorage.
     if (!remember) {
       try {
         window.addEventListener('beforeunload', () => {
