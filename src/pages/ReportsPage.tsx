@@ -313,10 +313,13 @@ function parseVVConfig(config: Array<{ key: string; value: string }> | undefined
 }
 
 // ── VV Matrix Tab ─────────────────────────────────────────────────────────────
+// 3 analytical modes for VV Matrix. See MODE_INFO below for full explanation.
+type VVMode = 'lot' | 'item_worst' | 'item_weighted';
+
 function VVMatrixTab() {
   const [vvClass, setVvClass]         = useState('');
   const [groupCode, setGroupCode]     = useState<number | undefined>();
-  const [mode, setMode]               = useState<'item' | 'lot'>('item');
+  const [mode, setMode]               = useState<VVMode>('lot');
   const [search, setSearch]           = useState('');
   const [warehouse, setWarehouse]     = useState('');
   const [fsCategory, setFsCategory]   = useState('');
@@ -334,7 +337,9 @@ function VVMatrixTab() {
   const { data: sysConfig }                           = useSystemConfig();
   const cfg = useMemo(() => parseVVConfig(sysConfig), [sysConfig]);
 
-  const isLoading = mode === 'item' ? stockLoading : lotLoading;
+  // item_worst falls back to v_stock_onhand (which already uses earliest lot
+  // expire per warehouse); other modes need raw lot data.
+  const isLoading = mode === 'item_worst' ? stockLoading : lotLoading;
 
   // Alpha initialises from config (admin can still override in-page)
   const [alpha, setAlpha] = useState(2);
@@ -345,15 +350,41 @@ function VVMatrixTab() {
   }
 
   const vvItems = useMemo<VVItem[]>(() => {
-    if (mode === 'item') {
+    // ── Mode 1: LOT — each lot scored independently (the canonical truth) ──
+    if (mode === 'lot') {
+      const lots = lotResult?.data ?? [];
+      const inputs: VVInput[] = lots
+        .filter(l => Number(l.qty) > 0)
+        .map(l => ({
+          item_code:   l.item_code,
+          itemname:    l.itemname,
+          group_name:  l.group_name,
+          uom:         l.uom,
+          stock_value: Number(l.amount),
+          expire_date: l.expire_date,
+          batch_num:   l.batch_num,
+          warehouse:   l.warehouse,
+          whs_name:    l.whs_name,
+          qty:         Number(l.qty),
+          fs_category: l.fs_category ?? null,
+        }));
+      return computeVVScores(inputs, cfg, alpha);
+    }
+
+    // ── Mode 2: ITEM (WORST-CASE) — aggregate to SKU, use earliest lot expire ──
+    // Conservative rule: "if any lot is at risk, the SKU is at risk"
+    if (mode === 'item_worst') {
       const all = stockData ?? [];
       if (!all.length) return [];
-      // Aggregate stock_value per item across warehouses
       const itemMap = new Map<string, VVInput>();
       for (const s of all) {
         const ex = itemMap.get(s.item_code);
         if (ex) {
           ex.stock_value += Number(s.stock_value);
+          // earliest expire across all warehouses wins (already lot-based per row)
+          if (s.expire_date && (!ex.expire_date || s.expire_date < ex.expire_date)) {
+            ex.expire_date = s.expire_date;
+          }
         } else {
           itemMap.set(s.item_code, {
             item_code:   s.item_code,
@@ -369,23 +400,69 @@ function VVMatrixTab() {
       return computeVVScores(Array.from(itemMap.values()), cfg, alpha);
     }
 
-    // ── Lot mode: each lot scored independently ──
+    // ── Mode 3: ITEM (WEIGHTED) — value-weighted avg of lot validity ──
+    // Realistic rule: "average freshness of money tied up in this SKU"
     const lots = lotResult?.data ?? [];
-    const inputs: VVInput[] = lots
-      .filter(l => Number(l.qty) > 0)
-      .map(l => ({
-        item_code:   l.item_code,
-        itemname:    l.itemname,
-        group_name:  l.group_name,
-        uom:         l.uom,
-        stock_value: Number(l.amount),
-        expire_date: l.expire_date,
-        batch_num:   l.batch_num,
-        warehouse:   l.warehouse,
-        whs_name:    l.whs_name,
-        qty:         Number(l.qty),
-        fs_category: l.fs_category ?? null,
-      }));
+    if (!lots.length) return [];
+
+    type Acc = {
+      item_code: string; itemname: string; group_name: string; uom: string;
+      fs_category: string | null;
+      total_value: number;
+      weighted_days_sum: number;       // Σ (days_remaining × lot_value)
+      total_value_with_expire: number; // denominator for weighted avg
+    };
+    const itemMap = new Map<string, Acc>();
+    const today = Date.now();
+
+    for (const l of lots) {
+      const qty = Number(l.qty);
+      if (qty <= 0) continue;
+      const value = Number(l.amount);
+      const daysLeft = l.expire_date
+        ? (new Date(l.expire_date).getTime() - today) / 86_400_000
+        : null;
+
+      const ex = itemMap.get(l.item_code);
+      if (ex) {
+        ex.total_value += value;
+        if (daysLeft != null) {
+          ex.weighted_days_sum += daysLeft * value;
+          ex.total_value_with_expire += value;
+        }
+      } else {
+        itemMap.set(l.item_code, {
+          item_code:   l.item_code,
+          itemname:    l.itemname,
+          group_name:  l.group_name,
+          uom:         l.uom,
+          fs_category: l.fs_category ?? null,
+          total_value:             value,
+          weighted_days_sum:       daysLeft != null ? daysLeft * value : 0,
+          total_value_with_expire: daysLeft != null ? value : 0,
+        });
+      }
+    }
+
+    // Build synthetic VVInput: convert weighted-avg-days back into a synthetic
+    // expire_date that produces the right validity_score when fed to computeVVScores.
+    const inputs: VVInput[] = Array.from(itemMap.values()).map(it => {
+      let effectiveExpire: string | null = null;
+      if (it.total_value_with_expire > 0) {
+        const avgDays = it.weighted_days_sum / it.total_value_with_expire;
+        const t = today + avgDays * 86_400_000;
+        effectiveExpire = new Date(t).toISOString().split('T')[0];
+      }
+      return {
+        item_code:   it.item_code,
+        itemname:    it.itemname,
+        group_name:  it.group_name,
+        uom:         it.uom,
+        stock_value: it.total_value,
+        expire_date: effectiveExpire,
+        fs_category: it.fs_category,
+      };
+    });
     return computeVVScores(inputs, cfg, alpha);
   }, [mode, stockData, lotResult, cfg, alpha]);
 
@@ -534,7 +611,11 @@ function VVMatrixTab() {
       'Exponential Class':         r.exp_class,
       'Risk Flag':                 r.risk_flag ?? '',
       'Recommendation':            r.recommendation,
-    })), mode === 'lot' ? 'VV_Matrix_By_Lot' : 'VV_Matrix_By_Item');
+    })),
+      mode === 'lot'           ? 'VV_Matrix_By_Lot'
+      : mode === 'item_worst'  ? 'VV_Matrix_Item_WorstCase'
+      :                          'VV_Matrix_Item_Weighted'
+    );
   };
 
   const alphaInfo = {
@@ -546,42 +627,8 @@ function VVMatrixTab() {
   return (
     <div className="space-y-6">
 
-      {/* ── Mode Toggle: By Item / By Lot */}
-      <div className="card py-3 px-4">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>เลือกระดับการวิเคราะห์ — ระดับสินค้ารวม หรือเจาะแต่ละ lot</p>
-          </div>
-          <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
-            <button
-              onClick={() => setMode('item')}
-              className="px-4 py-1.5 text-sm font-medium transition-colors"
-              style={mode === 'item'
-                ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
-                : { color: 'var(--text-muted)' }}
-            >
-              📦 By Item
-            </button>
-            <button
-              onClick={() => setMode('lot')}
-              disabled={!snap}
-              className="px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              style={mode === 'lot'
-                ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
-                : { color: 'var(--text-muted)' }}
-              title={!snap ? 'ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อน' : ''}
-            >
-              🧾 By Lot
-            </button>
-          </div>
-          <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-            {mode === 'item'
-              ? 'รวม stock ของแต่ละสินค้าจากทุกคลัง — เหมือนเดิม'
-              : `แต่ละ lot คำนวณคะแนนตาม expire date ของตัวเอง · snapshot ${snap ?? '—'}`}
-          </p>
-        </div>
-      </div>
+      {/* ── Mode Selector: 3 analytical lenses on the same data ── */}
+      <ModeSelectorCard mode={mode} setMode={setMode} snapAvailable={!!snap} snap={snap ?? null} />
 
       {/* ── Alpha Selector Bar */}
       <div className="card py-3 px-4">
@@ -3011,6 +3058,181 @@ function GroupAnalysisTab() {
           <li><strong>Move Share</strong> = สัดส่วน Out ของกลุ่มนี้ จากยอดรวม → เห็นว่ากลุ่มไหนคือ "ตัวขับเคลื่อน" ของธุรกิจ</li>
           <li><strong>เคสน่าสนใจ:</strong> กลุ่มที่มี Stock Value สูง + Turnover ต่ำ + Class C เยอะ = ของค้างที่ใกล้หมดอายุ ต้องเร่งระบาย</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ── VV Mode Selector Card — 3 buttons + inline explanation always visible ────
+const MODE_INFO: Record<VVMode, {
+  emoji: string;
+  label: string;
+  short: string;
+  why: string;
+  formula: string;
+  useFor: string;
+  goodFor: string[];
+  caution?: string;
+  accent: string;
+}> = {
+  lot: {
+    emoji:    '🧾',
+    label:    'By Lot',
+    short:    'แต่ละ lot คำนวณคะแนนของตัวเอง',
+    why:      'Validity และ Value ของแต่ละ lot ต่างกันโดยธรรมชาติ — การให้คะแนนระดับ lot คือความจริงที่แม่นยำที่สุด',
+    formula:  '1 lot = 1 หน่วยให้คะแนน → 1 SKU อาจกระจายอยู่ใน Class A/B/C พร้อมกันก็ได้',
+    useFor:   'การ Action รายตัว — FEFO picking, การทิ้งของหมดอายุ, audit',
+    goodFor:  ['FEFO Pick List', 'Write-off ของหมดอายุ', 'GMP/HACCP audit', 'ความเสี่ยงระดับ batch'],
+    accent:   '#16a34a',
+  },
+  item_worst: {
+    emoji:    '⚠️',
+    label:    'Item — Worst-Case',
+    short:    'รวมเป็น SKU โดยใช้ lot ที่ใกล้หมดที่สุด',
+    why:      'ปรัชญา Conservative — ถ้ามี lot ใดเสี่ยง → SKU นี้เสี่ยง',
+    formula:  'Validity Score = คะแนนของ lot ที่ใกล้หมดที่สุด (Min)  •  Value Score = sum ของ stock value',
+    useFor:   'การตัดสินใจระดับ SKU แบบรอบคอบ — alert, การหยุดสั่งซื้อ',
+    goodFor:  ['Risk Alert', 'หยุดสั่ง SKU ที่ใกล้หมด', 'Food safety', 'Quarterly review'],
+    caution:  'อาจตัด SKU เป็น Class C ทั้งที่มี lot ใหม่อยู่ — ตรวจดู Lot mode คู่กัน',
+    accent:   '#d97706',
+  },
+  item_weighted: {
+    emoji:    '⚖️',
+    label:    'Item — Weighted',
+    short:    'รวมเป็น SKU โดยถ่วงน้ำหนัก validity ด้วยมูลค่า lot',
+    why:      'ปรัชญา Realistic — สะท้อนความสดของเงินที่จมใน SKU นี้โดยเฉลี่ย',
+    formula:  'Validity Score = Σ(lot_days × lot_value) / Σ(lot_value)  •  Value Score = sum ของ stock value',
+    useFor:   'การตั้งราคา, การประเมินมูลค่าเชิงกลยุทธ์, แผนการตลาด',
+    goodFor:  ['การตั้งราคา/ส่วนลด', 'Pricing strategy', 'การเจรจา Supplier', 'งบประมาณ'],
+    caution:  'lot ใกล้หมดที่มูลค่าน้อยจะถูกบดบัง — ใช้คู่กับ Worst-Case mode',
+    accent:   '#1F3864',
+  },
+};
+
+function ModeSelectorCard({
+  mode, setMode, snapAvailable, snap,
+}: {
+  mode: VVMode;
+  setMode: (m: VVMode) => void;
+  snapAvailable: boolean;
+  snap: string | null;
+}) {
+  const order: VVMode[] = ['lot', 'item_worst', 'item_weighted'];
+  const active = MODE_INFO[mode];
+
+  return (
+    <div className="card p-0 overflow-hidden">
+      {/* Header strip with title + 3 buttons */}
+      <div className="px-4 py-3 border-b flex flex-wrap items-center gap-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+        <div>
+          <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Analysis Mode</p>
+          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>เลือกมุมมองตามคำถามที่ต้องการตอบ</p>
+        </div>
+        <div className="flex flex-wrap rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+          {order.map(m => {
+            const info = MODE_INFO[m];
+            const disabled = !snapAvailable;
+            const isActive = mode === m;
+            return (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                disabled={disabled}
+                className="px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed border-r last:border-r-0"
+                style={{
+                  borderColor: 'var(--border)',
+                  ...(isActive
+                    ? { backgroundColor: info.accent, color: '#fff' }
+                    : { color: 'var(--text-muted)', backgroundColor: 'var(--bg-card)' }
+                  ),
+                }}
+                title={disabled ? 'ยังไม่มีข้อมูล Lot — Import sheet "Lot Inventory" ก่อน' : info.short}
+              >
+                {info.emoji} {info.label}
+              </button>
+            );
+          })}
+        </div>
+        {snap && (
+          <span className="text-[10px] px-2 py-1 rounded ml-auto" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+            Snapshot: {snap}
+          </span>
+        )}
+      </div>
+
+      {/* Inline tooltip card — explains the active mode */}
+      <div className="p-4" style={{ borderLeft: `4px solid ${active.accent}` }}>
+        <div className="flex items-start gap-3 mb-2">
+          <span className="text-xl">{active.emoji}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold" style={{ color: active.accent }}>{active.label}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text)' }}>{active.short}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-xs">
+          <div>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>💡 ปรัชญา</p>
+            <p style={{ color: 'var(--text-muted)' }}>{active.why}</p>
+          </div>
+          <div>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>📐 วิธีคิด</p>
+            <p className="font-mono text-[11px] p-2 rounded" style={{ color: 'var(--text)', backgroundColor: 'var(--bg-alt)' }}>
+              {active.formula}
+            </p>
+          </div>
+          <div>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>🎯 เหมาะใช้ตอบ</p>
+            <p style={{ color: 'var(--text-muted)' }}>{active.useFor}</p>
+          </div>
+          <div>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>✅ ใช้กับงาน</p>
+            <div className="flex flex-wrap gap-1">
+              {active.goodFor.map(g => (
+                <span key={g} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: active.accent + '20', color: active.accent }}>
+                  {g}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {active.caution && (
+          <div className="mt-3 px-3 py-2 rounded text-[11px] flex items-start gap-2"
+               style={{ backgroundColor: 'rgba(217,119,6,0.08)', color: '#92400e', borderLeft: '3px solid #d97706' }}>
+            <span>⚠️</span><span><strong>ข้อควรระวัง:</strong> {active.caution}</span>
+          </div>
+        )}
+
+        {/* Comparison chips — all 3 modes side-by-side as one-liner */}
+        <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-[10px] font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>เปรียบเทียบทั้ง 3 mode:</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+            {order.map(m => {
+              const info = MODE_INFO[m];
+              const isActive = mode === m;
+              return (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className="text-left p-2 rounded border transition-all"
+                  style={{
+                    borderColor: isActive ? info.accent : 'var(--border)',
+                    backgroundColor: isActive ? info.accent + '12' : 'var(--bg-card)',
+                    opacity: isActive ? 1 : 0.7,
+                  }}
+                >
+                  <div className="font-semibold" style={{ color: info.accent }}>
+                    {info.emoji} {info.label}
+                  </div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {info.short}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
