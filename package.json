@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
+  "author": "D2Infinite Co., Ltd.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
