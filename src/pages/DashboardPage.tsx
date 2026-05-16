@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import {
-  DollarSign, Package, Clock, ArrowLeftRight, RefreshCw,
+  Package, Clock, ArrowLeftRight, RefreshCw,
   TrendingUp, TrendingDown, CalendarRange, Activity, AlertTriangle,
   Layers, Target, Banknote,
 } from 'lucide-react';
@@ -12,7 +12,7 @@ import {
 import {
   useKPI, useStockOnHand, useMovementMonthly,
   useTransactions, useDataDateRange,
-  useSlowMoving, useInventoryTurnover,
+  useSlowMoving,
   useLatestLotSnapshot, useLotAging, useMonthlyTotal,
 } from '@/hooks/useSupabaseQuery';
 import {
@@ -86,7 +86,6 @@ export function DashboardPage() {
   const { data: recentTx }                               = useTransactions({ page: 0, pageSize: 50 });
   const { data: dataDateRange }                          = useDataDateRange();
   const { data: slowData = [] }                          = useSlowMoving();
-  const { data: turnoverData = [] }                      = useInventoryTurnover();
   const { data: latestSnapshot }                         = useLatestLotSnapshot();
   const { data: lotAging = [] }                          = useLotAging(latestSnapshot);
   const { data: monthlyTotal = [] }                      = useMonthlyTotal(12);
@@ -217,27 +216,6 @@ export function DashboardPage() {
     }
     return Array.from(map.values()).sort((a, b) => b.totalMoved - a.totalMoved).slice(0, 10);
   }, [recentTx]);
-
-  // ── Action Items: Top "Cash Trapped" (high value × slow turnover) ──────────
-  const cashTrapped = useMemo(() => {
-    return turnoverData
-      .filter(t => Number(t.current_stock_value) > 0)
-      .map(t => {
-        const value = Number(t.current_stock_value);
-        const turnover = Number(t.turnover_ratio ?? 0);
-        const holdScore = value * (1 / Math.max(turnover, 0.1));
-        return {
-          item_code: t.item_code,
-          itemname: t.itemname,
-          group: (t.group_name ?? '').split('-')[0],
-          value,
-          turnover,
-          holdScore,
-        };
-      })
-      .sort((a, b) => b.holdScore - a.holdScore)
-      .slice(0, 5);
-  }, [turnoverData]);
 
   // ── MoM Comparison ─────────────────────────────────────────────────────────
   const mom = useMemo(() => {
@@ -578,9 +556,10 @@ export function DashboardPage() {
         )}
       </div>
 
-      {/* ====== Section 5: Warehouse + Group Bar Charts (2 cols) ====== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Warehouse Stock Value */}
+      {/* ====== Section 5: Warehouse Stock Value (full-width) ====== */}
+      <div className="grid grid-cols-1 gap-6">
+        {/* Warehouse Stock Value — full-width now that Group bar is removed
+            (Group composition is already covered by the donut in Section 3) */}
         <div className="card relative">
           <HelpButton
             title="มูลค่าสินค้าแยกตามคลัง"
@@ -626,85 +605,10 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Group Distribution */}
-        <div className="card relative">
-          <HelpButton
-            title="มูลค่าตามกลุ่มสินค้า"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                แท่งแนวนอนแสดงมูลค่ารวมของแต่ละกลุ่ม
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">
-                หา "กลุ่มหลัก" ของธุรกิจที่กิน working capital สูงสุด
-              </HelpSection>
-            </>)}
-          />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>มูลค่าตามกลุ่มสินค้า</h3>
-          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Value by Group · ฿{formatCompact(totalStockValue)}</p>
-          {stockByGroup.length === 0 ? (
-            <EmptyChart icon={<Package size={28} />} text="ไม่มีข้อมูลกลุ่ม" />
-          ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stockByGroup} layout="vertical" margin={{ left: 0, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                  <XAxis type="number" tickFormatter={(v) => formatCompact(v)} stroke="var(--text-muted)" fontSize={11} />
-                  <YAxis type="category" dataKey="name" width={75} stroke="var(--text-muted)" fontSize={11} tick={{ fill: 'var(--text)' }} />
-                  <Tooltip {...tooltipStyle} formatter={(v?: number | string) => formatCurrency(Number(v ?? 0))} />
-                  <Bar dataKey="value" name="มูลค่า" radius={[0, 4, 4, 0]} barSize={22}>
-                    {stockByGroup.map((_, i) => <Cell key={i} fill={GROUP_COLORS[i % GROUP_COLORS.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* ====== Section 6: Action Items — Top 5 Cash Trapped + Top 10 Moved (2 cols) ====== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Cash Trapped */}
-        <div className="card relative">
-          <div className="flex items-center gap-2 mb-1">
-            <DollarSign size={16} style={{ color: COLORS.red }} />
-            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 5 — เงินจมมากที่สุด</h3>
-            <InfoTooltip title="Cash Trapped Items">
-              <p className="mb-2"><strong>Hold Score = Value × (1 / Turnover)</strong></p>
-              <p>ของแพง + หมุนช้า → ขึ้นบนสุด · เป็น priority สำคัญในการระบายเงินสด</p>
-            </InfoTooltip>
-          </div>
-          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>High Value × Slow Turnover — Priority for clearance</p>
-          {cashTrapped.length === 0 ? (
-            <EmptyChart icon={<DollarSign size={28} />} text="กำลังโหลด..." />
-          ) : (
-            <div className="space-y-2">
-              {cashTrapped.map((row, idx) => (
-                <div key={row.item_code} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ backgroundColor: 'var(--bg-alt)' }}>
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                    style={{ backgroundColor: idx === 0 ? COLORS.red : idx === 1 ? COLORS.orange : COLORS.amber, color: '#fff' }}
-                  >{idx + 1}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="text-xs font-mono" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
-                        {row.group}
-                      </span>
-                    </div>
-                    <p className="text-xs truncate" style={{ color: 'var(--text)' }}>{row.itemname}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold tabular-nums" style={{ color: 'var(--text)' }}>฿{formatCompact(row.value)}</p>
-                    <p className="text-[10px] tabular-nums" style={{ color: row.turnover < 1 ? COLORS.red : COLORS.amber }}>
-                      Turn {row.turnover.toFixed(2)}×
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+      {/* ====== Section 6: MoM Comparison (full-width) ====== */}
+      <div className="grid grid-cols-1 gap-6">
         {/* MoM Comparison */}
         <div className="card relative">
           <div className="flex items-center gap-2 mb-1">
