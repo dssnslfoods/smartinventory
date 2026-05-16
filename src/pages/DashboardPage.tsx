@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import {
   DollarSign, Package, AlertTriangle, Clock, ArrowLeftRight,
-  TrendingUp, TrendingDown, CalendarRange, Activity, Truck,
+  TrendingUp, TrendingDown, CalendarRange, Activity,
 } from 'lucide-react';
 import {
   ComposedChart, PieChart, BarChart,
@@ -11,7 +11,6 @@ import {
 import {
   useKPI, useStockOnHand, useMovementMonthly,
   useTransactions, useStockAlerts, useDataDateRange,
-  useGoodsInTransit,
 } from '@/hooks/useSupabaseQuery';
 import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
@@ -52,7 +51,6 @@ export function DashboardPage() {
   const { data: alerts } = useStockAlerts();
   const { data: recentTx } = useTransactions({ page: 0, pageSize: 200 });
   const { data: dataDateRange } = useDataDateRange();
-  const { data: transitItems = [] } = useGoodsInTransit();
 
   // === Derived data ===
   const dateRange = useMemo(() => {
@@ -121,13 +119,6 @@ export function DashboardPage() {
     for (const a of alerts ?? []) counts[a.status as keyof typeof counts]++;
     return { ...counts, total: (alerts ?? []).length };
   }, [alerts]);
-
-  const transitSummary = useMemo(() => {
-    const overdue      = transitItems.filter(t => t.arrival_status === 'overdue').length;
-    const arrivingSoon = transitItems.filter(t => t.arrival_status === 'arriving_soon' || t.arrival_status === 'arriving_today').length;
-    const totalValue   = transitItems.reduce((s, t) => s + Number(t.pending_value), 0);
-    return { total: transitItems.length, overdue, arrivingSoon, totalValue };
-  }, [transitItems]);
 
   const mom = useMemo(() => {
     if (!monthlyData || monthlyData.length < 2) return null;
@@ -241,40 +232,6 @@ export function DashboardPage() {
                 ]} />
               </HelpSection>
               <HelpSection title="ใช้ทำอะไร">ดูภาพรวมการดำเนินงาน — ช่วงไหน busy ช่วงไหน slow</HelpSection>
-            </>),
-          }}
-        />
-        <KPICard
-          icon={<AlertTriangle size={20} />}
-          label="แจ้งเตือนวิกฤต"
-          value={formatNumber(kpi?.criticalAlerts ?? 0)}
-          sublabel="Critical Alerts"
-          color={(kpi?.criticalAlerts ?? 0) > 0 ? '#C62828' : '#2E7D32'}
-          help={{
-            title: 'แจ้งเตือนวิกฤต (Critical Alerts)',
-            body: (<>
-              <HelpSection title="คืออะไร">จำนวนรายการ (สินค้า × คลัง) ที่ stock ปัจจุบันต่ำกว่า Min Level — ต้องเร่งสั่งหรือเร่งผลิต</HelpSection>
-              <HelpSection title="เกณฑ์มาจากไหน">
-                ตั้งค่าที่ Settings → Stock Threshold Settings (Min / Reorder Point / Max ของแต่ละสินค้า · คลัง)
-              </HelpSection>
-              <HelpSection title="ดูรายละเอียด">เมนู <strong>Low Stock Alerts</strong> — มีคอลัมน์ Days Remaining บอกว่าจะหมดอีกกี่วัน</HelpSection>
-            </>),
-          }}
-        />
-        <KPICard
-          icon={<Truck size={20} />}
-          label="ระหว่างขนส่ง"
-          value={formatNumber(transitSummary.total)}
-          sublabel={transitSummary.overdue > 0 ? `เลยกำหนด ${transitSummary.overdue} รายการ` : 'Goods in Transit'}
-          color={transitSummary.overdue > 0 ? '#E65100' : '#00897B'}
-          help={{
-            title: 'ระหว่างขนส่ง (Goods in Transit)',
-            body: (<>
-              <HelpSection title="คืออะไร">รายการสินค้าที่สั่งซื้อแล้วและยังไม่ถึง — มาจากใบสั่งซื้อ (Purchase Orders) สถานะ confirmed/shipped/in_transit/customs</HelpSection>
-              <HelpSection title="หมายเหตุ">
-                NSL Food Service ปัจจุบันไม่ได้ใช้โมดูลจัดซื้อ — ตัวเลขนี้จึงแสดงเป็น 0
-                หากเปิดใช้โมดูลจัดซื้อในอนาคต Super Admin สามารถเปิด Feature ที่หน้า Companies ได้
-              </HelpSection>
             </>),
           }}
         />
