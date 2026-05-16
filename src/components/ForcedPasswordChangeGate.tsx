@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { KeyRound, Eye, EyeOff, Loader2, ShieldAlert, LogOut } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { invokeAdminUsers } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
 /**
@@ -42,33 +42,26 @@ export function ForcedPasswordChangeGate({ children }: { children: React.ReactNo
     setSaving(true);
     setError('');
 
-    // Watchdog — if we somehow get stuck for over 20 s, give the user a way out.
+    // Watchdog — surface a manual recovery path if the network is dead.
     const watchdog = window.setTimeout(() => {
       setError('การบันทึกใช้เวลานานผิดปกติ — ลองอีกครั้ง หรือ refresh หน้าเว็บ');
       setSaving(false);
-    }, 20_000);
+    }, 15_000);
 
     try {
-      // 1. Update auth password (Supabase enforces JWT for this — only self)
-      const { error: authErr } = await supabase.auth.updateUser({ password: pwd1 });
-      if (authErr) throw new Error(authErr.message);
+      // Single edge-function call (service role): updates auth password +
+      // clears must_change_password in one round-trip. This deliberately
+      // bypasses supabase.auth.updateUser, which was hanging (>20 s) for
+      // some users and didn't return an error — likely the client-side JWT
+      // refresh / auth-state-listener chain after a USER_UPDATED event.
+      await invokeAdminUsers({
+        action:   'self-change-password',
+        password: pwd1,
+      });
 
-      // 2. Clear the must_change_password flag in the profile row
-      const { error: rpcErr } = await supabase.rpc('clear_must_change_password');
-      if (rpcErr) throw new Error(rpcErr.message);
-
-      // 3. Optimistically unmount the gate. We deliberately do NOT await a
-      //    full loadProfile() round-trip here:
-      //
-      //    - supabase.auth.updateUser fires USER_UPDATED → the auth listener
-      //      in authStore.initialize() starts its own loadProfile in parallel.
-      //    - If we then await another loadProfile, both round-trips block the
-      //      submit button. On a slow network this looks like the app hung.
-      //    - markPasswordChanged() flips the local profile flag immediately
-      //      (gate unmounts) AND sets pwdClearedAt so the listener's stale
-      //      read (must_change_password=true, captured before the RPC) gets
-      //      ignored in loadProfile().
       window.clearTimeout(watchdog);
+      // Local optimistic update + 60 s stale-read guard so any in-flight
+      // loadProfile() can't flip must_change_password back to TRUE.
       markPasswordChanged();
       // No setSaving(false) — this component is about to unmount.
     } catch (e: any) {

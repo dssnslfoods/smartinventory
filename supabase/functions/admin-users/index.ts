@@ -3,14 +3,15 @@
 // Service role key stays on the server (never exposed to the browser).
 //
 // Operations:
-//   POST  /admin-users { action: "create", email, password, full_name, role, company_id }
-//   POST  /admin-users { action: "reset-password", user_id, password }
-//   POST  /admin-users { action: "bulk-reset-password", user_ids: string[], password }
-//   POST  /admin-users { action: "delete", user_id }   (super_admin only)
+//   POST  /admin-users { action: "create", email, password, full_name, role, company_id }      (admin/super_admin)
+//   POST  /admin-users { action: "reset-password", user_id, password }                         (admin/super_admin)
+//   POST  /admin-users { action: "bulk-reset-password", user_ids: string[], password }         (admin/super_admin)
+//   POST  /admin-users { action: "delete", user_id }                                           (super_admin only)
+//   POST  /admin-users { action: "self-change-password", password }                            (any authenticated user)
 //
-// On `create` and any reset action, the target's must_change_password flag is
-// flipped to TRUE so the React app forces them to set a new password on next
-// login.
+// On create / reset / bulk-reset, the target's must_change_password flag is
+// flipped to TRUE. On self-change-password, the caller's flag is flipped to
+// FALSE.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -69,9 +70,6 @@ Deno.serve(async (req: Request) => {
   if (!caller.is_active)  return json({ error: 'Caller is not active' }, 403);
 
   const callerRole = caller.role as Role;
-  if (callerRole !== 'super_admin' && callerRole !== 'admin') {
-    return json({ error: 'Forbidden — admin role required' }, 403);
-  }
 
   // ── 3. Parse request body ──────────────────────────────────────────────────
   let body: Record<string, unknown>;
@@ -82,6 +80,16 @@ Deno.serve(async (req: Request) => {
 
   // ── 4. Dispatch ────────────────────────────────────────────────────────────
   try {
+    // ── Self-service actions — any authenticated user ──────────────────────
+    if (action === 'self-change-password') {
+      return await handleSelfChangePassword(admin, callerId, body);
+    }
+
+    // ── All actions below require admin / super_admin ──────────────────────
+    if (callerRole !== 'super_admin' && callerRole !== 'admin') {
+      return json({ error: 'Forbidden — admin role required' }, 403);
+    }
+
     if (action === 'create') {
       return await handleCreate(admin, callerRole, caller.company_id, body);
     }
@@ -100,6 +108,30 @@ Deno.serve(async (req: Request) => {
     return json({ error: msg }, 500);
   }
 });
+
+// ── Action: self-change-password — any authenticated user changes own pwd ──
+
+async function handleSelfChangePassword(
+  admin: ReturnType<typeof createClient>,
+  callerId: string,
+  body: Record<string, unknown>,
+) {
+  const password = String(body.password ?? '');
+  if (password.length < 8) return json({ error: 'Password must be ≥ 8 chars' }, 400);
+
+  // 1. Update password via service role — reliable, no client-side auth round-trips.
+  const { error: authErr } = await admin.auth.admin.updateUserById(callerId, { password });
+  if (authErr) return json({ error: authErr.message }, 400);
+
+  // 2. Clear must_change_password flag.
+  const { error: profileErr } = await admin
+    .from('user_profiles')
+    .update({ must_change_password: false, updated_at: new Date().toISOString() })
+    .eq('id', callerId);
+  if (profileErr) return json({ error: profileErr.message }, 500);
+
+  return json({ ok: true });
+}
 
 // ── Action: create user ──────────────────────────────────────────────────────
 
@@ -127,7 +159,6 @@ async function handleCreate(
     return json({ error: `Role '${role}' is not assignable by ${callerRole}` }, 403);
   }
 
-  // admin can only create within their own company
   if (callerRole === 'admin') {
     if (companyId !== callerCompanyId) {
       return json({ error: 'Admin may only create users in their own company' }, 403);
@@ -137,7 +168,6 @@ async function handleCreate(
     }
   }
 
-  // 1. Create auth user
   const { data: created, error: authErr } = await admin.auth.admin.createUser({
     email,
     password,
@@ -148,7 +178,6 @@ async function handleCreate(
 
   const newUserId = created.user.id;
 
-  // 2. Upsert profile — initial password is admin-issued, so force-change on first login.
   const { error: profileErr } = await admin
     .from('user_profiles')
     .upsert(
@@ -165,7 +194,6 @@ async function handleCreate(
     );
 
   if (profileErr) {
-    // Best-effort cleanup of auth user so we don't leave an orphan
     await admin.auth.admin.deleteUser(newUserId).catch(() => {});
     return json({ error: profileErr.message }, 500);
   }
@@ -187,7 +215,6 @@ async function handleResetPassword(
   if (!userId)              return json({ error: 'user_id is required' }, 400);
   if (password.length < 8)  return json({ error: 'Password must be ≥ 8 chars' }, 400);
 
-  // Lookup target — admins may only reset within their own company
   if (callerRole === 'admin') {
     const { data: target, error: tErr } = await admin
       .from('user_profiles')
@@ -203,11 +230,9 @@ async function handleResetPassword(
     }
   }
 
-  // 1. Update auth password
   const { error } = await admin.auth.admin.updateUserById(userId, { password });
   if (error) return json({ error: error.message }, 400);
 
-  // 2. Mark profile so the user must change pwd on next login
   await admin.from('user_profiles')
     .update({ must_change_password: true, updated_at: new Date().toISOString() })
     .eq('id', userId);
@@ -215,7 +240,7 @@ async function handleResetPassword(
   return json({ ok: true });
 }
 
-// ── Action: bulk reset password (many users, one shared password) ──────────
+// ── Action: bulk reset password ─────────────────────────────────────────────
 
 async function handleBulkResetPassword(
   admin: ReturnType<typeof createClient>,
@@ -231,8 +256,6 @@ async function handleBulkResetPassword(
 
   const userIds: string[] = ids.map(String);
 
-  // Admins can only bulk-reset within their own company; super_admins cannot
-  // accidentally target other super_admins (must use the singular endpoint).
   let targets: { id: string; role: string; company_id: string | null }[] = [];
   {
     const { data, error } = await admin
@@ -255,7 +278,6 @@ async function handleBulkResetPassword(
     }
   }
 
-  // Run resets in parallel — record per-user failures rather than aborting the batch.
   const results = await Promise.all(
     targets.map(async t => {
       const { error: aErr } = await admin.auth.admin.updateUserById(t.id, { password });
@@ -291,16 +313,12 @@ async function handleDelete(
     return json({ error: 'You cannot delete your own account' }, 400);
   }
 
-  // Delete profile first — if this fails we haven't touched auth yet.
   const { error: profileErr } = await admin
     .from('user_profiles')
     .delete()
     .eq('id', userId);
   if (profileErr) return json({ error: `profile delete: ${profileErr.message}` }, 500);
 
-  // Then delete auth user. If this fails, the profile is gone but auth remains —
-  // we surface the error so an admin can retry; next call will short-circuit on
-  // missing profile (already deleted) and just retry the auth delete.
   const { error: authErr } = await admin.auth.admin.deleteUser(userId);
   if (authErr) return json({ error: `auth delete: ${authErr.message}` }, 500);
 
