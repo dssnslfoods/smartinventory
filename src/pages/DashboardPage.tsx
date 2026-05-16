@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import {
-  DollarSign, Package, AlertTriangle, Clock, ArrowLeftRight,
+  DollarSign, Package, Clock, ArrowLeftRight,
   TrendingUp, TrendingDown, CalendarRange, Activity,
 } from 'lucide-react';
 import {
@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import {
   useKPI, useStockOnHand, useMovementMonthly,
-  useTransactions, useStockAlerts, useDataDateRange,
+  useTransactions, useDataDateRange,
 } from '@/hooks/useSupabaseQuery';
 import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
@@ -48,7 +48,6 @@ export function DashboardPage() {
   const { data: kpi, isLoading: kpiLoading } = useKPI();
   const { data: stockData } = useStockOnHand();
   const { data: monthlyData, isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
-  const { data: alerts } = useStockAlerts();
   const { data: recentTx } = useTransactions({ page: 0, pageSize: 200 });
   const { data: dataDateRange } = useDataDateRange();
 
@@ -113,12 +112,6 @@ export function DashboardPage() {
     }
     return Array.from(map.values()).sort((a, b) => b.totalMoved - a.totalMoved).slice(0, 10);
   }, [recentTx]);
-
-  const healthData = useMemo(() => {
-    const counts = { critical: 0, warning: 0, normal: 0, overstock: 0 };
-    for (const a of alerts ?? []) counts[a.status as keyof typeof counts]++;
-    return { ...counts, total: (alerts ?? []).length };
-  }, [alerts]);
 
   const mom = useMemo(() => {
     if (!monthlyData || monthlyData.length < 2) return null;
@@ -402,10 +395,10 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ====== Section 5 + 6: Warehouse + Stock Health ====== */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Warehouse Performance */}
-        <div className="lg:col-span-3 card relative">
+      {/* ====== Section 5: Warehouse Stock Value ====== */}
+      <div className="grid grid-cols-1 gap-6">
+        {/* Warehouse Performance — now full-width since Stock Health card was removed */}
+        <div className="card relative">
           <HelpButton
             title="มูลค่าสินค้าแยกตามคลัง (Warehouse Stock Value)"
             body={(<>
@@ -462,87 +455,6 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Stock Health Gauge */}
-        <div className="lg:col-span-2 card relative">
-          <HelpButton
-            title="สุขภาพสต๊อก (Stock Health Overview)"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                แท่งเดียวที่แบ่งสัดส่วน 4 สถานะ + ตารางด้านล่าง — นับเฉพาะรายการ (สินค้า · คลัง) ที่ตั้งค่า Threshold ไว้
-              </HelpSection>
-              <HelpSection title="ความหมายของแต่ละสี">
-                <HelpLegend items={[
-                  { color: '#C62828', label: 'วิกฤต (Critical)',     meaning: 'จำนวนคงเหลือ < Min Level — ต้องเร่งสั่ง' },
-                  { color: '#E65100', label: 'เฝ้าระวัง (Warning)',  meaning: 'Min ≤ คงเหลือ < Reorder Point — เตรียมสั่ง' },
-                  { color: '#2E7D32', label: 'ปกติ (Normal)',         meaning: 'อยู่ในช่วง Reorder Point — Max Level' },
-                  { color: '#2E75B6', label: 'สต๊อกเกิน (Overstock)', meaning: 'คงเหลือ > Max Level — พิจารณาระบาย' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="ตั้งค่า Threshold">
-                Settings → Stock Threshold Settings — กำหนด Min / Reorder Point / Max ต่อสินค้า · คลัง
-                <p className="mt-1 text-xs italic">ถ้ายังไม่ได้ตั้ง รายการนั้นจะไม่ถูกนับใน Health</p>
-              </HelpSection>
-            </>)}
-          />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สุขภาพสต๊อก</h3>
-          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Stock Health Overview</p>
-
-          {healthData.total === 0 ? (
-            <div className="text-center py-10" style={{ color: 'var(--text-muted)' }}>
-              <AlertTriangle size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">ยังไม่มีการตั้งค่าเกณฑ์สต๊อก</p>
-              <p className="text-xs mt-1">ไปที่ <strong>Low Stock Alerts</strong> เพื่อตั้งค่า</p>
-            </div>
-          ) : (
-            <>
-              <div className="text-center mb-5">
-                <p className="text-3xl font-bold" style={{ color: 'var(--text)' }}>{healthData.total}</p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>รายการที่ตั้งค่าเกณฑ์</p>
-              </div>
-
-              {/* Stacked bar */}
-              <div className="flex h-3 rounded-full overflow-hidden mb-5" style={{ backgroundColor: 'var(--border)' }}>
-                {healthData.critical > 0 && (
-                  <div style={{ width: `${(healthData.critical / healthData.total) * 100}%`, backgroundColor: '#C62828' }} />
-                )}
-                {healthData.warning > 0 && (
-                  <div style={{ width: `${(healthData.warning / healthData.total) * 100}%`, backgroundColor: '#E65100' }} />
-                )}
-                {healthData.normal > 0 && (
-                  <div style={{ width: `${(healthData.normal / healthData.total) * 100}%`, backgroundColor: '#2E7D32' }} />
-                )}
-                {healthData.overstock > 0 && (
-                  <div style={{ width: `${(healthData.overstock / healthData.total) * 100}%`, backgroundColor: '#2E75B6' }} />
-                )}
-              </div>
-
-              {/* Status rows */}
-              <div className="space-y-3">
-                {([
-                  { key: 'critical', label: 'วิกฤต (Critical)', color: '#C62828' },
-                  { key: 'warning', label: 'เฝ้าระวัง (Warning)', color: '#E65100' },
-                  { key: 'normal', label: 'ปกติ (Normal)', color: '#2E7D32' },
-                  { key: 'overstock', label: 'สต๊อกเกิน (Overstock)', color: '#2E75B6' },
-                ] as const).map(({ key, label, color }) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                      <span className="text-sm" style={{ color: 'var(--text)' }}>{label}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>
-                        {healthData[key]}
-                      </span>
-                      <span className="text-xs tabular-nums w-10 text-right" style={{ color: 'var(--text-muted)' }}>
-                        {healthData.total > 0 ? ((healthData[key] / healthData.total) * 100).toFixed(0) : 0}%
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       {/* ====== Section 7 + 8: Top Items + MoM ====== */}
