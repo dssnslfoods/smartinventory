@@ -568,6 +568,154 @@ const sec10Summary = [
   ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
 ];
 
+// ── 11. NEW: 3 Analysis Modes ────────────────────────────────────────────────
+const sec11ThreeModes = [
+  h1('11. 3 Analysis Modes — เลือกตามคำถาม'),
+  para('ฟีเจอร์ใหม่ของ VV Matrix รองรับการคิดคะแนน 3 mode ต่างกัน เพราะ "Validity และ Value ของแต่ละ lot ต่างกันโดยธรรมชาติ" — ผู้ใช้เลือก mode ตามคำถามที่ต้องการตอบ'),
+  spacer(),
+
+  callout('💡 แนวคิดหลัก',
+    ['1 SKU อาจมีหลาย lot ที่หมดอายุไม่พร้อมกัน และมีต้นทุนต่างกัน',
+     '→ การคิดคะแนน "ระดับ lot" คือความจริงที่แม่นยำที่สุด',
+     '→ แต่ในระดับบริหาร การคิดเป็น SKU ก็ยังจำเป็น — โดยต้องเลือกกฎ aggregate ที่ชัดเจน'],
+    COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  h2('11.1 Mode 1 — By Lot (Default)'),
+  para('แต่ละ lot คำนวณคะแนนของตัวเอง — เป็นความจริงที่แม่นยำที่สุด'),
+  formulaBox([
+    'Value Score   = percentile rank ของ lot_amount  (1-5)',
+    'Validity Score = ตาม days_remaining ของ lot นั้น  (1-5)',
+    'Exp Score     = Value × (Validity/5)^α',
+    '',
+    '⇒ 1 lot = 1 หน่วยให้คะแนน',
+    '⇒ 1 SKU อาจมีหลาย lot กระจายอยู่ใน Class A, B, C พร้อมกัน',
+  ]),
+  callout('✅ เหมาะใช้กับ', [
+    '• FEFO Pick List — รู้ว่าหยิบ lot ไหนก่อน',
+    '• การ Write-off lot ที่หมดอายุ',
+    '• GMP / HACCP audit',
+    '• การแจ้งเตือนความเสี่ยงระดับ batch',
+  ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
+  spacer(),
+
+  h2('11.2 Mode 2 — Item Worst-Case (Conservative)'),
+  para('รวมเป็น SKU โดยใช้ "lot ที่ใกล้หมดอายุที่สุด" เป็นตัวกำหนด validity'),
+  formulaBox([
+    'Validity Score = min(lot validity scores)  ← worst-case',
+    'Value Score   = percentile rank ของ Σ(stock_value)',
+    'Exp Score     = Value × (Validity/5)^α',
+    '',
+    'ปรัชญา: "ถ้ามี lot ใดเสี่ยง → SKU นี้เสี่ยง"',
+  ]),
+  callout('✅ เหมาะใช้กับ', [
+    '• Risk Alert ระดับ SKU',
+    '• การหยุดสั่งซื้อ SKU ที่เริ่มมีของหมดอายุ',
+    '• Food safety review',
+    '• Quarterly review เชิงป้องกันความเสี่ยง',
+  ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
+  callout('⚠️ ข้อควรระวัง', [
+    'อาจตัด SKU เป็น Class C ทั้งที่มี lot ใหม่อยู่เยอะ',
+    'เช่น: lot ใหม่ ฿100,000 + lot เก่า ฿100 → SKU ถูกตัดเป็น C เพราะ lot เก่า',
+    '→ ใช้คู่กับ By Lot mode เพื่อดู action รายตัว',
+  ], COLOR_CALLOUT_WARN, COLOR_WARN),
+  spacer(),
+
+  h2('11.3 Mode 3 — Item Weighted (Realistic)'),
+  para('รวมเป็น SKU โดยถ่วงน้ำหนัก validity ของแต่ละ lot ด้วยมูลค่า'),
+  formulaBox([
+    'Avg Days = Σ(lot_days × lot_value) / Σ(lot_value)',
+    'Validity Score = scoring(Avg Days)  ← weighted average',
+    'Value Score   = percentile rank ของ Σ(stock_value)',
+    'Exp Score     = Value × (Validity/5)^α',
+    '',
+    'ปรัชญา: "ความสดของเงินที่จมใน SKU นี้โดยเฉลี่ย"',
+  ]),
+  callout('✅ เหมาะใช้กับ', [
+    '• การตั้งราคา / ส่วนลด',
+    '• Pricing strategy',
+    '• การเจรจา Supplier (สั่งลด/เพิ่ม)',
+    '• การวางงบประมาณ',
+  ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
+  callout('⚠️ ข้อควรระวัง', [
+    'lot ใกล้หมดที่มูลค่าน้อยจะถูกบดบัง',
+    'เช่น: lot ใหม่ ฿100,000 + lot หมดอายุ ฿100 → SKU ดูสด (เกือบ Class A) ทั้งที่มี lot หมดอายุปนอยู่',
+    '→ ใช้คู่กับ Worst-Case mode',
+  ], COLOR_CALLOUT_WARN, COLOR_WARN),
+  spacer(),
+
+  h2('11.4 ตัวอย่างเปรียบเทียบ — SKU เดียว 3 Mode'),
+  para('สมมติ SKU "F7000100206 Smoked Salmon" มี 3 lot:'),
+  buildTable(
+    [
+      { label: 'Lot', weight: 0.20 },
+      { label: 'มูลค่า', weight: 0.20 },
+      { label: 'วันหมดอายุ', weight: 0.20 },
+      { label: 'Days Left', weight: 0.20 },
+      { label: 'Validity', weight: 0.20, align: AlignmentType.CENTER },
+    ],
+    [
+      ['Lot A', '฿100,000', 'มี.ค. 2027', '+335 วัน', { text: '5', color: COLOR_GOOD, bold: true, align: AlignmentType.CENTER }],
+      ['Lot B', '฿20,000',  'มิ.ย. 2026',  '+45 วัน',  { text: '3', color: COLOR_WARN, bold: true, align: AlignmentType.CENTER }],
+      ['Lot C', '฿5,000',   'พ.ค. 2026',   '−10 วัน',  { text: '1', color: COLOR_BAD,  bold: true, align: AlignmentType.CENTER }],
+    ],
+  ),
+  spacer(),
+  para('SKU มี Total Value = ฿125,000 → Value Score (rank) สมมติ = 4'),
+  spacer(),
+
+  para('ผลลัพธ์ของแต่ละ Mode (α=3):', { bold: true }),
+  buildTable(
+    [
+      { label: 'Mode', weight: 0.32 },
+      { label: 'Validity ที่ใช้', weight: 0.25 },
+      { label: 'Exp Score', weight: 0.23 },
+      { label: 'Class', weight: 0.20, align: AlignmentType.CENTER },
+    ],
+    [
+      ['🧾 By Lot — Lot A',        '5',              '4 × (5/5)³ = 4.00',  { text: 'A', bold: true, color: COLOR_GOOD, align: AlignmentType.CENTER }],
+      ['🧾 By Lot — Lot B',        '3',              '4 × (3/5)³ = 0.86',  { text: 'C', bold: true, color: COLOR_BAD,  align: AlignmentType.CENTER }],
+      ['🧾 By Lot — Lot C',        '1',              '4 × (1/5)³ = 0.03',  { text: 'C', bold: true, color: COLOR_BAD,  align: AlignmentType.CENTER }],
+      ['⚠️ Item Worst-Case',       '1 (min)',         '4 × (1/5)³ = 0.03',  { text: 'C', bold: true, color: COLOR_BAD,  align: AlignmentType.CENTER }],
+      ['⚖️ Item Weighted',         '~4.76 (avg-by-$)', '4 × (4.76/5)³ = 3.45', { text: 'B', bold: true, color: COLOR_WARN, align: AlignmentType.CENTER }],
+    ],
+  ),
+  spacer(),
+
+  callout('🎯 บทเรียนจากตัวอย่างนี้', [
+    '• By Lot ชี้ตรงๆ ว่า Lot C ต้อง write-off, Lot B ใกล้หมด, Lot A ยังขายดี',
+    '• Item Worst-Case ระบุ SKU เป็น C → ใช้เป็น Alert "ระวัง SKU นี้"',
+    '• Item Weighted ระบุ SKU เป็น B → สะท้อนภาพรวมว่ายังมีของดีอยู่เยอะ',
+    '• ทั้ง 3 mode "ส่งเสริมกัน" — ไม่ใช่แทนกัน',
+  ], COLOR_CALLOUT_INFO, COLOR_ACCENT),
+  spacer(),
+
+  h2('11.5 เกณฑ์การเลือก Mode'),
+  buildTable(
+    [
+      { label: 'สถานการณ์ / คำถาม', weight: 0.55 },
+      { label: 'Mode ที่แนะนำ', weight: 0.45, align: AlignmentType.CENTER },
+    ],
+    [
+      ['"วันนี้ต้องหยิบ lot ไหน?"',                            '🧾 By Lot'],
+      ['"มี lot ไหนที่ต้อง Write-off?"',                         '🧾 By Lot'],
+      ['"มี SKU ไหนกำลังเสี่ยง?" (alert ระดับ SKU)',             '⚠️ Item Worst-Case'],
+      ['"ควรหยุดสั่งซื้อ SKU ไหน?"',                            '⚠️ Item Worst-Case'],
+      ['"จะตั้งราคา/ส่วนลดให้ SKU ไหน?"',                       '⚖️ Item Weighted'],
+      ['"ภาพรวม SKU นี้ในเชิงงบประมาณเป็นอย่างไร?"',           '⚖️ Item Weighted'],
+      ['"กลุ่มสินค้าแต่ละกลุ่มเป็นอย่างไร?"',                    '🧾 By Lot (ที่ Group Analysis)'],
+    ],
+  ),
+  spacer(),
+
+  callout('📌 สรุปข้อสำคัญ', [
+    '• Lot mode คือ "ความจริง" — Item modes คือ "การสรุป"',
+    '• Item modes ทั้งสองรวม lot ขึ้นมา → ใช้ lot จริงเป็นพื้นฐานเหมือนกัน',
+    '• ระบบบันทึก expire จาก Lot Inventory โดยตรง (ไม่ใช่ items.expire_date)',
+    '• สลับ mode ได้ทันที — ทุกตัวเลข/ตาราง/กราฟอัพเดทตาม mode',
+  ], COLOR_CALLOUT_GOOD, COLOR_GOOD),
+];
+
 // ── Document ─────────────────────────────────────────────────────────────────
 const doc = new Document({
   creator: 'SmartInventory · NSL Food Service',
@@ -620,6 +768,7 @@ const doc = new Document({
       ...sec8Compare,
       ...sec9Whatif,
       ...sec10Summary,
+      ...sec11ThreeModes,
     ],
   }],
 });
