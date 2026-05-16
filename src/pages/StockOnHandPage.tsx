@@ -6,6 +6,7 @@ import { WAREHOUSES, ITEM_GROUPS } from '@/types/database';
 import { exportToExcel } from '@/utils/export';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import { PageHeader } from '@/components/PageHeader';
+import { InfoTooltip } from '@/components/InfoTooltip';
 
 export function StockOnHandPage() {
   const [warehouse, setWarehouse] = useState('');
@@ -165,16 +166,82 @@ export function StockOnHandPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* ── Total Stock Lines ─────────────────────────────────────────── */}
         <div className="card">
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Stock Lines</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Stock Lines</p>
+            <InfoTooltip title="Total Stock Lines คืออะไร?">
+              <p className="mb-2">จำนวน <strong>"บรรทัด" สต็อก</strong> ทั้งหมด = (สินค้า × คลัง × snapshot) ที่ยังมีของอยู่ใน v_stock_onhand</p>
+              <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p className="font-mono mb-1.5 pb-1.5 border-b" style={{ color: 'var(--text)', borderColor: 'var(--border)' }}>
+                  COUNT(*) WHERE current_stock &gt; 0
+                </p>
+                <div className="flex justify-between"><span>SKU ที่ Active</span><span className="font-mono tabular-nums">{formatNumber(totalItems)} บรรทัด</span></div>
+              </div>
+              <p className="mt-2 mb-1"><strong>จะวิเคราะห์ได้</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>1 สินค้าอยู่ในหลายคลัง = หลายบรรทัด</li>
+                <li>เลขนี้สูง = สินค้ากระจายในคลังเยอะ → SKU ซ้ำซ้อนหรือคลังกระจายตัวเกิน</li>
+                <li>เปรียบเทียบกับจำนวน SKU master (items table) เพื่อดูสัดส่วน "ที่ active"</li>
+              </ul>
+              <p className="mt-2 text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                ใช้ตัวกรอง "เรียงตามมูลค่าสูง→ต่ำ" เพื่อหาบรรทัดที่กิน working capital มากที่สุด
+              </p>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</p>
         </div>
+
+        {/* ── Total Stock Value ─────────────────────────────────────────── */}
         <div className="card">
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Stock Value</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Stock Value</p>
+            <InfoTooltip title="Total Stock Value คืออะไร?">
+              <p className="mb-2">มูลค่ารวมของสินค้าคงเหลือทั้งหมด — คือ <strong>Working Capital ที่ "จม" อยู่ในคลัง</strong></p>
+              <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p className="font-mono mb-1.5 pb-1.5 border-b" style={{ color: 'var(--text)', borderColor: 'var(--border)' }}>
+                  Σ (current_stock × moving_avg_cost)
+                </p>
+                <div className="flex justify-between"><span>Inventory Value</span><span className="font-mono tabular-nums font-bold">{formatCurrency(totalValue)}</span></div>
+              </div>
+              <p className="mt-2 mb-1"><strong>จะวิเคราะห์ได้</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>คือเงินสดที่ถูกแช่ไว้ในสินค้า — ไม่สามารถใช้หมุนเวียนได้</li>
+                <li>Carrying Cost ประมาณ <strong>15%/ปี</strong> ของมูลค่านี้ (ค่าเก็บรักษา ดอกเบี้ย ความเสี่ยงเสียหาย)</li>
+                <li>ใช้คู่กับ <strong>Inventory Turnover</strong> (Dashboard) — Stock Value / COGS = Days Inventory</li>
+              </ul>
+              <p className="mt-2 text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                ⚠ ยิ่งสูง → ต้องการเงินสดมาก · เสี่ยง Dead Stock มากขึ้น
+              </p>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</p>
         </div>
+
+        {/* ── Avg Value per Line ────────────────────────────────────────── */}
         <div className="card">
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Avg Value per Line</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Avg Value per Line</p>
+            <InfoTooltip title="Avg Value per Line คืออะไร?">
+              <p className="mb-2">มูลค่าเฉลี่ยต่อบรรทัด — ช่วยบอกว่าโดยรวม <strong>สินค้าราคาสูงหรือต่ำ</strong></p>
+              <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p className="font-mono mb-1.5 pb-1.5 border-b" style={{ color: 'var(--text)', borderColor: 'var(--border)' }}>
+                  Total Stock Value ÷ Total Stock Lines
+                </p>
+                <div className="flex justify-between"><span>{formatCurrency(totalValue)}</span><span className="font-mono tabular-nums">÷ {formatNumber(totalItems)}</span></div>
+                <div className="flex justify-between font-bold mt-0.5"><span>= Avg / Line</span><span className="font-mono tabular-nums">{formatCurrency(totalItems > 0 ? totalValue / totalItems : 0)}</span></div>
+              </div>
+              <p className="mt-2 mb-1"><strong>จะวิเคราะห์ได้</strong></p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>สูง = ส่วนใหญ่เป็นสินค้าราคาแพง (เนื้อ Premium, Seafood) → ใช้เงินทุนต่อหน่วยสูง</li>
+                <li>ต่ำ = มีสินค้าราคาถูกจำนวนมาก (Packaging, Daily Goods)</li>
+                <li>ดู outlier — กรอง "&gt; ฿1M" จะเหลือเฉพาะบรรทัดที่กิน working capital มากผิดปกติ</li>
+              </ul>
+              <p className="mt-2 text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                เทคนิค: ถ้า Avg พุ่งสูงผิดปกติ ให้ดูว่ามีบรรทัดเดียวที่มูลค่าโตเกินไป (Pareto 80/20)
+              </p>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text)' }}>
             {formatCurrency(totalItems > 0 ? totalValue / totalItems : 0)}
           </p>
