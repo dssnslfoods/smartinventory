@@ -1539,17 +1539,33 @@ function TurnoverTab() {
     };
   }, [data]);
 
+  /**
+   * Sort the entire dataset locally by turnover_ratio desc so the chart's
+   * Top-20 view and the full table below always agree on order, even if the
+   * DB query later changes its default ordering. nulls land at the bottom.
+   */
+  const sortedData = useMemo(() => {
+    const list = [...(data ?? [])];
+    list.sort((a, b) => {
+      const av = a.turnover_ratio === null ? -Infinity : Number(a.turnover_ratio);
+      const bv = b.turnover_ratio === null ? -Infinity : Number(b.turnover_ratio);
+      return bv - av;
+    });
+    return list;
+  }, [data]);
+
   const chartData = useMemo(() =>
-    (data ?? []).slice(0, 20).map(r => ({
+    sortedData.slice(0, 20).map(r => ({
       item_code:      r.item_code,
+      itemname:       r.itemname,
       turnover_ratio: Number(r.turnover_ratio ?? 0),
       days_on_hand:   Number(r.days_on_hand   ?? 0),
     })),
-    [data],
+    [sortedData],
   );
 
   const handleExport = () => {
-    exportToExcel((data ?? []).map(r => ({
+    exportToExcel(sortedData.map(r => ({
       'Item Code':      r.item_code,
       'Item Name':      r.itemname,
       'Group':          r.group_name,
@@ -1610,7 +1626,12 @@ function TurnoverTab() {
               <YAxis type="category" dataKey="item_code" width={90} stroke="var(--text-muted)" fontSize={10} />
               <Tooltip {...tooltipStyle}
                 formatter={(val: unknown, name?: string) =>
-                  name === 'turnover_ratio' ? [`${Number(val).toFixed(1)}×`, 'Turnover'] : [`${Number(val).toFixed(0)} days`, 'Days on Hand']}
+                  name === 'turnover_ratio' ? [`${Number(val).toFixed(2)}×`, 'Turnover'] : [`${Number(val).toFixed(0)} days`, 'Days on Hand']}
+                labelFormatter={(itemCode) => {
+                  const code = String(itemCode ?? '');
+                  const row = chartData.find(d => d.item_code === code);
+                  return row ? `${code} — ${row.itemname}` : code;
+                }}
               />
               <Bar dataKey="turnover_ratio" name="turnover_ratio" radius={[0, 4, 4, 0]} barSize={14}>
                 {chartData.map((d, i) => (
@@ -1653,7 +1674,7 @@ function TurnoverTab() {
                 </tr>
               </thead>
               <tbody>
-                {(data ?? []).map((row) => (
+                {sortedData.map((row) => (
                   <tr key={row.item_code}>
                     <td className="px-2 py-2 font-mono text-xs font-medium truncate" style={{ color: 'var(--color-primary-light)' }} title={row.item_code}>
                       {row.item_code}
@@ -1685,7 +1706,7 @@ function TurnoverTab() {
                     </td>
                   </tr>
                 ))}
-                {(data ?? []).length === 0 && (
+                {sortedData.length === 0 && (
                   <tr><td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
                 )}
               </tbody>
