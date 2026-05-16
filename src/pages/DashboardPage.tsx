@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import {
-  DollarSign, Package, Clock, ArrowLeftRight,
-  TrendingUp, TrendingDown, CalendarRange, Activity,
+  DollarSign, Package, Clock, ArrowLeftRight, RefreshCw,
+  TrendingUp, TrendingDown, CalendarRange, Activity, AlertTriangle,
+  Layers, Target, Banknote,
 } from 'lucide-react';
 import {
   ComposedChart, PieChart, BarChart,
@@ -11,15 +12,31 @@ import {
 import {
   useKPI, useStockOnHand, useMovementMonthly,
   useTransactions, useDataDateRange,
+  useSlowMoving, useInventoryTurnover,
+  useLatestLotSnapshot, useLotAging, useMonthlyTotal,
 } from '@/hooks/useSupabaseQuery';
 import {
   formatNumber, formatCurrency, formatDate, formatDateTime,
   formatThaiMonthRange, formatCompact,
 } from '@/utils/format';
-import { HelpButton, HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
+import { HelpButton, HelpSection, HelpLegend } from '@/components/HelpButton';
+import { InfoTooltip } from '@/components/InfoTooltip';
 
-// ── Color constants ──────────────────────────────────────────────────────────
-const GROUP_COLORS = ['#1F3864', '#2E75B6', '#00897B', '#E65100'];
+// ── Color tokens ─────────────────────────────────────────────────────────────
+const COLORS = {
+  primary:   '#1F3864',
+  primary2:  '#2E75B6',
+  teal:      '#00897B',
+  green:     '#16a34a',
+  amber:     '#d97706',
+  orange:    '#E65100',
+  red:       '#dc2626',
+  redDark:   '#7f1d1d',
+  purple:    '#7c3aed',
+  muted:     '#64748b',
+};
+
+const GROUP_COLORS = ['#1F3864', '#2E75B6', '#00897B', '#E65100', '#7B1FA2', '#C62828', '#0891B2'];
 
 const WHS_TYPE_COLORS: Record<string, string> = {
   FG: '#1F3864', RM: '#2E75B6', PD: '#00897B',
@@ -31,6 +48,22 @@ function getWhsColor(code: string): string {
   const prefix = code.split('-')[1]?.substring(0, 2) ?? '';
   return WHS_TYPE_COLORS[prefix] ?? WHS_TYPE_COLORS[code.split('-')[0]] ?? '#64748b';
 }
+
+const AGING_BUCKETS: Record<string, { label: string; color: string }> = {
+  expired: { label: 'หมดอายุแล้ว',  color: '#7f1d1d' },
+  '0-30':  { label: '≤ 30 วัน',     color: '#dc2626' },
+  '31-60': { label: '31–60 วัน',    color: '#ea580c' },
+  '61-90': { label: '61–90 วัน',    color: '#d97706' },
+  '91-180':{ label: '91–180 วัน',   color: '#65a30d' },
+  '180+':  { label: '> 180 วัน',    color: '#16a34a' },
+  unknown: { label: 'ไม่ระบุ',       color: '#94a3b8' },
+};
+
+const MOVEMENT_HEALTH_COLORS = {
+  normal:      '#16a34a',
+  slow_moving: '#d97706',
+  dead_stock:  '#dc2626',
+};
 
 const tooltipStyle = {
   contentStyle: {
@@ -45,11 +78,16 @@ const tooltipStyle = {
 // ── Main Component ───────────────────────────────────────────────────────────
 export function DashboardPage() {
   // === Data hooks ===
-  const { data: kpi, isLoading: kpiLoading } = useKPI();
-  const { data: stockData } = useStockOnHand();
-  const { data: monthlyData, isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
-  const { data: recentTx } = useTransactions({ page: 0, pageSize: 200 });
-  const { data: dataDateRange } = useDataDateRange();
+  const { data: kpi, isLoading: kpiLoading }            = useKPI();
+  const { data: stockData = [] }                         = useStockOnHand();
+  const { data: monthlyData = [], isLoading: monthlyLoading } = useMovementMonthly({ months: 12 });
+  const { data: recentTx }                               = useTransactions({ page: 0, pageSize: 200 });
+  const { data: dataDateRange }                          = useDataDateRange();
+  const { data: slowData = [] }                          = useSlowMoving();
+  const { data: turnoverData = [] }                      = useInventoryTurnover();
+  const { data: latestSnapshot }                         = useLatestLotSnapshot();
+  const { data: lotAging = [] }                          = useLotAging(latestSnapshot);
+  const { data: monthlyTotal = [] }                      = useMonthlyTotal(12);
 
   // === Derived data ===
   const dateRange = useMemo(() => {
@@ -58,13 +96,77 @@ export function DashboardPage() {
   }, [dataDateRange]);
 
   const movementTrend = useMemo(
-    () => (monthlyData ?? []).map((m) => ({ ...m, net: m.In - m.Out })),
+    () => monthlyData.map((m) => ({
+      ...m, net: m.In - m.Out,
+      label: new Date(m.month).toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }),
+    })),
     [monthlyData],
   );
 
+  // ── Financial KPIs (Inventory Turnover, DIO, Carrying Cost) ────────────────
+  const financialKpi = useMemo(() => {
+    // Total inventory value (Moving Avg)
+    const invValue = stockData.reduce((s, x) => s + Number(x.stock_value), 0);
+    // 12-month COGS proxy = sum of out_value over last 12 months
+    const cogs12mo = monthlyTotal.reduce((s, m) => s + Number(m.out_value ?? 0), 0);
+    const turnover = invValue > 0 ? cogs12mo / invValue : 0;
+    const dio = turnover > 0 ? Math.round(365 / turnover) : null;
+    return { invValue, cogs12mo, turnover, dio };
+  }, [stockData, monthlyTotal]);
+
+  // ── Stock Movement Health (Active / Slow / Dead) ───────────────────────────
+  const movementHealth = useMemo(() => {
+    const counts = { normal: 0, slow_moving: 0, dead_stock: 0 };
+    const values = { normal: 0, slow_moving: 0, dead_stock: 0 };
+    for (const r of slowData) {
+      const status = r.movement_status as keyof typeof counts;
+      if (status in counts) {
+        counts[status]++;
+        values[status] += Number(r.stock_value);
+      }
+    }
+    const total = counts.normal + counts.slow_moving + counts.dead_stock;
+    return {
+      counts, values, total,
+      deadPct: total > 0 ? (counts.dead_stock / total) * 100 : 0,
+    };
+  }, [slowData]);
+
+  // ── Lot Aging Distribution (for the donut) ─────────────────────────────────
+  const agingData = useMemo(() => {
+    const map = new Map<string, { lots: number; value: number }>();
+    for (const a of lotAging) {
+      const key = a.aging_bucket;
+      const cur = map.get(key) ?? { lots: 0, value: 0 };
+      cur.lots  += Number(a.lot_count);
+      cur.value += Number(a.total_value);
+      map.set(key, cur);
+    }
+    return Object.entries(AGING_BUCKETS).map(([key, meta]) => ({
+      key,
+      label: meta.label,
+      color: meta.color,
+      lots:  map.get(key)?.lots  ?? 0,
+      value: map.get(key)?.value ?? 0,
+    })).filter(b => b.lots > 0);
+  }, [lotAging]);
+
+  const totalAgingValue = agingData.reduce((s, b) => s + b.value, 0);
+  const expiringSoon = useMemo(() => {
+    const expired = agingData.find(a => a.key === 'expired') ?? { lots: 0, value: 0 };
+    const soon30  = agingData.find(a => a.key === '0-30')   ?? { lots: 0, value: 0 };
+    return {
+      lots:  expired.lots  + soon30.lots,
+      value: expired.value + soon30.value,
+      expiredLots:  expired.lots,
+      expiredValue: expired.value,
+    };
+  }, [agingData]);
+
+  // ── Inventory Value by Group ───────────────────────────────────────────────
   const stockByGroup = useMemo(() => {
     const map = new Map<string, number>();
-    for (const s of stockData ?? []) {
+    for (const s of stockData) {
       const name = (s.group_name ?? '').split('-')[0].trim();
       map.set(name, (map.get(name) ?? 0) + Number(s.stock_value));
     }
@@ -78,9 +180,10 @@ export function DashboardPage() {
     [stockByGroup],
   );
 
+  // ── Warehouse Stock Value ──────────────────────────────────────────────────
   const stockByWarehouse = useMemo(() => {
     const map = new Map<string, { warehouse: string; whs_name: string; value: number }>();
-    for (const s of stockData ?? []) {
+    for (const s of stockData) {
       const prev = map.get(s.warehouse) ?? { warehouse: s.warehouse, whs_name: s.whs_name, value: 0 };
       prev.value += Number(s.stock_value);
       map.set(s.warehouse, prev);
@@ -88,11 +191,11 @@ export function DashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.value - a.value).slice(0, 10);
   }, [stockData]);
 
+  // ── Top Moved Items (last 30 days from recent transactions) ────────────────
   const itemNameMap = useMemo(() => {
     const map = new Map<string, string>();
-    for (const s of stockData ?? []) {
+    for (const s of stockData) {
       if (!map.has(s.item_code)) {
-        // Fallback to item_name if itemname is not yet available from the view
         map.set(s.item_code, s.itemname || (s as any).item_name || '—');
       }
     }
@@ -113,8 +216,30 @@ export function DashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.totalMoved - a.totalMoved).slice(0, 10);
   }, [recentTx]);
 
+  // ── Action Items: Top "Cash Trapped" (high value × slow turnover) ──────────
+  const cashTrapped = useMemo(() => {
+    return turnoverData
+      .filter(t => Number(t.current_stock_value) > 0)
+      .map(t => {
+        const value = Number(t.current_stock_value);
+        const turnover = Number(t.turnover_ratio ?? 0);
+        const holdScore = value * (1 / Math.max(turnover, 0.1));
+        return {
+          item_code: t.item_code,
+          itemname: t.itemname,
+          group: (t.group_name ?? '').split('-')[0],
+          value,
+          turnover,
+          holdScore,
+        };
+      })
+      .sort((a, b) => b.holdScore - a.holdScore)
+      .slice(0, 5);
+  }, [turnoverData]);
+
+  // ── MoM Comparison ─────────────────────────────────────────────────────────
   const mom = useMemo(() => {
-    if (!monthlyData || monthlyData.length < 2) return null;
+    if (monthlyData.length < 2) return null;
     const curr = monthlyData[monthlyData.length - 1];
     const prev = monthlyData[monthlyData.length - 2];
     const pct = (c: number, p: number) => (p === 0 ? 0 : ((c - p) / Math.abs(p)) * 100);
@@ -123,271 +248,277 @@ export function DashboardPage() {
       prevMonth: prev.month,
       inCurr: curr.In, inPrev: prev.In, inPct: pct(curr.In, prev.In),
       outCurr: curr.Out, outPrev: prev.Out, outPct: pct(curr.Out, prev.Out),
-      netCurr: curr.In - curr.Out, netPrev: prev.In - prev.Out,
-      amtCurr: curr.total_amount, amtPrev: prev.total_amount,
-      amtPct: pct(curr.total_amount, prev.total_amount),
     };
   }, [monthlyData]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* ====== Section 1: Data Period Banner ====== */}
+      {/* ====== Section 1: Period Banner ====== */}
       <div
         className="card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
         style={{
-          borderLeft: '4px solid var(--color-primary)',
+          borderLeft: `4px solid ${COLORS.primary}`,
           background: 'linear-gradient(135deg, rgba(31,56,100,0.06) 0%, rgba(46,117,182,0.04) 100%)',
         }}
       >
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(31,56,100,0.1)' }}>
-            <CalendarRange size={22} style={{ color: 'var(--color-primary)' }} />
+            <CalendarRange size={22} style={{ color: COLORS.primary }} />
           </div>
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
-              {dateRange ? formatThaiMonthRange(dateRange.min, dateRange.max) : 'Loading...'}
+              {dateRange ? formatThaiMonthRange(dateRange.min, dateRange.max) : 'ภาพรวมการดำเนินงาน'}
             </h2>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               NSL Food Service — Inventory Intelligence Platform
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--text-muted)' }}>
-          {dataDateRange && (
-            <span className="badge badge-info">{formatNumber(dataDateRange.totalTransactions)} transactions</span>
+        <div className="flex items-center gap-3 text-xs flex-wrap">
+          {recentTx?.count != null && (
+            <span className="px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: 'rgba(31,56,100,0.1)', color: COLORS.primary }}>
+              {formatNumber(recentTx.count)} transactions
+            </span>
           )}
-          {kpi?.lastSync && (
-            <span>Synced: {formatDateTime(kpi.lastSync)}</span>
+          {latestSnapshot && (
+            <span style={{ color: 'var(--text-muted)' }}>
+              Lot Snapshot: <strong style={{ color: 'var(--text)' }}>{formatDate(latestSnapshot)}</strong>
+            </span>
           )}
+          <span style={{ color: 'var(--text-muted)' }}>
+            Synced: <strong style={{ color: 'var(--text)' }}>{kpi?.lastSync ? formatDateTime(kpi.lastSync) : '–'}</strong>
+          </span>
         </div>
       </div>
 
-      {/* ====== Section 2: Executive KPI Row ====== */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <KPICard
-          icon={<DollarSign size={20} />}
-          label="มูลค่าคงคลังรวม"
-          value={kpiLoading ? '...' : `฿${formatCompact(kpi?.totalStockValue ?? 0)}`}
-          sublabel="Total Stock Value"
-          color="#1F3864"
-          help={{
-            title: 'มูลค่าคงคลังรวม (Total Stock Value)',
-            body: (<>
-              <HelpSection title="คืออะไร">มูลค่ารวมของสินค้าทั้งหมดที่มีในทุกคลัง — ใช้รายงานทางบัญชี/ผู้บริหาร</HelpSection>
-              <HelpSection title="คำนวณยังไง">
-                <HelpFormula>Σ (จำนวนคงเหลือ × Moving Avg Cost) ของทุกรายการ × ทุกคลัง</HelpFormula>
-                จำนวนคงเหลือมาจาก Σ in_qty − Σ out_qty ของทุก transaction
-              </HelpSection>
-              <HelpSection title="ข้อสังเกต">
-                ตัวเลขจะเปลี่ยนทุกครั้งที่ Import ข้อมูลใหม่ — เวลาที่อัปเดตล่าสุดดูที่ KPI "อัปเดตล่าสุด"
-              </HelpSection>
-            </>),
-          }}
+      {/* ====== Section 2: Executive Health KPI Strip (6 cards) ====== */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <KpiCard
+          icon={<Banknote size={18} />}
+          label="Working Capital"
+          value={kpiLoading ? '...' : `฿${formatCompact(financialKpi.invValue)}`}
+          sublabel="เงินจมในคลัง (Moving Avg)"
+          color={COLORS.primary}
+          tooltipTitle="Working Capital"
+          tooltip={<>
+            <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน (Moving Avg)</p>
+            <p>ยิ่งสูง → ยิ่งต้องการกระแสเงินสด · ยิ่งเสีย Carrying Cost ต่อปี</p>
+          </>}
         />
-        <KPICard
-          icon={<Package size={20} />}
-          label="สินค้า Active"
+        <KpiCard
+          icon={<RefreshCw size={18} />}
+          label="Inventory Turnover"
+          value={kpiLoading ? '...' : `${financialKpi.turnover.toFixed(2)}×`}
+          sublabel={`/ปี · COGS ฿${formatCompact(financialKpi.cogs12mo)}`}
+          color={financialKpi.turnover >= 4 ? COLORS.green : financialKpi.turnover >= 1 ? COLORS.amber : COLORS.red}
+          tooltipTitle="Inventory Turnover"
+          tooltip={<>
+            <p className="font-mono text-[11px] p-2 rounded mb-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              Turnover = COGS / Inventory
+            </p>
+            <ul className="list-disc ml-4 space-y-0.5">
+              <li>🟢 ≥ 4×/ปี — ดี (อาหาร)</li>
+              <li>🟠 1-4× — ปานกลาง</li>
+              <li>🔴 &lt; 1× — ของค้าง</li>
+            </ul>
+          </>}
+        />
+        <KpiCard
+          icon={<Clock size={18} />}
+          label="Days Inventory"
+          value={financialKpi.dio == null ? 'N/A' : `${financialKpi.dio} วัน`}
+          sublabel="365 / Turnover"
+          color={financialKpi.dio == null ? COLORS.muted : financialKpi.dio <= 90 ? COLORS.green : financialKpi.dio <= 180 ? COLORS.amber : COLORS.red}
+          tooltipTitle="Days Inventory Outstanding (DIO)"
+          tooltip="ของอยู่ในคลังเฉลี่ยกี่วันก่อนถูกขายออก · อาหารควร ≤ 90 วัน"
+        />
+        <KpiCard
+          icon={<Package size={18} />}
+          label="Active SKUs"
           value={kpiLoading ? '...' : formatNumber(kpi?.activeItems ?? 0)}
-          sublabel="Active Items"
-          color="#2E75B6"
-          help={{
-            title: 'สินค้า Active (Active Items)',
-            body: (<>
-              <HelpSection title="คืออะไร">จำนวนรหัสสินค้าที่ "ยังคล่องตัว" — มีการเคลื่อนไหวรับ/จ่ายภายในระยะที่กำหนด</HelpSection>
-              <HelpSection title="ปรับเกณฑ์ได้ที่">
-                Settings → System Configuration → <strong>Active Item Threshold (Days)</strong>
-                <p className="mt-1 text-xs">ค่า default คือ 90 วัน — สินค้าที่ไม่เคลื่อนไหวเกินกว่านี้จะไม่ถูกนับ</p>
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">ตัดสินใจว่าจะเก็บ SKU ไว้กี่รายการในระบบ — ลด Dead Stock</HelpSection>
-            </>),
-          }}
+          sublabel="มี tx ใน 90 วัน"
+          color={COLORS.teal}
+          tooltipTitle="Active SKUs"
+          tooltip="จำนวนรหัสสินค้าที่มีการเคลื่อนไหวใน 90 วันที่ผ่านมา"
         />
-        <KPICard
-          icon={<ArrowLeftRight size={20} />}
-          label="เคลื่อนไหว/เดือน"
-          value={monthlyLoading ? '...' : formatNumber(
-            (movementTrend.at(-1)?.In ?? 0) + (movementTrend.at(-1)?.Out ?? 0), 0,
-          )}
-          sublabel="Monthly Movement (qty)"
-          color="#00897B"
-          trend={mom ? {
-            pct: ((mom.inCurr + mom.outCurr) - (mom.inPrev + mom.outPrev)) / Math.max(mom.inPrev + mom.outPrev, 1) * 100,
-          } : undefined}
-          help={{
-            title: 'เคลื่อนไหว/เดือน (Monthly Movement)',
-            body: (<>
-              <HelpSection title="คืออะไร">จำนวนหน่วยรวม (รับเข้า + จ่ายออก) ของเดือนล่าสุดในข้อมูล</HelpSection>
-              <HelpSection title="แท็ก % สีเขียว/แดง">
-                <HelpLegend items={[
-                  { color: '#2E7D32', label: '↑ สีเขียว', meaning: 'เพิ่มขึ้นเทียบกับเดือนก่อนหน้า' },
-                  { color: '#C62828', label: '↓ สีแดง',   meaning: 'ลดลงเทียบกับเดือนก่อนหน้า' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">ดูภาพรวมการดำเนินงาน — ช่วงไหน busy ช่วงไหน slow</HelpSection>
-            </>),
-          }}
+        <KpiCard
+          icon={<AlertTriangle size={18} />}
+          label="Expiring ≤ 30 วัน"
+          value={formatNumber(expiringSoon.lots)}
+          sublabel={`${expiringSoon.expiredLots > 0 ? `🔴 หมดแล้ว ${expiringSoon.expiredLots} lots · ` : ''}฿${formatCompact(expiringSoon.value)}`}
+          color={expiringSoon.expiredLots > 0 ? COLORS.red : expiringSoon.lots > 0 ? COLORS.amber : COLORS.green}
+          tooltipTitle="Lots ใกล้หมดอายุ"
+          tooltip={<>
+            <p className="mb-2">จำนวน lot ที่หมดอายุไปแล้ว + จะหมดใน 30 วัน + มูลค่าที่เสี่ยง</p>
+            <p><strong>Action:</strong> ดู FEFO Pick List หรือ Lot Inventory เพื่อเร่งระบาย</p>
+          </>}
         />
-        <KPICard
-          icon={<Clock size={20} />}
-          label="อัปเดตล่าสุด"
-          value={kpi?.lastSync ? new Date(kpi.lastSync).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '–'}
-          sublabel={kpi?.lastSync ? new Date(kpi.lastSync).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : 'Last Sync'}
-          color="#00897B"
-          help={{
-            title: 'อัปเดตล่าสุด (Last Sync)',
-            body: (<>
-              <HelpSection title="คืออะไร">วันเวลาที่ Import ข้อมูลครั้งล่าสุดเข้าระบบ — บอกว่าตัวเลขทุกตัวบน Dashboard เป็นปัจจุบันถึงเมื่อใด</HelpSection>
-              <HelpSection title="ทำไมสำคัญ">
-                หาก Last Sync ห่างจากปัจจุบันหลายวัน อาจหมายถึงข้อมูล stock ล้าสมัย
-                ควร Import ทุกสิ้นวันหรือทุกครั้งที่ปิดงวดเพื่อให้ตัวเลขแม่น
-              </HelpSection>
-              <HelpSection title="วิธี Import">เมนู Data Import (สำหรับ Admin / Supervisor)</HelpSection>
-            </>),
-          }}
+        <KpiCard
+          icon={<TrendingDown size={18} />}
+          label="Dead Stock %"
+          value={`${movementHealth.deadPct.toFixed(1)}%`}
+          sublabel={`${movementHealth.counts.dead_stock} items · ฿${formatCompact(movementHealth.values.dead_stock)}`}
+          color={movementHealth.deadPct <= 5 ? COLORS.green : movementHealth.deadPct <= 15 ? COLORS.amber : COLORS.red}
+          tooltipTitle="Dead Stock %"
+          tooltip="สินค้าที่ไม่มีการเคลื่อนไหวเลย ≥ 180 วัน · มาตรฐานควร < 5%"
         />
       </div>
 
-      {/* ====== Section 3 + 4: Movement Trend + Donut ====== */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Movement Trend */}
-        <div className="lg:col-span-3 card relative">
-          <HelpButton
-            title="แนวโน้มการเคลื่อนไหวสินค้า (Movement Trend)"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                <HelpLegend items={[
-                  { color: '#2E7D32', label: 'พื้นที่สีเขียว (รับเข้า)', meaning: 'จำนวนหน่วยที่รับเข้าคลังในแต่ละเดือน' },
-                  { color: '#C62828', label: 'พื้นที่สีแดง (จ่ายออก)',   meaning: 'จำนวนหน่วยที่จ่ายออกคลังในแต่ละเดือน' },
-                  { color: '#1F3864', label: 'เส้นประน้ำเงิน (Net)',     meaning: 'ผลต่าง รับเข้า − จ่ายออก = สต็อกเพิ่ม/ลดสุทธิ' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="ช่วงเวลา">ย้อนหลัง 12 เดือนนับจากเดือนล่าสุดในข้อมูล (ไม่ใช่วันนี้)</HelpSection>
-              <HelpSection title="วิธีแปลผล">
-                <ul className="list-disc ml-5 space-y-1 text-xs">
-                  <li>เส้น Net เป็นบวก → คลังกำลังสะสมสินค้า</li>
-                  <li>เส้น Net เป็นลบ → คลังกำลังระบายสินค้า</li>
-                  <li>พื้นที่เขียว/แดงสูงขึ้นพร้อมกัน → ปริมาณงานในเดือนนั้นมาก</li>
-                </ul>
-              </HelpSection>
-            </>)}
-          />
-          <div className="flex items-center justify-between mb-1">
-            <div>
-              <h3 className="font-semibold" style={{ color: 'var(--text)' }}>แนวโน้มการเคลื่อนไหวสินค้า</h3>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Movement Trend — 12 เดือน</p>
-            </div>
-            <Activity size={18} style={{ color: 'var(--text-muted)' }} />
+      {/* ====== Section 3: Risk Snapshot — 3 Donut Charts ====== */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Lot Aging Donut */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <Layers size={16} style={{ color: COLORS.primary }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>การกระจายอายุ Lot</h3>
+            <InfoTooltip title="Lot Aging Distribution">
+              <p className="mb-2">สัดส่วน <strong>มูลค่า</strong> ของ lot ตามช่วงวันก่อนหมดอายุ</p>
+              <p>🔴 แดงเข้ม = หมดแล้ว · 🔴 แดง = ≤30 วัน · 🟠 ส้ม = 31-60 · 🟡 เหลือง = 61-90 · 🟢 เขียว = 91-180+</p>
+            </InfoTooltip>
           </div>
-          <div className="h-80 mt-2">
-            {monthlyLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Lot Aging by Value · {agingData.reduce((s, d) => s + d.lots, 0)} lots</p>
+          {agingData.length === 0 ? (
+            <EmptyChart icon={<Layers size={28} />} text="ยังไม่มีข้อมูล Lot" />
+          ) : (
+            <div className="h-60">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={movementTrend}>
-                  <defs>
-                    <linearGradient id="fillIn" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2E7D32" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="#2E7D32" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="fillOut" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#C62828" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="#C62828" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis
-                    dataKey="month"
-                    tickFormatter={(v) => {
-                      const d = new Date(v);
-                      return d.toLocaleDateString('th-TH', { month: 'short' }) + ' ' + String(d.getFullYear() + 543).slice(-2);
-                    }}
-                    stroke="var(--text-muted)" fontSize={11}
-                  />
-                  <YAxis stroke="var(--text-muted)" fontSize={11} tickFormatter={(v) => formatCompact(v)} />
+                <PieChart>
+                  <Pie
+                    data={agingData} dataKey="value" nameKey="label"
+                    cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2}
+                  >
+                    {agingData.map((d) => <Cell key={d.key} fill={d.color} />)}
+                  </Pie>
                   <Tooltip
                     {...tooltipStyle}
-                    formatter={(val?: number | string) => formatNumber(Number(val ?? 0), 0)}
-                    labelFormatter={(v) => formatDate(String(v))}
+                    formatter={(v?: number | string, _name?: string, item?: any) => {
+                      const pct = totalAgingValue > 0 ? ((Number(v) / totalAgingValue) * 100).toFixed(1) : '0';
+                      return [`฿${formatCompact(Number(v ?? 0))} (${pct}%) · ${item?.payload?.lots} lots`, item?.payload?.label];
+                    }}
                   />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Area name="รับเข้า (In)" type="monotone" dataKey="In" stroke="#2E7D32" strokeWidth={2} fill="url(#fillIn)" />
-                  <Area name="จ่ายออก (Out)" type="monotone" dataKey="Out" stroke="#C62828" strokeWidth={2} fill="url(#fillOut)" />
-                  <Line name="Net Movement" type="monotone" dataKey="net" stroke="#1F3864" strokeWidth={2.5} strokeDasharray="6 3" dot={{ r: 3, fill: '#1F3864' }} />
-                </ComposedChart>
+                </PieChart>
               </ResponsiveContainer>
-            )}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-1.5 mt-2 text-[10px]">
+            {agingData.slice(0, 6).map(d => (
+              <div key={d.key} className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                <span style={{ color: 'var(--text-muted)' }}>{d.label}</span>
+                <span className="ml-auto tabular-nums font-medium" style={{ color: 'var(--text)' }}>
+                  {totalAgingValue > 0 ? ((d.value / totalAgingValue) * 100).toFixed(0) : 0}%
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Stock Value Donut */}
-        <div className="lg:col-span-2 card relative">
-          <HelpButton
-            title="สัดส่วนมูลค่าสินค้าคงคลัง (Stock Value Distribution)"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                <p>โดนัทแบ่งตาม <strong>กลุ่มสินค้า</strong> (Item Group) — ขนาดของแต่ละชิ้น = มูลค่ารวมของกลุ่มนั้น</p>
-                <p className="mt-1">ตรงกลางคือมูลค่ารวมทุกกลุ่ม</p>
-                <HelpLegend items={[
-                  { color: '#1F3864', label: 'FFG', meaning: 'Finish Goods — สินค้าสำเร็จรูป' },
-                  { color: '#2E75B6', label: 'FRM', meaning: 'Raw Materials — วัตถุดิบ' },
-                  { color: '#00897B', label: 'FBY', meaning: 'By Product — ผลพลอยได้' },
-                  { color: '#E65100', label: 'FPKG', meaning: 'Packaging — บรรจุภัณฑ์' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">
-                <ul className="list-disc ml-5 space-y-1 text-xs">
-                  <li>ดูว่ากลุ่มไหนกินทุนมากที่สุด → focus จัดการที่กลุ่มนั้นก่อน</li>
-                  <li>ตรวจสัดส่วน RM vs FG ว่าเหมาะสมกับโมเดลธุรกิจไหม</li>
-                </ul>
-              </HelpSection>
-            </>)}
-          />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สัดส่วนมูลค่าสินค้าคงคลัง</h3>
-          <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Stock Value Distribution</p>
-          <div className="h-56 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={stockByGroup}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%" cy="50%"
-                  innerRadius={58} outerRadius={88}
-                  paddingAngle={2}
-                  label={({ name, percent }: { name?: string; percent?: number }) =>
-                    `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`
-                  }
-                  labelLine={{ stroke: 'var(--text-muted)', strokeWidth: 1 }}
-                  fontSize={11}
-                >
-                  {stockByGroup.map((_, i) => (
-                    <Cell key={i} fill={GROUP_COLORS[i % GROUP_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip {...tooltipStyle} formatter={(val?: number | string) => formatCurrency(Number(val ?? 0))} />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Center label */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>รวม</p>
-                <p className="text-base font-bold" style={{ color: 'var(--text)' }}>฿{formatCompact(totalStockValue)}</p>
-              </div>
-            </div>
+        {/* Movement Health Donut */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <Activity size={16} style={{ color: COLORS.primary }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สุขภาพการเคลื่อนไหว</h3>
+            <InfoTooltip title="Movement Health">
+              <p className="mb-2">แยกสินค้าตามการเคลื่อนไหวล่าสุด:</p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                <li>🟢 <strong>Normal</strong> — มี tx ใน 90 วัน</li>
+                <li>🟠 <strong>Slow Moving</strong> — เคลื่อนไหวบ้าง 90-180 วัน</li>
+                <li>🔴 <strong>Dead Stock</strong> — ไม่ขยับ ≥ 180 วัน (ของค้าง!)</li>
+              </ul>
+            </InfoTooltip>
           </div>
-          {/* Legend */}
-          <div className="space-y-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
-            {stockByGroup.map((g, i) => (
-              <div key={g.name} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: GROUP_COLORS[i % GROUP_COLORS.length] }} />
-                  <span style={{ color: 'var(--text)' }}>{g.name}</span>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Movement Health · {movementHealth.total} items</p>
+          {movementHealth.total === 0 ? (
+            <EmptyChart icon={<Activity size={28} />} text="ยังไม่มีข้อมูล" />
+          ) : (
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Normal',      value: movementHealth.counts.normal,      color: MOVEMENT_HEALTH_COLORS.normal },
+                      { name: 'Slow Moving', value: movementHealth.counts.slow_moving, color: MOVEMENT_HEALTH_COLORS.slow_moving },
+                      { name: 'Dead Stock',  value: movementHealth.counts.dead_stock,  color: MOVEMENT_HEALTH_COLORS.dead_stock },
+                    ].filter(x => x.value > 0)}
+                    dataKey="value" nameKey="name"
+                    cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2}
+                  >
+                    {([MOVEMENT_HEALTH_COLORS.normal, MOVEMENT_HEALTH_COLORS.slow_moving, MOVEMENT_HEALTH_COLORS.dead_stock]).map((c, i) => (
+                      <Cell key={i} fill={c} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    {...tooltipStyle}
+                    formatter={(v?: number | string, name?: string) => {
+                      const pct = movementHealth.total > 0 ? ((Number(v) / movementHealth.total) * 100).toFixed(1) : '0';
+                      return [`${formatNumber(Number(v ?? 0))} items (${pct}%)`, name];
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+            {[
+              { key: 'normal',      label: 'Normal',      color: MOVEMENT_HEALTH_COLORS.normal },
+              { key: 'slow_moving', label: 'Slow',        color: MOVEMENT_HEALTH_COLORS.slow_moving },
+              { key: 'dead_stock',  label: 'Dead',        color: MOVEMENT_HEALTH_COLORS.dead_stock },
+            ].map((s) => (
+              <div key={s.key} className="text-center p-1.5 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <div className="flex items-center justify-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: s.color }} />
+                  <span style={{ color: 'var(--text-muted)' }}>{s.label}</span>
                 </div>
-                <span className="font-medium tabular-nums" style={{ color: 'var(--text-muted)' }}>
-                  ฿{formatCompact(g.value)}
+                <div className="font-semibold tabular-nums mt-0.5" style={{ color: 'var(--text)' }}>
+                  {formatNumber(movementHealth.counts[s.key as keyof typeof movementHealth.counts])}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Group Composition Donut */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <Target size={16} style={{ color: COLORS.primary }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>มูลค่าตามกลุ่มสินค้า</h3>
+            <InfoTooltip title="Value Composition by Group">
+              <p className="mb-2">สัดส่วนมูลค่าสต็อกของแต่ละกลุ่มสินค้า</p>
+              <p>เห็นว่า "เงินจม" อยู่กลุ่มไหนมากที่สุด — focus resource ที่กลุ่มใหญ่</p>
+            </InfoTooltip>
+          </div>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Value by Item Group · ฿{formatCompact(totalStockValue)}</p>
+          {stockByGroup.length === 0 ? (
+            <EmptyChart icon={<Package size={28} />} text="ยังไม่มีข้อมูล" />
+          ) : (
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={stockByGroup} dataKey="value" nameKey="name"
+                    cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2}
+                  >
+                    {stockByGroup.map((_, i) => <Cell key={i} fill={GROUP_COLORS[i % GROUP_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip
+                    {...tooltipStyle}
+                    formatter={(v?: number | string, name?: string) => {
+                      const pct = totalStockValue > 0 ? ((Number(v) / totalStockValue) * 100).toFixed(1) : '0';
+                      return [`฿${formatCompact(Number(v ?? 0))} (${pct}%)`, name];
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-1.5 mt-2 text-[10px]">
+            {stockByGroup.slice(0, 6).map((g, i) => (
+              <div key={g.name} className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: GROUP_COLORS[i % GROUP_COLORS.length] }} />
+                <span className="truncate" style={{ color: 'var(--text-muted)' }}>{g.name}</span>
+                <span className="ml-auto tabular-nums font-medium" style={{ color: 'var(--text)' }}>
+                  {totalStockValue > 0 ? ((g.value / totalStockValue) * 100).toFixed(0) : 0}%
                 </span>
               </div>
             ))}
@@ -395,285 +526,344 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ====== Section 5: Warehouse Stock Value ====== */}
-      <div className="grid grid-cols-1 gap-6">
-        {/* Warehouse Performance — now full-width since Stock Health card was removed */}
-        <div className="card relative">
-          <HelpButton
-            title="มูลค่าสินค้าแยกตามคลัง (Warehouse Stock Value)"
-            body={(<>
-              <HelpSection title="กราฟอ่านยังไง">
-                แท่งแนวนอน 10 อันดับคลังที่มีมูลค่าสต็อกสูงสุด — ความยาวแท่ง = มูลค่ารวมในคลังนั้น
-                <p className="mt-1 text-xs">เมาส์ hover เพื่อดูชื่อเต็มของคลัง + ตัวเลขที่แม่นยำ</p>
-              </HelpSection>
-              <HelpSection title="สีของแท่งบอกประเภทคลัง">
-                <HelpLegend items={[
-                  { color: '#1F3864', label: 'FG', meaning: 'Finished Goods — คลังสินค้าสำเร็จรูป' },
-                  { color: '#2E75B6', label: 'RM', meaning: 'Raw Materials — คลังวัตถุดิบ' },
-                  { color: '#00897B', label: 'PD', meaning: 'Production — คลังผลิต' },
-                  { color: '#E65100', label: 'PK', meaning: 'Packaging — คลังบรรจุภัณฑ์' },
-                  { color: '#7B1FA2', label: 'QC', meaning: 'Quality Control — คลัง QC' },
-                  { color: '#C62828', label: 'CL/CO', meaning: 'Claim Hold — คลังรอเคลม' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">เปรียบเทียบ workload ระหว่างคลัง — คลังที่สต็อกค้างเยอะอาจต้องเร่งระบายหรือตรวจดูว่าเหมาะกับ capacity ไหม</HelpSection>
-            </>)}
-          />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>มูลค่าสินค้าแยกตามคลัง</h3>
-          <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Warehouse Stock Value — Top 10</p>
+      {/* ====== Section 4: Movement Trend ====== */}
+      <div className="card relative">
+        <HelpButton
+          title="แนวโน้มการเคลื่อนไหวสินค้า (12 Months)"
+          body={(<>
+            <HelpSection title="กราฟอ่านยังไง">
+              พื้นที่เขียว = รับเข้า · พื้นที่แดง = จ่ายออก · เส้นน้ำเงิน = Net (รับ−จ่าย)
+            </HelpSection>
+            <HelpSection title="ช่วงเวลา">12 เดือนล่าสุดในข้อมูล</HelpSection>
+          </>)}
+        />
+        <div className="flex items-center gap-2 mb-1">
+          <ArrowLeftRight size={16} style={{ color: COLORS.primary }} />
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>แนวโน้มการเคลื่อนไหว 12 เดือน</h3>
+        </div>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Movement Trend (qty)</p>
+        {monthlyLoading ? (
+          <div className="h-80 flex items-center justify-center">
+            <div className="w-8 h-8 border-3 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : movementTrend.length === 0 ? (
+          <EmptyChart icon={<TrendingUp size={32} />} text="ยังไม่มีข้อมูลการเคลื่อนไหว" />
+        ) : (
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stockByWarehouse} layout="vertical" margin={{ left: 10, right: 30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                <XAxis
-                  type="number"
-                  tickFormatter={(v) => formatCompact(v)}
-                  stroke="var(--text-muted)" fontSize={11}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="warehouse"
-                  width={75}
-                  stroke="var(--text-muted)" fontSize={11}
-                  tick={{ fill: 'var(--text)' }}
-                />
-                <Tooltip
-                  {...tooltipStyle}
-                  formatter={(val?: number | string) => formatCurrency(Number(val ?? 0))}
-                  labelFormatter={(label) => {
-                    const item = stockByWarehouse.find((w) => w.warehouse === label);
-                    return item ? `${item.warehouse} — ${item.whs_name}` : String(label);
-                  }}
-                />
-                <Bar dataKey="value" name="มูลค่า" radius={[0, 4, 4, 0]} barSize={20}>
-                  {stockByWarehouse.map((w) => (
-                    <Cell key={w.warehouse} fill={getWhsColor(w.warehouse)} />
-                  ))}
-                </Bar>
-              </BarChart>
+              <ComposedChart data={movementTrend} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="gradIn" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={COLORS.green} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={COLORS.green} stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="gradOut" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={COLORS.red} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={COLORS.red} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={11} />
+                <YAxis stroke="var(--text-muted)" fontSize={11} tickFormatter={(v) => formatCompact(Number(v))} />
+                <Tooltip {...tooltipStyle} formatter={(v?: number | string, name?: string) => [formatNumber(Number(v ?? 0), 0), name]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area type="monotone" dataKey="In"  name="รับเข้า"   fill="url(#gradIn)"  stroke={COLORS.green} strokeWidth={2} />
+                <Area type="monotone" dataKey="Out" name="จ่ายออก"   fill="url(#gradOut)" stroke={COLORS.red}   strokeWidth={2} />
+                <Line type="monotone" dataKey="net" name="Net (สุทธิ)" stroke={COLORS.primary} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 3, fill: COLORS.primary }} />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </div>
-
+        )}
       </div>
 
-      {/* ====== Section 7 + 8: Top Items + MoM ====== */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Top 10 Active Items */}
-        <div className="lg:col-span-3 card p-0 relative">
+      {/* ====== Section 5: Warehouse + Group Bar Charts (2 cols) ====== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Warehouse Stock Value */}
+        <div className="card relative">
           <HelpButton
-            title="สินค้าเคลื่อนไหวสูงสุด 10 อันดับ (Top 10 Most Active)"
+            title="มูลค่าสินค้าแยกตามคลัง"
             body={(<>
-              <HelpSection title="คืออะไร">
-                10 อันดับสินค้าที่มีการเคลื่อนไหวมากที่สุด (รับเข้า + จ่ายออก) จากชุด transactions ล่าสุด
+              <HelpSection title="กราฟอ่านยังไง">
+                Top 10 คลังที่มีมูลค่าสต็อกสูงสุด · สีตามประเภทคลัง
               </HelpSection>
-              <HelpSection title="คอลัมน์">
+              <HelpSection title="ประเภท">
                 <HelpLegend items={[
-                  { color: '#16a34a', label: '+ สีเขียว', meaning: 'จำนวนรับเข้า (In)' },
-                  { color: '#dc2626', label: '− สีแดง',   meaning: 'จำนวนจ่ายออก (Out)' },
-                  { color: '#1F3864', label: 'รวม',        meaning: 'In + Out รวมกัน — ใช้จัดอันดับ' },
+                  { color: '#1F3864', label: 'FG', meaning: 'Finished Goods' },
+                  { color: '#2E75B6', label: 'RM', meaning: 'Raw Materials' },
+                  { color: '#00897B', label: 'PD', meaning: 'Production' },
+                  { color: '#E65100', label: 'PK', meaning: 'Packaging' },
                 ]} />
-              </HelpSection>
-              <HelpSection title="ใช้ทำอะไร">
-                <ul className="list-disc ml-5 space-y-1 text-xs">
-                  <li>เห็น "Hot Items" ที่หมุนเวียนเยอะ → focus จัดการ stock policy</li>
-                  <li>ตรวจว่าสินค้าหลักมี throughput ตามคาดไหม</li>
-                </ul>
               </HelpSection>
             </>)}
           />
-          <div className="px-5 pt-5 pb-3">
-            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สินค้าเคลื่อนไหวสูงสุด 10 อันดับ</h3>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Top 10 Most Active Items (recent transactions)</p>
-          </div>
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th className="w-10 text-center">#</th>
-                  <th>รหัสสินค้า</th>
-                  <th>ชื่อสินค้า</th>
-                  <th className="text-right">รับเข้า</th>
-                  <th className="text-right">จ่ายออก</th>
-                  <th className="text-right">รวม</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topMoved.map((item, i) => (
-                  <tr key={item.item_code}>
-                    <td className="text-center">
-                      <span
-                        className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold text-white"
-                        style={{ backgroundColor: i < 3 ? '#1F3864' : 'var(--text-muted)' }}
-                      >
-                        {i + 1}
-                      </span>
-                    </td>
-                    <td className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>
-                      {item.item_code}
-                    </td>
-                    <td
-                      className="text-sm max-w-[180px] truncate"
-                      style={{ color: 'var(--text)' }}
-                      title={itemNameMap.get(item.item_code) ?? item.item_code}
-                    >
-                      {itemNameMap.get(item.item_code) ?? '—'}
-                    </td>
-                    <td className="text-right text-sm text-green-600 tabular-nums">
-                      {item.totalIn > 0 ? `+${formatNumber(item.totalIn, 0)}` : '–'}
-                    </td>
-                    <td className="text-right text-sm text-red-600 tabular-nums">
-                      {item.totalOut > 0 ? `-${formatNumber(item.totalOut, 0)}` : '–'}
-                    </td>
-                    <td className="text-right font-semibold tabular-nums" style={{ color: 'var(--text)' }}>
-                      {formatNumber(item.totalMoved, 0)}
-                    </td>
-                  </tr>
-                ))}
-                {topMoved.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10" style={{ color: 'var(--text-muted)' }}>
-                      ยังไม่มีข้อมูล
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>คลังที่มีมูลค่าสูงสุด</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Top 10 Warehouses by Value</p>
+          {stockByWarehouse.length === 0 ? (
+            <EmptyChart icon={<Package size={28} />} text="ไม่มีข้อมูลคลัง" />
+          ) : (
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stockByWarehouse} layout="vertical" margin={{ left: 0, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" tickFormatter={(v) => formatCompact(v)} stroke="var(--text-muted)" fontSize={11} />
+                  <YAxis type="category" dataKey="warehouse" width={75} stroke="var(--text-muted)" fontSize={11} tick={{ fill: 'var(--text)' }} />
+                  <Tooltip
+                    {...tooltipStyle}
+                    formatter={(v?: number | string) => formatCurrency(Number(v ?? 0))}
+                    labelFormatter={(label) => {
+                      const item = stockByWarehouse.find((w) => w.warehouse === label);
+                      return item ? `${item.warehouse} — ${item.whs_name}` : String(label);
+                    }}
+                  />
+                  <Bar dataKey="value" name="มูลค่า" radius={[0, 4, 4, 0]} barSize={20}>
+                    {stockByWarehouse.map((w) => <Cell key={w.warehouse} fill={getWhsColor(w.warehouse)} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
-        {/* Month-over-Month */}
-        <div className="lg:col-span-2 card relative">
+        {/* Group Distribution */}
+        <div className="card relative">
           <HelpButton
-            title="เปรียบเทียบรายเดือน (Month-over-Month)"
+            title="มูลค่าตามกลุ่มสินค้า"
             body={(<>
-              <HelpSection title="คืออะไร">
-                เปรียบเทียบเดือนปัจจุบัน (เดือนล่าสุดในข้อมูล) กับเดือนก่อนหน้า — ทั้งปริมาณและมูลค่า
+              <HelpSection title="กราฟอ่านยังไง">
+                แท่งแนวนอนแสดงมูลค่ารวมของแต่ละกลุ่ม
               </HelpSection>
-              <HelpSection title="แต่ละบรรทัด">
-                <HelpLegend items={[
-                  { color: '#2E7D32', label: 'รับเข้า (In)',           meaning: 'หน่วยรวมที่รับเข้าทุกคลัง' },
-                  { color: '#C62828', label: 'จ่ายออก (Out)',          meaning: 'หน่วยรวมที่จ่ายออกทุกคลัง' },
-                  { color: '#1F3864', label: 'Net Movement',           meaning: 'In − Out = สต็อกเปลี่ยนแปลงสุทธิ' },
-                  { color: '#E65100', label: 'มูลค่ารวม (Amount)',     meaning: 'มูลค่ารวมของ transaction ทั้งหมดในเดือน' },
-                ]} />
-              </HelpSection>
-              <HelpSection title="แท็ก %">
-                สีเขียว ↑ = เพิ่มจากเดือนก่อน, สีแดง ↓ = ลดลง
-                <p className="mt-1 text-xs italic">เลข prev: ด้านล่างคือค่าของเดือนก่อนหน้า ใช้ตีความบริบท</p>
+              <HelpSection title="ใช้ทำอะไร">
+                หา "กลุ่มหลัก" ของธุรกิจที่กิน working capital สูงสุด
               </HelpSection>
             </>)}
           />
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>เปรียบเทียบรายเดือน</h3>
-          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-            {mom
-              ? (() => {
-                const currFmt = new Date(mom.currMonth).toLocaleDateString('th-TH', { month: 'short' }) + ' ' + String(new Date(mom.currMonth).getFullYear() + 543).slice(-2);
-                const prevFmt = new Date(mom.prevMonth).toLocaleDateString('th-TH', { month: 'short' }) + ' ' + String(new Date(mom.prevMonth).getFullYear() + 543).slice(-2);
-                return `${currFmt} vs ${prevFmt}`;
-              })()
-              : 'Month-over-Month'}
-          </p>
-
-          {!mom ? (
-            <div className="text-center py-10" style={{ color: 'var(--text-muted)' }}>
-              <p className="text-sm">ข้อมูลไม่เพียงพอสำหรับการเปรียบเทียบ</p>
-            </div>
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>มูลค่าตามกลุ่มสินค้า</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Value by Group · ฿{formatCompact(totalStockValue)}</p>
+          {stockByGroup.length === 0 ? (
+            <EmptyChart icon={<Package size={28} />} text="ไม่มีข้อมูลกลุ่ม" />
           ) : (
-            <div className="space-y-4">
-              <MoMStat label="รับเข้า (In)" value={mom.inCurr} prev={mom.inPrev} pct={mom.inPct} color="#2E7D32" />
-              <MoMStat label="จ่ายออก (Out)" value={mom.outCurr} prev={mom.outPrev} pct={mom.outPct} color="#C62828" />
-              <MoMStat
-                label="Net Movement"
-                value={mom.netCurr} prev={mom.netPrev}
-                pct={mom.netPrev === 0 ? 0 : ((mom.netCurr - mom.netPrev) / Math.abs(mom.netPrev)) * 100}
-                color="#1F3864"
-              />
-              <MoMStat label="มูลค่ารวม (Amount)" value={mom.amtCurr} prev={mom.amtPrev} pct={mom.amtPct} color="#E65100" isCurrency />
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stockByGroup} layout="vertical" margin={{ left: 0, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" tickFormatter={(v) => formatCompact(v)} stroke="var(--text-muted)" fontSize={11} />
+                  <YAxis type="category" dataKey="name" width={75} stroke="var(--text-muted)" fontSize={11} tick={{ fill: 'var(--text)' }} />
+                  <Tooltip {...tooltipStyle} formatter={(v?: number | string) => formatCurrency(Number(v ?? 0))} />
+                  <Bar dataKey="value" name="มูลค่า" radius={[0, 4, 4, 0]} barSize={22}>
+                    {stockByGroup.map((_, i) => <Cell key={i} fill={GROUP_COLORS[i % GROUP_COLORS.length]} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           )}
         </div>
       </div>
+
+      {/* ====== Section 6: Action Items — Top 5 Cash Trapped + Top 10 Moved (2 cols) ====== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Top Cash Trapped */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <DollarSign size={16} style={{ color: COLORS.red }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 5 — เงินจมมากที่สุด</h3>
+            <InfoTooltip title="Cash Trapped Items">
+              <p className="mb-2"><strong>Hold Score = Value × (1 / Turnover)</strong></p>
+              <p>ของแพง + หมุนช้า → ขึ้นบนสุด · เป็น priority สำคัญในการระบายเงินสด</p>
+            </InfoTooltip>
+          </div>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>High Value × Slow Turnover — Priority for clearance</p>
+          {cashTrapped.length === 0 ? (
+            <EmptyChart icon={<DollarSign size={28} />} text="กำลังโหลด..." />
+          ) : (
+            <div className="space-y-2">
+              {cashTrapped.map((row, idx) => (
+                <div key={row.item_code} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                    style={{ backgroundColor: idx === 0 ? COLORS.red : idx === 1 ? COLORS.orange : COLORS.amber, color: '#fff' }}
+                  >{idx + 1}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="text-xs font-mono" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+                        {row.group}
+                      </span>
+                    </div>
+                    <p className="text-xs truncate" style={{ color: 'var(--text)' }}>{row.itemname}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold tabular-nums" style={{ color: 'var(--text)' }}>฿{formatCompact(row.value)}</p>
+                    <p className="text-[10px] tabular-nums" style={{ color: row.turnover < 1 ? COLORS.red : COLORS.amber }}>
+                      Turn {row.turnover.toFixed(2)}×
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* MoM Comparison */}
+        <div className="card relative">
+          <div className="flex items-center gap-2 mb-1">
+            <Activity size={16} style={{ color: COLORS.primary }} />
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>เทียบเดือนก่อน (MoM)</h3>
+            <InfoTooltip title="Month-over-Month">
+              <p className="mb-2">เปรียบเทียบเดือนล่าสุดกับเดือนก่อนหน้า</p>
+              <p>🟢 % เขียว = ขึ้น · 🔴 % แดง = ลง</p>
+            </InfoTooltip>
+          </div>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+            {mom ? `${formatDate(mom.currMonth)} vs ${formatDate(mom.prevMonth)}` : 'Month-over-Month Comparison'}
+          </p>
+          {!mom ? (
+            <EmptyChart icon={<TrendingUp size={28} />} text="ต้องมีข้อมูลอย่างน้อย 2 เดือน" />
+          ) : (
+            <div className="space-y-3">
+              <MomRow label="รับเข้า (In)"   curr={mom.inCurr}  prev={mom.inPrev}  pct={mom.inPct}  color={COLORS.green} />
+              <MomRow label="จ่ายออก (Out)"  curr={mom.outCurr} prev={mom.outPrev} pct={mom.outPct} color={COLORS.red} />
+              <MomRow label="Net (สุทธิ)"
+                      curr={mom.inCurr - mom.outCurr}
+                      prev={mom.inPrev - mom.outPrev}
+                      pct={(mom.inPrev - mom.outPrev) === 0 ? 0 : (((mom.inCurr - mom.outCurr) - (mom.inPrev - mom.outPrev)) / Math.abs(mom.inPrev - mom.outPrev)) * 100}
+                      color={COLORS.primary} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ====== Section 7: Top 10 Most Moved Items (Last 30 days) ====== */}
+      <div className="card relative">
+        <HelpButton
+          title="สินค้าเคลื่อนไหวมากสุด"
+          body={(<>
+            <HelpSection title="คืออะไร">
+              สินค้าที่มี Tx จำนวนหน่วยรวม (รับ+จ่าย) มากที่สุดจากธุรกรรมล่าสุด 200 รายการ
+            </HelpSection>
+            <HelpSection title="คอลัมน์">
+              <ul className="list-disc ml-5 text-xs space-y-1">
+                <li><strong>Total Moved</strong> = In + Out (รวมหน่วยทั้งสองทาง)</li>
+                <li><strong>Tx Count</strong> = จำนวนธุรกรรม</li>
+              </ul>
+            </HelpSection>
+          </>)}
+        />
+        <div className="flex items-center gap-2 mb-1">
+          <Activity size={16} style={{ color: COLORS.primary }} />
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 10 Most Active Items</h3>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>From recent 200 transactions</p>
+        {topMoved.length === 0 ? (
+          <EmptyChart icon={<Activity size={28} />} text="ยังไม่มี Transaction" />
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th className="text-center">#</th>
+                  <th>Item Code</th>
+                  <th>Item Name</th>
+                  <th className="text-right">In</th>
+                  <th className="text-right">Out</th>
+                  <th className="text-right">Total Moved</th>
+                  <th className="text-right">Tx Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topMoved.map((row, idx) => (
+                  <tr key={row.item_code}>
+                    <td className="text-center" style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                    <td className="font-mono text-sm" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</td>
+                    <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {itemNameMap.get(row.item_code) ?? '—'}
+                    </td>
+                    <td className="text-right" style={{ color: COLORS.green }}>+{formatNumber(row.totalIn, 0)}</td>
+                    <td className="text-right" style={{ color: COLORS.red }}>-{formatNumber(row.totalOut, 0)}</td>
+                    <td className="text-right font-semibold">{formatNumber(row.totalMoved, 0)}</td>
+                    <td className="text-right" style={{ color: 'var(--text-muted)' }}>{row.txCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
-
-function KPICard({
-  icon, label, sublabel, value, color, trend, help,
+// ── KPI Card ────────────────────────────────────────────────────────────────
+function KpiCard({
+  icon, label, value, sublabel, color, tooltipTitle, tooltip,
 }: {
   icon: React.ReactNode;
   label: string;
-  sublabel: string;
   value: string;
+  sublabel: string;
   color: string;
-  trend?: { pct: number };
-  help?: { title: string; body: React.ReactNode };
+  tooltipTitle?: string;
+  tooltip?: React.ReactNode;
 }) {
   return (
-    <div className="card flex flex-col gap-3 relative overflow-hidden">
-      {/* Decorative top bar */}
-      <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: color }} />
-      {help && <HelpButton title={help.title} body={help.body} />}
-      <div className="flex items-center justify-between">
-        <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}15` }}>
-          <span style={{ color }}>{icon}</span>
+    <div className="card relative" style={{ borderTop: `3px solid ${color}` }}>
+      <div className="flex items-start justify-between">
+        <div
+          className="p-2 rounded-lg flex-shrink-0"
+          style={{ backgroundColor: `${color}15`, color }}
+        >
+          {icon}
         </div>
-        {trend && (
-          <span
-            className="flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded"
-            style={{
-              color: trend.pct >= 0 ? '#2E7D32' : '#C62828',
-              backgroundColor: trend.pct >= 0 ? '#2E7D3215' : '#C6282815',
-            }}
-          >
-            {trend.pct >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-            {Math.abs(trend.pct).toFixed(1)}%
-          </span>
-        )}
+        {tooltip && <InfoTooltip title={tooltipTitle ?? label} size={13}>{tooltip}</InfoTooltip>}
       </div>
-      <div>
-        <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{value}</p>
-        <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
-        <p className="text-[10px]" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>{sublabel}</p>
+      <div className="mt-2.5">
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</p>
+        <p className="text-xl font-bold tabular-nums mt-0.5" style={{ color }}>{value}</p>
+        <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>{sublabel}</p>
       </div>
     </div>
   );
 }
 
-function MoMStat({
-  label, value, prev, pct, color, isCurrency = false,
-}: {
-  label: string;
-  value: number;
-  prev: number;
-  pct: number;
-  color: string;
-  isCurrency?: boolean;
+// ── MoM Row ─────────────────────────────────────────────────────────────────
+function MomRow({ label, curr, prev, pct, color }: {
+  label: string; curr: number; prev: number; pct: number; color: string;
 }) {
-  const fmt = isCurrency
-    ? (v: number) => `฿${formatCompact(v)}`
-    : (v: number) => formatNumber(v, 0);
-
+  const positive = pct >= 0;
+  const flat = Math.abs(pct) < 0.1;
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--bg-alt, #f8fafc)' }}>
-      <div className="w-2 h-10 rounded-full" style={{ backgroundColor: color }} />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</p>
-        <p className="text-lg font-bold tabular-nums" style={{ color: 'var(--text)' }}>{fmt(value)}</p>
-        <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>prev: {fmt(prev)}</p>
+    <div className="flex items-center justify-between gap-3 p-3 rounded-lg" style={{ backgroundColor: 'var(--bg-alt)' }}>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+        <span className="text-sm" style={{ color: 'var(--text)' }}>{label}</span>
       </div>
-      <span
-        className="flex items-center gap-0.5 text-xs font-semibold px-2 py-1 rounded-lg"
-        style={{
-          color: pct >= 0 ? '#2E7D32' : '#C62828',
-          backgroundColor: pct >= 0 ? '#2E7D3212' : '#C6282812',
-        }}
-      >
-        {pct >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-        {Math.abs(pct).toFixed(1)}%
-      </span>
+      <div className="text-right flex items-center gap-3">
+        <div>
+          <p className="text-sm font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatNumber(curr, 0)}</p>
+          <p className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>vs {formatNumber(prev, 0)}</p>
+        </div>
+        <div
+          className="px-2 py-0.5 rounded text-xs font-semibold tabular-nums flex items-center gap-0.5"
+          style={{
+            backgroundColor: flat ? 'rgba(100,116,139,0.1)' : positive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)',
+            color:           flat ? COLORS.muted             : positive ? COLORS.green              : COLORS.red,
+            minWidth: 72,
+            justifyContent: 'center',
+          }}
+        >
+          {flat ? '—' : positive ? '↑' : '↓'}
+          {flat ? '' : `${positive ? '+' : ''}${pct.toFixed(1)}%`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Empty chart placeholder ─────────────────────────────────────────────────
+function EmptyChart({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <div className="h-60 flex flex-col items-center justify-center text-center" style={{ color: 'var(--text-muted)' }}>
+      <div className="opacity-40 mb-2">{icon}</div>
+      <p className="text-sm">{text}</p>
     </div>
   );
 }
