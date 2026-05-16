@@ -19,6 +19,7 @@ import { exportToExcel } from '@/utils/export';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 import { InfoTooltip } from '@/components/InfoTooltip';
+import { LotDetailModal } from '@/components/LotDetailModal';
 
 // ── Color palettes ─────────────────────────────────────────────────────────────
 const VV_COLORS   = { A: '#16a34a', B: '#d97706', C: '#dc2626' } as const;
@@ -1234,6 +1235,12 @@ function SlowMovingTab() {
   /** "FEFO Violations only" toggle — surfaces SKUs that look healthy by
    *  movement but have aging lots stuck behind newer ones. */
   const [fefoOnly, setFefoOnly]   = useState(false);
+  /** Drill-down: click a row to inspect every lot of that item × warehouse */
+  const [drillDown, setDrillDown] = useState<{
+    item_code: string; itemname: string;
+    warehouse: string; whs_name: string;
+  } | null>(null);
+  const { data: latestSnap } = useLatestLotSnapshot();
 
   const { data: rawData, isLoading } = useSlowMoving({
     movementStatus: status    || undefined,
@@ -1398,7 +1405,17 @@ function SlowMovingTab() {
               </thead>
               <tbody>
                 {(data ?? []).map((row, i) => (
-                  <tr key={`${row.item_code}-${row.warehouse}-${i}`}>
+                  <tr
+                    key={`${row.item_code}-${row.warehouse}-${i}`}
+                    onClick={() => setDrillDown({
+                      item_code: row.item_code,
+                      itemname:  row.itemname,
+                      warehouse: row.warehouse,
+                      whs_name:  row.whs_name,
+                    })}
+                    className="cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
+                    title="คลิกเพื่อดูรายละเอียด lot ของรายการนี้"
+                  >
                     <td>
                       <div className="flex items-center gap-1.5">
                         <span className="badge text-white text-xs"
@@ -1464,7 +1481,20 @@ function SlowMovingTab() {
             </table>
           </div>
         )}
+        <p className="px-4 py-2 text-[10px] text-center border-t" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+          💡 คลิกที่แถวเพื่อดูรายละเอียด lot ทั้งหมดของรายการนั้น
+        </p>
       </div>
+
+      {/* Lot drill-down modal */}
+      <LotDetailModal
+        itemCode={drillDown?.item_code ?? null}
+        itemName={drillDown?.itemname}
+        warehouse={drillDown?.warehouse ?? null}
+        whsName={drillDown?.whs_name}
+        snapshotDate={latestSnap}
+        onClose={() => setDrillDown(null)}
+      />
     </div>
   );
 }
