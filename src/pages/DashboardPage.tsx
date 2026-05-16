@@ -360,15 +360,19 @@ export function DashboardPage() {
           icon={<RefreshCw size={18} />}
           label="Inventory Turnover"
           value={kpiLoading ? '...' : `${financialKpi.turnover.toFixed(2)}×`}
-          sublabel={`${financialKpi.monthsCounted} mo · COGS ฿${formatCompact(financialKpi.cogs12mo)}`}
+          sublabel={`${financialKpi.monthsCounted} mo · COGS Proxy ฿${formatCompact(financialKpi.cogs12mo)}`}
           color={financialKpi.turnover >= 4 ? COLORS.green : financialKpi.turnover >= 1 ? COLORS.amber : COLORS.red}
           tooltipTitle="Inventory Turnover"
           tooltip={<>
-            <CalcBlock formula="Turnover = COGS / Inventory">
-              <CalcLine label="COGS (Out value)" value={`฿${formatCompact(financialKpi.cogs12mo)}`} />
+            <CalcBlock formula="Turnover = COGS Proxy / Inventory">
+              <CalcLine label="COGS Proxy (Out value)" value={`฿${formatCompact(financialKpi.cogs12mo)}`} />
               <CalcLine label="÷ Inventory" value={`฿${formatCompact(financialKpi.invValue)}`} />
               <CalcLine label="= Turnover" value={`${financialKpi.turnover.toFixed(4)}×`} bold />
             </CalcBlock>
+            <p className="text-[10px] mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              <strong>COGS Proxy</strong> = Σ ABS(amount) WHERE direction='Out' (Delivery+Issue+Return)
+              — ใกล้เคียง COGS จริงในบัญชี ไม่นับ Transfers/Cost adjustments
+            </p>
             <p className="mt-2 mb-1">
               <strong>Window:</strong> {financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูล
             </p>
