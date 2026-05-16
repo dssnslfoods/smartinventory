@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { useLoginStats, type LoginPublicStats } from '@/hooks/useLoginStats';
 
 // ─── Brand tokens (from design handoff) ────────────────────────────────────
 const BRAND = {
@@ -52,18 +53,94 @@ const EDGES: [number, number][] = [
 ];
 
 // ─── Ticker data ──────────────────────────────────────────────────────────
-const TICKER_ITEMS: { key: string; value: string; color: string }[] = [
-  { key: 'LOT_4429',    value: 'exp in 12 days',     color: BRAND.amber },
-  { key: 'LOT_1180',    value: 'expired · write-off', color: BRAND.red },
-  { key: 'FEFO_QUEUE',  value: '27 lots ready',       color: BRAND.teal },
-  { key: 'VV_CLASS_C',  value: '56 SKUs at risk',     color: BRAND.amber },
-  { key: 'TURNOVER',    value: '4.2× / year',         color: BRAND.teal },
-  { key: 'ON_HAND',     value: '฿ 2,756M',            color: BRAND.textMid },
-  { key: 'SKUS_LIVE',   value: '3,862',               color: 'rgba(148,163,184,0.85)' },
-  { key: 'IMPORT',      value: '45s · 100k tx',       color: BRAND.blueSoft },
-  { key: 'GMP_AUDIT',   value: 'ready',               color: BRAND.teal },
-  { key: 'SHELF_LIFE',  value: '17 groups',           color: 'rgba(148,163,184,0.85)' },
+// Static fallback used when the public-stats RPC fails (network / no DB).
+// In normal operation buildTickerItems() below replaces this with real data.
+type TickerItem = { key: string; value: string; color: string };
+
+const FALLBACK_TICKER: TickerItem[] = [
+  { key: 'SYSTEM',     value: 'online',          color: BRAND.teal },
+  { key: 'FEFO',       value: 'ready',           color: BRAND.teal },
+  { key: 'GMP_AUDIT',  value: 'compliant',       color: BRAND.teal },
+  { key: 'TENANCY',    value: 'isolated',        color: BRAND.blueSoft },
+  { key: 'ENCRYPTION', value: 'at rest + transit', color: BRAND.blueSoft },
+  { key: 'IMPORT',     value: 'Excel-based',     color: 'rgba(148,163,184,0.85)' },
 ];
+
+/** Format a YYYY-MM-DD date string into "dd MMM yyyy" (Buddhist Era for Thai). */
+function fmtDate(s: string | null | undefined): string {
+  if (!s) return '—';
+  try {
+    return new Date(s).toLocaleDateString('th-TH', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    });
+  } catch { return s; }
+}
+
+/** Compact number for ticker (1.2K / 264K / 1.5M) */
+function fmtCompact(n: number | null | undefined): string {
+  if (n == null) return '—';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1_000)     return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n);
+}
+
+/**
+ * Build the ticker item list from real DB stats.
+ * Each item is curated to be **non-sensitive** — only counts + dates +
+ * group taxonomy. No prices, no SKU codes, no warehouse codes, no names.
+ */
+function buildTickerItems(stats: LoginPublicStats | null | undefined): TickerItem[] {
+  if (!stats) return FALLBACK_TICKER;
+
+  const items: TickerItem[] = [];
+
+  // Total scope (always present)
+  items.push({ key: 'WAREHOUSES',  value: String(stats.warehouse_count),         color: BRAND.blueSoft });
+  items.push({ key: 'GROUPS',      value: String(stats.group_count),             color: 'rgba(148,163,184,0.85)' });
+  items.push({ key: 'SKUS',        value: `${fmtCompact(stats.active_sku_count)} active`, color: BRAND.textMid });
+  items.push({ key: 'LOTS',        value: fmtCompact(stats.lot_count),           color: BRAND.blueSoft });
+
+  // Group taxonomy (short codes — fully generic)
+  if (stats.group_codes && stats.group_codes.length) {
+    items.push({
+      key:   'TAXONOMY',
+      value: stats.group_codes.join(' · '),
+      color: 'rgba(148,163,184,0.85)',
+    });
+  }
+
+  // Transactions
+  items.push({ key: 'TRANSACTIONS', value: `${fmtCompact(stats.tx_count)} total`, color: BRAND.textMid });
+  if (stats.tx_last_30d > 0) {
+    items.push({ key: 'TX_30D', value: `${fmtCompact(stats.tx_last_30d)} in last 30d`, color: BRAND.teal });
+  }
+
+  // Last update dates
+  if (stats.last_tx_date) {
+    items.push({ key: 'LAST_TX',  value: fmtDate(stats.last_tx_date),       color: BRAND.teal });
+  }
+  if (stats.last_snapshot_date) {
+    items.push({ key: 'SNAPSHOT', value: fmtDate(stats.last_snapshot_date), color: BRAND.blueSoft });
+  }
+  if (stats.last_master_update) {
+    items.push({ key: 'MASTER_SYNC', value: fmtDate(stats.last_master_update), color: 'rgba(148,163,184,0.85)' });
+  }
+
+  // Risk indicators — counts only, not "which lots"
+  if (stats.expired_lots > 0) {
+    items.push({ key: 'EXPIRED_LOTS',   value: `${fmtCompact(stats.expired_lots)} flagged`, color: BRAND.red });
+  }
+  if (stats.lots_expiring_30d > 0) {
+    items.push({ key: 'EXPIRING_30D',   value: `${fmtCompact(stats.lots_expiring_30d)} lots`, color: BRAND.amber });
+  }
+
+  // Static brand value props (always at the end)
+  items.push({ key: 'FEFO',      value: 'ready',           color: BRAND.teal });
+  items.push({ key: 'GMP_AUDIT', value: 'compliant',       color: BRAND.teal });
+  items.push({ key: 'TENANCY',   value: 'isolated',        color: BRAND.blueSoft });
+
+  return items;
+}
 
 // ─── Brand mark — "SI" with stacked horizontal bars ───────────────────────
 function BrandMark({ size = 36 }: { size?: number }) {
@@ -157,8 +234,8 @@ function WarehouseMap() {
 }
 
 // ─── Bottom ticker ────────────────────────────────────────────────────────
-function DataTicker() {
-  const items = [...TICKER_ITEMS, ...TICKER_ITEMS]; // duplicate for seamless loop
+function DataTicker({ items: source }: { items: TickerItem[] }) {
+  const items = [...source, ...source]; // duplicate for seamless loop
   return (
     <div
       className="fixed bottom-0 left-0 right-0 h-9 overflow-hidden pointer-events-none"
@@ -215,6 +292,9 @@ export function LoginPage() {
   const [remember, setRemember]     = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  // Real-time public stats for the bottom ticker (safe pre-auth aggregates)
+  const { data: stats } = useLoginStats();
+  const tickerItems = buildTickerItems(stats);
 
   if (loading) {
     return (
@@ -626,8 +706,8 @@ export function LoginPage() {
           </div>
         </div>
 
-        {/* ── Bottom Data Ticker ── */}
-        <DataTicker />
+        {/* ── Bottom Data Ticker (real DB stats) ── */}
+        <DataTicker items={tickerItems} />
 
         {/* ── License footer (subtle, below ticker visually) ── */}
         <div
