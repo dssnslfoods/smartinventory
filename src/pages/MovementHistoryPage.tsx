@@ -3,13 +3,13 @@ import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import {
   Download, Search, Filter, ChevronLeft, ChevronRight, Loader2,
-  List, BarChart3, TrendingUp, TrendingDown,
+  List, BarChart3, TrendingUp, TrendingDown, X, Layers,
 } from 'lucide-react';
 import {
   ComposedChart, Area, Line, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { useTransactions, useMovementMonthly, useMonthlyTotal } from '@/hooks/useSupabaseQuery';
+import { useTransactions, useMovementMonthly, useMonthlyTotal, useMonthlySummary } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS, TRANS_TYPES } from '@/types/database';
@@ -388,6 +388,14 @@ function WaterfallTab() {
   // Pull a wide window (36 months) so the user can scrub the range freely
   const { data: monthly = [], isLoading } = useMonthlyTotal(36);
 
+  // Per-month-per-group breakdown — fetched alongside the totals so the
+  // drill-down modal opens instantly when a bar is clicked.
+  const { data: groupBreakdown = [] } = useMonthlySummary(36);
+
+  // Drill-down state — set when user clicks a bar. anchor bars (start/end)
+  // are not drillable.
+  const [drillBar, setDrillBar] = useState<WaterfallBar | null>(null);
+
   // ── Step 1: filter raw months to the selected range ──────────────────────
   const monthsInRange = useMemo(() => {
     const fromKey = `${fromMonth}-01`;
@@ -731,7 +739,19 @@ function WaterfallTab() {
                 {/* Invisible floor — stacked below visible delta */}
                 <Bar dataKey="floor" stackId="wf" fill="transparent" isAnimationActive={false} />
                 {/* Visible delta — each bar colored independently via Cell */}
-                <Bar dataKey="delta" stackId="wf" isAnimationActive={false} radius={[3, 3, 0, 0]}>
+                <Bar
+                  dataKey="delta"
+                  stackId="wf"
+                  isAnimationActive={false}
+                  radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  onClick={(d: any) => {
+                    const bar = d?.payload as WaterfallBar | undefined;
+                    // Skip the start/end anchors — nothing to break down there
+                    if (!bar || bar.type === 'start' || bar.type === 'end') return;
+                    setDrillBar(bar);
+                  }}
+                >
                   {waterfall.map((entry, idx) => (
                     <Cell key={`cell-${idx}`} fill={entry.color} />
                   ))}
@@ -769,8 +789,21 @@ function WaterfallTab() {
           แท่ง <strong style={{ color: '#dc2626' }}>แดงลอย</strong> ลดลง (จ่ายออก),
           แท่ง <strong style={{ color: '#1F3864' }}>น้ำเงิน</strong> ด้านขวาคือ <strong>ยอดสะสมสุทธิ</strong> ตลอดช่วง,
           เส้นประน้ำเงินตามขั้นบันได = ยอดสะสมตามเวลา (Running Total)
+          <br />
+          <strong style={{ color: 'var(--color-primary)' }}>💡 คลิกที่แท่ง</strong> เพื่อดูว่าประกอบด้วยกลุ่มสินค้าใดในสัดส่วนเท่าไหร่
         </div>
       </div>
+
+      {/* Group breakdown drill-down modal */}
+      {drillBar && (
+        <WaterfallGroupBreakdownModal
+          bar={drillBar}
+          monthlySummary={groupBreakdown}
+          granularity={granularity}
+          metric={metric}
+          onClose={() => setDrillBar(null)}
+        />
+      )}
 
       {/* Period detail table */}
       <div className="card p-0 overflow-hidden">
@@ -853,6 +886,188 @@ function KpiCard({ label, value, subtitle, color, icon }: {
       </div>
       <div className="mt-1 text-xl font-bold tabular-nums" style={{ color }}>{value}</div>
       {subtitle && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</div>}
+    </div>
+  );
+}
+
+// ── Waterfall bar → group breakdown drill-down modal ────────────────────────
+/**
+ * Click a waterfall bar → open this modal. We aggregate the per-group
+ * monthly summary (v_monthly_summary) by:
+ *   - the period the user clicked (single month, or 3 months of a quarter)
+ *   - the type of bar (in / out / net)
+ *   - the active metric (value or qty)
+ * then sort groups by contribution descending so the biggest contributors
+ * are at the top.
+ */
+function WaterfallGroupBreakdownModal({
+  bar, monthlySummary, granularity, metric, onClose,
+}: {
+  bar: WaterfallBar;
+  monthlySummary: { month: string; group_code: number; group_name: string;
+                    in_value: number; out_value: number; in_qty: number; out_qty: number }[];
+  granularity: Granularity;
+  metric: Metric;
+  onClose: () => void;
+}) {
+  // Which months belong to the clicked period?
+  const monthsInBar = useMemo<string[]>(() => {
+    if (granularity === 'month') {
+      // bar.period is "YYYY-MM" → all rows with month starting with that
+      return [`${bar.period}-`];
+    }
+    // Quarter: bar.period is "YYYY-Q{n}" → expand to 3 month prefixes
+    const [yStr, qStr] = bar.period.split('-Q');
+    const y = Number(yStr), q = Number(qStr);
+    const startMonth = (q - 1) * 3 + 1;
+    return [0, 1, 2].map(i => {
+      const m = startMonth + i;
+      return `${y}-${String(m).padStart(2, '0')}-`;
+    });
+  }, [bar.period, granularity]);
+
+  // Filter + aggregate by group
+  const breakdown = useMemo(() => {
+    const inKey = metric === 'value' ? 'in_value'  : 'in_qty';
+    const outKey = metric === 'value' ? 'out_value' : 'out_qty';
+    const map = new Map<string, { code: number; name: string; in: number; out: number; contribution: number }>();
+    for (const row of monthlySummary) {
+      // Match if any of the period's month prefixes match this row's month
+      const matches = monthsInBar.some(prefix => row.month.startsWith(prefix));
+      if (!matches) continue;
+      const key = String(row.group_code);
+      const ex  = map.get(key) ?? { code: row.group_code, name: row.group_name, in: 0, out: 0, contribution: 0 };
+      ex.in  += Number((row as any)[inKey]  ?? 0);
+      ex.out += Number((row as any)[outKey] ?? 0);
+      // Contribution depends on which bar type was clicked
+      ex.contribution =
+        bar.type === 'in'  ? ex.in :
+        bar.type === 'out' ? ex.out :
+        /* net */            ex.in - ex.out;
+      map.set(key, ex);
+    }
+    return Array.from(map.values())
+      .filter(g => Math.abs(g.contribution) > 0)
+      .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+  }, [monthlySummary, monthsInBar, metric, bar.type]);
+
+  const total = breakdown.reduce((s, g) => s + Math.abs(g.contribution), 0);
+
+  const typeLabel =
+    bar.type === 'in'  ? 'รับเข้า (In)' :
+    bar.type === 'out' ? 'จ่ายออก (Out)' : 'สุทธิ Net';
+  const typeColor =
+    bar.type === 'in'  ? '#16a34a' :
+    bar.type === 'out' ? '#dc2626' : '#1F3864';
+  const fmt = (v: number) => metric === 'value' ? `฿${formatCompact(Math.abs(v))}` : formatNumber(Math.abs(v), 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        style={{ backgroundColor: 'var(--bg-card)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 rounded-lg flex-shrink-0" style={{ backgroundColor: `${typeColor}1a` }}>
+              <Layers size={18} style={{ color: typeColor }} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-sm truncate" style={{ color: 'var(--text)' }}>
+                Breakdown ตามกลุ่มสินค้า — {bar.label.replace('\n', ' ')}
+              </h3>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                <span className="font-medium" style={{ color: typeColor }}>{typeLabel}</span>
+                {' '}· {metric === 'value' ? 'มูลค่า (฿)' : 'จำนวน (Qty)'}
+                {' '}· รวม <strong>{fmt(bar.rawValue)}</strong>
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="p-1.5 rounded hover:bg-[var(--bg-alt)]"
+            style={{ color: 'var(--text-muted)' }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {breakdown.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center" style={{ color: 'var(--text-muted)' }}>
+              <Layers size={32} className="opacity-40 mb-2" />
+              <p className="text-sm">ไม่มีข้อมูลกลุ่มสินค้าในช่วงนี้</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0" style={{ backgroundColor: 'var(--bg-card)', boxShadow: '0 1px 0 var(--border)' }}>
+                <tr style={{ color: 'var(--text-muted)' }}>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase">#</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase">กลุ่มสินค้า</th>
+                  <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase">{typeLabel}</th>
+                  <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase">% สัดส่วน</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase" style={{ width: '32%' }}>กราฟ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.map((g, idx) => {
+                  const pct = total > 0 ? (Math.abs(g.contribution) / total) * 100 : 0;
+                  return (
+                    <tr key={g.code} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                      <td className="px-3 py-2 text-xs text-center tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className="font-medium" style={{ color: 'var(--text)' }}>{g.name.split('-')[0]}</span>
+                        {g.name.includes('-') && (
+                          <span className="ml-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                            ({g.name.split('-').slice(1).join('-')})
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold" style={{ color: typeColor }}>
+                        {fmt(g.contribution)}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: 'var(--text)' }}>
+                        {pct.toFixed(1)}%
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="w-full rounded-full h-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <div className="h-2 rounded-full" style={{ width: `${pct}%`, backgroundColor: typeColor }} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+                  <td colSpan={2} className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text)' }}>
+                    รวม {breakdown.length} กลุ่ม
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right tabular-nums font-bold" style={{ color: typeColor }}>
+                    {fmt(total)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold" style={{ color: 'var(--text)' }}>
+                    100%
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+
+        {/* Footer hint */}
+        <div className="px-6 py-2.5 border-t text-[10px] text-center"
+             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+          เรียงตามมูลค่าที่ contribute สูงสุด → ต่ำสุด · กด Esc หรือคลิกพื้นที่นอกเพื่อปิด
+        </div>
+      </div>
     </div>
   );
 }
