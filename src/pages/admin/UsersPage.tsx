@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, AlertTriangle } from 'lucide-react';
+import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, AlertTriangle, UserCheck, UserX, ShieldAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { cn, formatDateTime } from '@/utils/format';
@@ -201,7 +201,12 @@ export function UsersPage() {
   const [search, setSearch]         = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkReset, setShowBulkReset] = useState(false);
-  /** ids of selected rows (excludes super_admins which can't be bulk-reset by admin) */
+  /** Confirmation modal for bulk activate / deactivate: null = closed,
+   *  otherwise the target is_active value about to be applied. */
+  const [bulkActivate, setBulkActivate] = useState<boolean | null>(null);
+  const [bulkSaving, setBulkSaving]   = useState(false);
+  const [bulkResult, setBulkResult]   = useState<{ ok: number; failed: number } | null>(null);
+  /** ids of selected rows (excludes super_admins which can't be bulk-edited by admin) */
   const [selected, setSelected]     = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => users.filter(u =>
@@ -241,6 +246,33 @@ export function UsersPage() {
 
   const selectedUsers = users.filter(u => selected.has(u.id));
 
+  /** Activate or deactivate all selected (non-super_admin) users in bulk.
+   *  Single UPDATE statement via the .in() filter — RLS already restricts
+   *  admin to their own company so no per-user permission check needed. */
+  const applyBulkActiveState = async (nextValue: boolean) => {
+    if (selected.size === 0) return;
+    setBulkSaving(true);
+    setBulkResult(null);
+    try {
+      const ids = Array.from(selected);
+      const { error, count } = await supabase
+        .from('user_profiles')
+        .update({ is_active: nextValue }, { count: 'exact' })
+        .in('id', ids)
+        .neq('role', 'super_admin');  // defence-in-depth — RLS also blocks
+      if (error) throw error;
+      setBulkResult({ ok: count ?? ids.length, failed: ids.length - (count ?? ids.length) });
+      qc.invalidateQueries({ queryKey: ['admin_users', company?.id] });
+      setSelected(new Set());
+    } catch (e: any) {
+      setBulkResult({ ok: 0, failed: selected.size });
+      // eslint-disable-next-line no-console
+      console.error('[users] bulk activate failed:', e);
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -269,13 +301,16 @@ export function UsersPage() {
               <li><strong>ผู้ใช้ใหม่จะถูกบังคับให้เปลี่ยนรหัสผ่านในครั้งแรกที่ login</strong></li>
             </ol>
           </HelpSection>
-          <HelpSection title="Bulk Reset Password (Reset แบบกลุ่ม)">
-            <ol className="list-decimal ml-5 text-xs space-y-1">
-              <li>ติ๊กเลือกผู้ใช้หลายรายการในตาราง (หรือเลือกทั้งหมดที่หัวคอลัมน์)</li>
-              <li>กดปุ่ม "Reset Password (N)" ใน toolbar ที่ปรากฏขึ้นด้านบน</li>
-              <li>กำหนดรหัสผ่านชั่วคราวร่วม (ระบบสุ่มให้แล้ว — ปรับได้)</li>
-              <li>ผู้ใช้ทุกคนจะถูกบังคับให้เปลี่ยนรหัสผ่านเองในการ login ครั้งถัดไป</li>
-            </ol>
+          <HelpSection title="Bulk Actions (จัดการผู้ใช้แบบกลุ่ม)">
+            <p className="text-xs mb-2">ติ๊ก checkbox หลายรายการ → toolbar สีน้ำเงินจะปรากฏ → เลือก action ที่ต้องการ:</p>
+            <ul className="list-disc ml-5 text-xs space-y-1">
+              <li><strong>🟢 Activate (N)</strong> — เปิดใช้งานผู้ใช้ที่เลือกทั้งหมดในคราวเดียว</li>
+              <li><strong>🟠 Deactivate (N)</strong> — ระงับผู้ใช้ที่เลือกทั้งหมด (จะ logout ในรอบ session ถัดไป)</li>
+              <li><strong>🔑 Reset Password (N)</strong> — สุ่มรหัสร่วม 1 ชุด · ทุกคนต้องเปลี่ยนรหัสตอน login ครั้งถัดไป</li>
+            </ul>
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted)' }}>
+              ใช้ได้กับทุก role (admin / supervisor / executive / staff) — super_admin ติ๊กไม่ได้
+            </p>
           </HelpSection>
           <HelpSection title="Reset Password / Edit Role">
             กดไอคอน 🔑 = Reset Password เฉพาะคน, ปุ่ม "Edit" = แก้ Role + Active/Inactive
@@ -314,7 +349,7 @@ export function UsersPage() {
 
       {/* Bulk action toolbar — sticky-feel banner that appears when ≥1 row selected */}
       {selected.size > 0 && (
-        <div className="mb-3 flex items-center gap-3 px-4 py-2.5 rounded-lg border"
+        <div className="mb-3 flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-lg border"
              style={{
                backgroundColor: 'rgba(31,56,100,0.06)',
                borderColor: 'var(--color-primary)',
@@ -323,20 +358,38 @@ export function UsersPage() {
           <span className="text-sm" style={{ color: 'var(--text)' }}>
             เลือกแล้ว <strong>{selected.size}</strong> ผู้ใช้
           </span>
-          <button
-            onClick={() => setShowBulkReset(true)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-            style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-          >
-            <KeyRound size={13} /> Reset Password ({selected.size})
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border hover:bg-[var(--bg-alt)]"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-          >
-            <X size={12} /> ล้าง
-          </button>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <button
+              onClick={() => setBulkActivate(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={{ borderColor: '#16a34a', color: '#16a34a', backgroundColor: 'rgba(22,163,74,0.08)' }}
+              title="เปิดใช้งานผู้ใช้ที่เลือกทั้งหมด"
+            >
+              <UserCheck size={13} /> Activate ({selected.size})
+            </button>
+            <button
+              onClick={() => setBulkActivate(false)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={{ borderColor: '#94a3b8', color: '#475569', backgroundColor: 'rgba(148,163,184,0.10)' }}
+              title="ระงับผู้ใช้ที่เลือกทั้งหมด"
+            >
+              <UserX size={13} /> Deactivate ({selected.size})
+            </button>
+            <button
+              onClick={() => setShowBulkReset(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+            >
+              <KeyRound size={13} /> Reset Password ({selected.size})
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border hover:bg-[var(--bg-alt)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              <X size={12} /> ล้าง
+            </button>
+          </div>
         </div>
       )}
 
@@ -411,6 +464,90 @@ export function UsersPage() {
             setSelected(new Set());
           }}
         />
+      )}
+
+      {/* ── Bulk activate / deactivate confirmation ───────────────────── */}
+      {bulkActivate !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+               style={{ backgroundColor: 'var(--bg-card)' }}>
+            <div className="px-6 py-4 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+              <ShieldAlert size={18} style={{ color: bulkActivate ? '#16a34a' : '#ea580c' }} />
+              <h2 className="font-semibold" style={{ color: 'var(--text)' }}>
+                {bulkActivate ? 'ยืนยันการเปิดใช้งานผู้ใช้' : 'ยืนยันการระงับผู้ใช้'}
+              </h2>
+            </div>
+            <div className="p-6 space-y-3">
+              {bulkResult ? (
+                <div className="px-3 py-3 rounded-lg text-sm leading-relaxed"
+                     style={{
+                       backgroundColor: bulkResult.failed === 0 ? 'rgba(22,163,74,0.10)' : 'rgba(234,88,12,0.10)',
+                       borderLeft: `3px solid ${bulkResult.failed === 0 ? '#16a34a' : '#ea580c'}`,
+                       color: bulkResult.failed === 0 ? '#15803d' : '#9a3412',
+                     }}>
+                  <p className="font-semibold mb-1">
+                    {bulkActivate ? 'เปิดใช้งานสำเร็จ' : 'ระงับสำเร็จ'} {bulkResult.ok} ผู้ใช้
+                  </p>
+                  {bulkResult.failed > 0 && (
+                    <p className="text-xs">ล้มเหลว {bulkResult.failed} ราย — ตรวจสอบใน console</p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm" style={{ color: 'var(--text)' }}>
+                    {bulkActivate
+                      ? <>กำลังจะ <strong>เปิดใช้งาน</strong> ผู้ใช้ <strong>{selected.size}</strong> ราย — ทุกคนจะกลับมาเข้าใช้ระบบได้</>
+                      : <>กำลังจะ <strong>ระงับ</strong> ผู้ใช้ <strong>{selected.size}</strong> ราย — ทุกคนจะไม่สามารถเข้าใช้ระบบได้</>
+                    }
+                  </p>
+                  <div className="rounded-lg border max-h-32 overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+                    <ul className="px-3 py-2 text-xs space-y-0.5">
+                      {selectedUsers.slice(0, 8).map(u => (
+                        <li key={u.id} className="flex items-center gap-2">
+                          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', ROLE_COLORS[u.role])}>
+                            {ROLE_LABELS[u.role]}
+                          </span>
+                          <span className="font-mono truncate" style={{ color: 'var(--text)' }}>{u.email}</span>
+                        </li>
+                      ))}
+                      {selectedUsers.length > 8 && (
+                        <li className="text-[11px]" style={{ color: 'var(--text-muted)' }}>… อีก {selectedUsers.length - 8} ราย</li>
+                      )}
+                    </ul>
+                  </div>
+                  {!bulkActivate && (
+                    <p className="text-[11px] leading-relaxed px-3 py-2 rounded"
+                       style={{ backgroundColor: 'rgba(234,88,12,0.08)', color: '#9a3412' }}>
+                      ⚠ ผู้ใช้ที่ถูกระงับจะถูก redirect ไปหน้า "บัญชีถูกระงับ" ทันทีที่ session refresh —
+                      session ปัจจุบันยังใช้ได้จนกว่าจะ expire
+                    </p>
+                  )}
+                </>
+              )}
+
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  onClick={() => { setBulkActivate(null); setBulkResult(null); }}
+                  className="px-4 py-2 rounded-lg text-sm border"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >
+                  {bulkResult ? 'ปิด' : 'ยกเลิก'}
+                </button>
+                {!bulkResult && (
+                  <button
+                    onClick={() => applyBulkActiveState(bulkActivate)}
+                    disabled={bulkSaving}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                    style={{ backgroundColor: bulkActivate ? '#16a34a' : '#ea580c' }}
+                  >
+                    {bulkSaving && <Loader2 size={14} className="animate-spin" />}
+                    {bulkSaving ? 'กำลังบันทึก…' : (bulkActivate ? `Activate ${selected.size} ผู้ใช้` : `Deactivate ${selected.size} ผู้ใช้`)}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
