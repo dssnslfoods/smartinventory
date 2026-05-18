@@ -1698,23 +1698,18 @@ function SlowMovingTab() {
 function TurnoverTab() {
   const [groupCode, setGroupCode] = useState<number | undefined>();
 
+  // ── Per-column filters — drive table + chart + summary in one shot ────────
+  const [filtCode,       setFiltCode]       = useState('');   // item_code substring
+  const [filtName,       setFiltName]       = useState('');   // itemname substring
+  const [filtMinCogs,    setFiltMinCogs]    = useState('');   // annual_cogs ≥
+  const [filtMinValue,   setFiltMinValue]   = useState('');   // current_stock_value ≥
+  const [filtMinTurn,    setFiltMinTurn]    = useState('');   // turnover_ratio ≥
+  const [filtMaxDoh,     setFiltMaxDoh]     = useState('');   // days_on_hand ≤
+  const [filtMinMonths,  setFiltMinMonths]  = useState('');   // active_months ≥
+
   const { data, isLoading } = useInventoryTurnover({
     groupName: groupCode ? ITEM_GROUPS[groupCode] : undefined,
   });
-
-  const summary = useMemo(() => {
-    const all = data ?? [];
-    const withRatio = all.filter(r => r.turnover_ratio !== null);
-    if (!withRatio.length) return { avg: 0, high: 0, low: 0, avgDoh: 0 };
-    const ratios = withRatio.map(r => Number(r.turnover_ratio));
-    const dohs   = withRatio.filter(r => r.days_on_hand !== null).map(r => Number(r.days_on_hand));
-    return {
-      avg:    ratios.reduce((s, v) => s + v, 0) / ratios.length,
-      high:   Math.max(...ratios),
-      low:    Math.min(...ratios),
-      avgDoh: dohs.length ? dohs.reduce((s, v) => s + v, 0) / dohs.length : 0,
-    };
-  }, [data]);
 
   /**
    * Sort the entire dataset locally by turnover_ratio desc so the chart's
@@ -1731,18 +1726,70 @@ function TurnoverTab() {
     return list;
   }, [data]);
 
+  // ── Apply per-column filters — single source for table / chart / export ──
+  const filtered = useMemo(() => {
+    const codeQ = filtCode.trim().toLowerCase();
+    const nameQ = filtName.trim().toLowerCase();
+    const minCogs   = parseFloat(filtMinCogs);
+    const minValue  = parseFloat(filtMinValue);
+    const minTurn   = parseFloat(filtMinTurn);
+    const maxDoh    = parseFloat(filtMaxDoh);
+    const minMonths = parseFloat(filtMinMonths);
+
+    return sortedData.filter(r => {
+      if (codeQ && !r.item_code.toLowerCase().includes(codeQ)) return false;
+      if (nameQ && !(r.itemname ?? '').toLowerCase().includes(nameQ)) return false;
+      if (Number.isFinite(minCogs)   && Number(r.annual_cogs)         < minCogs)   return false;
+      if (Number.isFinite(minValue)  && Number(r.current_stock_value) < minValue)  return false;
+      if (Number.isFinite(minTurn)) {
+        if (r.turnover_ratio == null) return false;
+        if (Number(r.turnover_ratio) < minTurn) return false;
+      }
+      if (Number.isFinite(maxDoh)) {
+        if (r.days_on_hand == null) return false;
+        if (Number(r.days_on_hand) > maxDoh) return false;
+      }
+      if (Number.isFinite(minMonths) && Number(r.active_months) < minMonths) return false;
+      return true;
+    });
+  }, [sortedData, filtCode, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths]);
+
+  const activeFilterCount = [
+    filtCode, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths,
+  ].filter(Boolean).length;
+
+  const resetFilters = () => {
+    setFiltCode(''); setFiltName(''); setFiltMinCogs(''); setFiltMinValue('');
+    setFiltMinTurn(''); setFiltMaxDoh(''); setFiltMinMonths('');
+  };
+
+  // Summary KPI cards react to filters too — what users see in the table is
+  // what they see in the KPIs above.
+  const summary = useMemo(() => {
+    const withRatio = filtered.filter(r => r.turnover_ratio !== null);
+    if (!withRatio.length) return { avg: 0, high: 0, low: 0, avgDoh: 0 };
+    const ratios = withRatio.map(r => Number(r.turnover_ratio));
+    const dohs   = withRatio.filter(r => r.days_on_hand !== null).map(r => Number(r.days_on_hand));
+    return {
+      avg:    ratios.reduce((s, v) => s + v, 0) / ratios.length,
+      high:   Math.max(...ratios),
+      low:    Math.min(...ratios),
+      avgDoh: dohs.length ? dohs.reduce((s, v) => s + v, 0) / dohs.length : 0,
+    };
+  }, [filtered]);
+
   const chartData = useMemo(() =>
-    sortedData.slice(0, 20).map(r => ({
+    filtered.slice(0, 20).map(r => ({
       item_code:      r.item_code,
       itemname:       r.itemname,
       turnover_ratio: Number(r.turnover_ratio ?? 0),
       days_on_hand:   Number(r.days_on_hand   ?? 0),
     })),
-    [sortedData],
+    [filtered],
   );
 
   const handleExport = () => {
-    exportToExcel(sortedData.map(r => ({
+    exportToExcel(filtered.map(r => ({
       'Item Code':      r.item_code,
       'Item Name':      r.itemname,
       'Group':          r.group_name,
@@ -1778,7 +1825,7 @@ function TurnoverTab() {
       </div>
 
       <div className="card">
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
           <select className="select" value={groupCode ?? ''} onChange={e => setGroupCode(e.target.value ? Number(e.target.value) : undefined)}>
             <option value="">All Groups</option>
@@ -1786,15 +1833,39 @@ function TurnoverTab() {
               <option key={code} value={code}>{name}</option>
             ))}
           </select>
+
+          {/* Result count + reset filters */}
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            แสดง <strong style={{ color: 'var(--text)' }}>{formatNumber(filtered.length)}</strong>
+            {' '}/ {formatNumber(sortedData.length)} รายการ
+          </span>
+          {activeFilterCount > 0 && (
+            <button
+              onClick={resetFilters}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              title="ล้าง column filter ทั้งหมด"
+            >
+              <X size={12} /> Reset filters ({activeFilterCount})
+            </button>
+          )}
+
           <button onClick={handleExport} className="btn btn-secondary ml-auto">
-            <Download size={16} /> Export
+            <Download size={16} /> Export ({filtered.length})
           </button>
         </div>
       </div>
 
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 20 Items by Turnover Ratio</h3>
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
+            Top 20 Items by Turnover Ratio
+            {activeFilterCount > 0 && (
+              <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
+                (จาก {formatNumber(filtered.length)} รายการที่ผ่าน filter)
+              </span>
+            )}
+          </h3>
           <span className="text-[11px] px-2 py-0.5 rounded-full"
                 style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
             ลำดับเดียวกับตารางด้านล่าง
@@ -2014,7 +2085,82 @@ function TurnoverTab() {
                 </tr>
               </thead>
               <tbody>
-                {sortedData.map((row) => (
+                {/* ── Per-column filter row ─────────────────────────────── */}
+                <tr style={{ backgroundColor: 'var(--bg-alt)' }}>
+                  <td className="px-1.5 py-1">
+                    <input
+                      value={filtCode}
+                      onChange={e => setFiltCode(e.target.value)}
+                      placeholder="🔍 รหัส"
+                      className="w-full px-2 py-1 rounded border text-[11px]"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      value={filtName}
+                      onChange={e => setFiltName(e.target.value)}
+                      placeholder="🔍 ชื่อสินค้า"
+                      className="w-full px-2 py-1 rounded border text-[11px]"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    ใช้ filter ด้านบน
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number" min="0"
+                      value={filtMinCogs}
+                      onChange={e => setFiltMinCogs(e.target.value)}
+                      placeholder="≥ ฿"
+                      className="w-full px-2 py-1 rounded border text-[11px] text-right tabular-nums"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number" min="0"
+                      value={filtMinValue}
+                      onChange={e => setFiltMinValue(e.target.value)}
+                      placeholder="≥ ฿"
+                      className="w-full px-2 py-1 rounded border text-[11px] text-right tabular-nums"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number" min="0" step="0.1"
+                      value={filtMinTurn}
+                      onChange={e => setFiltMinTurn(e.target.value)}
+                      placeholder="≥ ×"
+                      className="w-full px-2 py-1 rounded border text-[11px] text-right tabular-nums"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number" min="0"
+                      value={filtMaxDoh}
+                      onChange={e => setFiltMaxDoh(e.target.value)}
+                      placeholder="≤ d"
+                      className="w-full px-2 py-1 rounded border text-[11px] text-right tabular-nums"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number" min="0" max="12"
+                      value={filtMinMonths}
+                      onChange={e => setFiltMinMonths(e.target.value)}
+                      placeholder="≥ mo"
+                      className="w-full px-2 py-1 rounded border text-[11px] text-right tabular-nums"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </td>
+                </tr>
+
+                {filtered.map((row) => (
                   <tr key={row.item_code}>
                     <td className="px-2 py-2 font-mono text-xs font-medium truncate" style={{ color: 'var(--color-primary-light)' }} title={row.item_code}>
                       {row.item_code}
@@ -2046,8 +2192,12 @@ function TurnoverTab() {
                     </td>
                   </tr>
                 ))}
-                {sortedData.length === 0 && (
-                  <tr><td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>ยังไม่มีข้อมูล</td></tr>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
+                    {activeFilterCount > 0
+                      ? 'ไม่พบรายการที่ตรงกับเงื่อนไข — ลองปรับ filter หรือกด Reset'
+                      : 'ยังไม่มีข้อมูล'}
+                  </td></tr>
                 )}
               </tbody>
             </table>
