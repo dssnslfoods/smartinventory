@@ -1866,14 +1866,151 @@ function TurnoverTab() {
               </colgroup>
               <thead>
                 <tr>
-                  <th className="px-2 py-2">รหัส</th>
-                  <th className="px-2 py-2">ชื่อสินค้า</th>
-                  <th className="px-2 py-2">กลุ่ม</th>
-                  <th className="px-2 py-2 text-right">COGS ปี</th>
-                  <th className="px-2 py-2 text-right">มูลค่า</th>
-                  <th className="px-2 py-2 text-right">Turnover</th>
-                  <th className="px-2 py-2 text-right">DoH</th>
-                  <th className="px-2 py-2 text-right">เดือน</th>
+                  <th className="px-2 py-2">
+                    <span className="inline-flex items-center gap-1">
+                      รหัส
+                      <InfoTooltip title="Item Code">
+                        <p className="mb-1">รหัสสินค้าจาก master file (<code>items.item_code</code>)</p>
+                        <ul className="list-disc ml-4 space-y-0.5 text-[11px]">
+                          <li>เป็น unique key ที่เชื่อมกับ ERP</li>
+                          <li>คอลัมน์นี้ผูกกับ <code>inventory_transactions.item_code</code></li>
+                          <li>ใช้สำหรับ join ข้ามทุกตารางในระบบ</li>
+                        </ul>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2">
+                    <span className="inline-flex items-center gap-1">
+                      ชื่อสินค้า
+                      <InfoTooltip title="Item Name">
+                        <p className="mb-1">ชื่อเต็มของสินค้า (<code>items.itemname</code>)</p>
+                        <ul className="list-disc ml-4 space-y-0.5 text-[11px]">
+                          <li>ดึงจากตาราง items ตอน import</li>
+                          <li>Hover แท่งใน chart ด้านบนเพื่อดูชื่อพร้อมรหัส</li>
+                          <li>ความยาวเกินคอลัมน์ → ตัด ... · hover ดูเต็มได้</li>
+                        </ul>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2">
+                    <span className="inline-flex items-center gap-1">
+                      กลุ่ม
+                      <InfoTooltip title="Item Group (FFG / FRM / FBY / FPKG)">
+                        <p className="mb-1">กลุ่มสินค้าหลัก สำหรับการแบ่งรายงาน</p>
+                        <ul className="list-disc ml-4 space-y-0.5 text-[11px]">
+                          <li><strong>FFG</strong> — Finished Goods (สินค้าสำเร็จรูป)</li>
+                          <li><strong>FRM</strong> — Raw Materials (วัตถุดิบ)</li>
+                          <li><strong>FBY</strong> — By Product (ของพลอยได้)</li>
+                          <li><strong>FPKG</strong> — Packaging (บรรจุภัณฑ์)</li>
+                        </ul>
+                        <p className="mt-1.5 text-[11px] italic" style={{ color: 'var(--text-muted)' }}>
+                          ดูสรุประดับกลุ่มที่ Reports → Group Analysis
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2 text-right">
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      COGS ปี
+                      <InfoTooltip title="Annual COGS (Cost of Goods Sold)">
+                        <p className="mb-1">ต้นทุนสินค้าที่ถูกขายออกในรอบ <strong>12 เดือนล่าสุด</strong></p>
+                        <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <p className="font-mono" style={{ color: 'var(--text)' }}>
+                            COGS = Σ (out_qty × moving_avg_cost)
+                          </p>
+                          <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                            สรุปจาก inventory_transactions ที่ trans_type มีการ "จ่ายออก"
+                          </p>
+                        </div>
+                        <p className="mt-1.5 text-[11px]">
+                          ใช้เป็น <strong>ตัวเศษ</strong> ในการคำนวณ Turnover
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2 text-right">
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      มูลค่า
+                      <InfoTooltip title="Stock Value (มูลค่าคงเหลือปัจจุบัน)">
+                        <p className="mb-1">มูลค่าสต็อกที่ยังเหลือในคลัง ณ ปัจจุบัน — คือ <strong>Working Capital ที่จม</strong></p>
+                        <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <p className="font-mono" style={{ color: 'var(--text)' }}>
+                            Stock Value = Σ (current_stock × moving_avg)
+                          </p>
+                          <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                            ที่ระดับ SKU (รวมทุกคลัง) — ตรงกับ Total Stock Value ที่หน้า Stock On-Hand
+                          </p>
+                        </div>
+                        <p className="mt-1.5 text-[11px]">
+                          ใช้เป็น <strong>ตัวส่วน</strong> ในการคำนวณ Turnover
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2 text-right">
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      Turnover
+                      <InfoTooltip title="Turnover Ratio (อัตราการหมุนเวียนต่อปี)">
+                        <p className="mb-1">สินค้าหมุนเวียนกี่รอบในรอบปี — <strong>ยิ่งสูงยิ่งดี</strong></p>
+                        <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <p className="font-mono" style={{ color: 'var(--text)' }}>
+                            Turnover = Annual COGS ÷ Stock Value
+                          </p>
+                        </div>
+                        <p className="mb-1 mt-1.5"><strong>เกณฑ์ตีความ</strong></p>
+                        <ul className="space-y-0.5 text-[11px]">
+                          <li><span style={{ color: '#2E7D32' }}>● ≥ 4× = ดีมาก</span> (สินค้าหมุนเร็ว ผลิตหรือสั่งซื้อตามรอบ)</li>
+                          <li><span style={{ color: '#d97706' }}>● 1-4× = ปกติ</span> (ระดับมาตรฐาน)</li>
+                          <li><span style={{ color: '#C62828' }}>● &lt; 1× = ของค้าง</span> (สินค้าจม รอบปีหมุนไม่ครบ)</li>
+                        </ul>
+                        <p className="mt-1.5 text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                          สีในตาราง: เขียว = สูงกว่าค่าเฉลี่ย · แดง = ต่ำกว่าค่าเฉลี่ย
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2 text-right">
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      DoH
+                      <InfoTooltip title="Days on Hand (จำนวนวันที่สต็อกอยู่ได้)">
+                        <p className="mb-1">ถ้าหยุดสั่งซื้อตอนนี้ สต็อกจะอยู่ได้อีกกี่วัน</p>
+                        <div className="rounded p-2 text-[11px] my-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                          <p className="font-mono" style={{ color: 'var(--text)' }}>
+                            DoH = 365 ÷ Turnover Ratio
+                          </p>
+                          <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                            หรือเทียบเท่า: (Stock Value ÷ COGS) × 365
+                          </p>
+                        </div>
+                        <p className="mb-1 mt-1.5"><strong>เกณฑ์ตีความ</strong></p>
+                        <ul className="space-y-0.5 text-[11px]">
+                          <li><span style={{ color: '#2E7D32' }}>● &lt; 90 วัน = ดี</span> (มาตรฐานอาหาร)</li>
+                          <li><span style={{ color: '#d97706' }}>● 90-180 วัน = ปกติ</span></li>
+                          <li><span style={{ color: '#C62828' }}>● &gt; 180 วัน = ของค้าง</span> (อาจเลย shelf life แล้ว)</li>
+                        </ul>
+                        <p className="mt-1.5 text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                          สีในตาราง: แดง = สูงกว่า 1.5× ของค่าเฉลี่ย DoH
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
+                  <th className="px-2 py-2 text-right">
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      เดือน
+                      <InfoTooltip title="Active Months (เดือนที่มี transaction)">
+                        <p className="mb-1">จำนวนเดือนในรอบ <strong>12 เดือนล่าสุด</strong> ที่ SKU นี้มีการเคลื่อนไหว</p>
+                        <ul className="list-disc ml-4 space-y-0.5 text-[11px]">
+                          <li><strong>12 mo</strong> — ขายทุกเดือน · best seller</li>
+                          <li><strong>6-11 mo</strong> — ขายประจำ มีบางเดือนหยุด</li>
+                          <li><strong>1-5 mo</strong> — ขายเป็นรอบ ไม่สม่ำเสมอ</li>
+                          <li><strong>0 mo</strong> — ไม่มีการเคลื่อนไหว → Dead Stock</li>
+                        </ul>
+                        <p className="mt-1.5 text-[11px] italic" style={{ color: 'var(--text-muted)' }}>
+                          ใช้ดูสไตล์การขาย: SKU ที่ 12 mo เหมาะ stocking สูง · 1-3 mo เหมาะสั่งตามคำสั่ง
+                        </p>
+                      </InfoTooltip>
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
