@@ -166,8 +166,22 @@ export function LotDetailModal({
                       <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {l.batch_num ?? '—'}
                         {isOldestFefoRisk && (
-                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold"
-                                style={{ backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}>
+                          <span
+                            className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold cursor-help"
+                            style={{ backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
+                            title={
+                              `OLD: lot นี้อายุ ${formatNumber(inDateDays!)} วัน (≥ 180 วัน) ` +
+                              `และมี lot ใหม่กว่าในคลังเดียวกัน → ละเมิด FEFO\n\n` +
+                              `ทำไมถึง flag:\n` +
+                              `• สินค้าค้างคลังนาน เสี่ยงเสื่อมคุณภาพและใกล้หมดอายุ\n` +
+                              `• ทีมหยิบ lot ใหม่ไปก่อนแทนที่จะหยิบ lot นี้\n` +
+                              `• กระทบ GMP/HACCP audit\n\n` +
+                              `ควรทำอย่างไร:\n` +
+                              `• หยิบ lot นี้ออกก่อน (First-Expired-First-Out)\n` +
+                              `• ถ้าใกล้หมดอายุมาก → ทำโปรโมชัน clearance\n` +
+                              `• ถ้าเลย shelf life → ดำเนินการ write-off ตาม SOP`
+                            }
+                          >
                             ⚠️ OLD
                           </span>
                         )}
@@ -206,9 +220,20 @@ export function LotDetailModal({
           )}
         </div>
 
-        {/* Footer hint */}
-        <div className="px-6 py-2.5 border-t text-[10px] text-center" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
-          เรียงตามวันหมดอายุน้อย → มาก (FEFO order) · กด Esc หรือคลิกพื้นที่นอกหน้าต่างเพื่อปิด
+        {/* Footer hint + OLD badge legend */}
+        <div className="px-6 py-2.5 border-t flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-center"
+             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+          <span>เรียงตามวันหมดอายุน้อย → มาก (FEFO order)</span>
+          <span>·</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="text-[9px] px-1 py-0.5 rounded font-bold"
+                  style={{ backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}>
+              ⚠️ OLD
+            </span>
+            = lot อายุ ≥ 180 วัน + มี lot ใหม่กว่าในคลังเดียวกัน (ละเมิด FEFO)
+          </span>
+          <span>·</span>
+          <span>กด Esc หรือคลิกพื้นที่นอกเพื่อปิด</span>
         </div>
       </div>
     </div>
