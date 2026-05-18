@@ -1793,14 +1793,40 @@ function TurnoverTab() {
       </div>
 
       <div className="card">
-        <h3 className="font-semibold mb-3" style={{ color: 'var(--text)' }}>Top 20 Items by Turnover Ratio</h3>
-        <div className="h-72">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>Top 20 Items by Turnover Ratio</h3>
+          <span className="text-[11px] px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+            ลำดับเดียวกับตารางด้านล่าง
+          </span>
+        </div>
+        {/* Height scales with 20 items so all y-axis labels can show with interval=0 */}
+        <div style={{ height: 520 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 40 }}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ left: 10, right: 50, top: 5, bottom: 30 }}
+              barCategoryGap="22%"
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-              <XAxis type="number" stroke="var(--text-muted)" fontSize={11}
-                label={{ value: 'Turnover Ratio (×)', position: 'insideBottomRight', offset: -10, fontSize: 11 }} />
-              <YAxis type="category" dataKey="item_code" width={90} stroke="var(--text-muted)" fontSize={10} />
+              <XAxis
+                type="number" stroke="var(--text-muted)" fontSize={11}
+                label={{ value: 'Turnover Ratio (×)', position: 'insideBottomRight', offset: -10, fontSize: 11 }}
+              />
+              {/* interval={0} forces ALL 20 labels to render so the visual order
+                  exactly matches the table below — Recharts default auto-skips
+                  labels when they overlap, which was making the chart look like
+                  it was sorted differently. */}
+              <YAxis
+                type="category"
+                dataKey="item_code"
+                width={104}
+                stroke="var(--text-muted)"
+                fontSize={10}
+                interval={0}
+                tickMargin={4}
+              />
               <Tooltip {...tooltipStyle}
                 formatter={(val: unknown, name?: string) =>
                   name === 'turnover_ratio' ? [`${Number(val).toFixed(2)}×`, 'Turnover'] : [`${Number(val).toFixed(0)} days`, 'Days on Hand']}
