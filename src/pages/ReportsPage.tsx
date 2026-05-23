@@ -1410,6 +1410,9 @@ function SlowMovingTab() {
   /** "FEFO Violations only" toggle — surfaces SKUs that look healthy by
    *  movement but have aging lots stuck behind newer ones. */
   const [fefoOnly, setFefoOnly]   = useState(false);
+  /** "At-Risk only" — Dead + Slow combined (client-side; the dropdown can
+   *  only pick one status at a time). Driven by the At-Risk KPI card. */
+  const [atRisk, setAtRisk]       = useState(false);
   /** Drill-down: click a row to inspect every lot of that item × warehouse */
   const [drillDown, setDrillDown] = useState<{
     item_code: string; itemname: string;
@@ -1423,11 +1426,22 @@ function SlowMovingTab() {
     groupName:      groupCode ? ITEM_GROUPS[groupCode] : undefined,
   });
 
-  // Apply FEFO filter client-side (RPC view doesn't expose it as a filter param)
+  // Apply client-side filters (RPC view doesn't expose these as params)
   const data = useMemo(() => {
-    if (!fefoOnly) return rawData;
-    return (rawData ?? []).filter(r => r.fefo_violation);
-  }, [rawData, fefoOnly]);
+    let rows = rawData ?? [];
+    if (atRisk)   rows = rows.filter(r => r.movement_status === 'dead_stock' || r.movement_status === 'slow_moving');
+    if (fefoOnly) rows = rows.filter(r => r.fefo_violation);
+    return rows;
+  }, [rawData, atRisk, fefoOnly]);
+
+  // ── KPI card click handlers — each acts as a preset (clears the others) ───
+  const toggleStatus = (s: string) => {
+    setStatus(prev => (prev === s ? '' : s));
+    setAtRisk(false);
+    setFefoOnly(false);
+  };
+  const toggleAtRisk = () => { setAtRisk(v => !v); setStatus(''); setFefoOnly(false); };
+  const toggleFefo   = () => { setFefoOnly(v => !v); setStatus(''); setAtRisk(false); };
 
   const summary = useMemo(() => {
     const all = rawData ?? [];   // strip *unfiltered* totals (so cards always show full picture)
@@ -1465,31 +1479,81 @@ function SlowMovingTab() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.dead_stock }}>
+        {/* Dead Stock — click to filter */}
+        <button
+          onClick={() => toggleStatus('dead_stock')}
+          className="card border-l-4 text-left transition-all"
+          style={{
+            borderLeftColor: SLOW_COLORS.dead_stock,
+            opacity: (status || atRisk || fefoOnly) && status !== 'dead_stock' ? 0.55 : 1,
+            boxShadow: status === 'dead_stock' ? `0 0 0 2px ${SLOW_COLORS.dead_stock}` : undefined,
+          }}
+          title={status === 'dead_stock' ? 'คลิกซ้ำเพื่อยกเลิก' : 'คลิกเพื่อกรอง Dead Stock'}
+        >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Dead Stock (≥180d / never)</p>
           <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.dead_stock }}>{formatNumber(summary.dead, 0)}</p>
           <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.deadVal)}</p>
-        </div>
-        <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.slow_moving }}>
+        </button>
+        {/* Slow Moving — click to filter */}
+        <button
+          onClick={() => toggleStatus('slow_moving')}
+          className="card border-l-4 text-left transition-all"
+          style={{
+            borderLeftColor: SLOW_COLORS.slow_moving,
+            opacity: (status || atRisk || fefoOnly) && status !== 'slow_moving' ? 0.55 : 1,
+            boxShadow: status === 'slow_moving' ? `0 0 0 2px ${SLOW_COLORS.slow_moving}` : undefined,
+          }}
+          title={status === 'slow_moving' ? 'คลิกซ้ำเพื่อยกเลิก' : 'คลิกเพื่อกรอง Slow Moving'}
+        >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Slow Moving (90–179 days)</p>
           <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.slow_moving }}>{formatNumber(summary.slow, 0)}</p>
           <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.slowVal)}</p>
-        </div>
-        <div className="card border-l-4" style={{ borderLeftColor: SLOW_COLORS.normal }}>
+        </button>
+        {/* Active — click to filter */}
+        <button
+          onClick={() => toggleStatus('normal')}
+          className="card border-l-4 text-left transition-all"
+          style={{
+            borderLeftColor: SLOW_COLORS.normal,
+            opacity: (status || atRisk || fefoOnly) && status !== 'normal' ? 0.55 : 1,
+            boxShadow: status === 'normal' ? `0 0 0 2px ${SLOW_COLORS.normal}` : undefined,
+          }}
+          title={status === 'normal' ? 'คลิกซ้ำเพื่อยกเลิก' : 'คลิกเพื่อกรอง Active'}
+        >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Active (&lt;90 days)</p>
           <p className="text-2xl font-bold" style={{ color: SLOW_COLORS.normal }}>{formatNumber(summary.normal, 0)}</p>
-        </div>
-        <div className="card">
+        </button>
+        {/* At-Risk = Dead + Slow combined — click to filter */}
+        <button
+          onClick={toggleAtRisk}
+          className="card border-l-4 text-left transition-all"
+          style={{
+            borderLeftColor: '#b45309',
+            opacity: (status || atRisk || fefoOnly) && !atRisk ? 0.55 : 1,
+            boxShadow: atRisk ? '0 0 0 2px #b45309' : undefined,
+          }}
+          title={atRisk ? 'คลิกซ้ำเพื่อยกเลิก' : 'คลิกเพื่อกรอง Dead + Slow รวมกัน'}
+        >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>At-Risk Inventory Value</p>
           <p className="text-2xl font-bold" style={{ color: 'var(--text)' }}>
             ฿{formatCompact(summary.deadVal + summary.slowVal)}
           </p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Dead + Slow stock combined</p>
-        </div>
-        {/* FEFO Violation card — surfaces SKUs where old lots aren't being picked */}
-        <div className="card border-l-4" style={{ borderLeftColor: '#7c3aed' }}>
+        </button>
+        {/* FEFO Violation card — click to filter to FEFO violations only */}
+        <button
+          onClick={toggleFefo}
+          className="card border-l-4 text-left transition-all"
+          style={{
+            borderLeftColor: '#7c3aed',
+            opacity: (status || atRisk || fefoOnly) && !fefoOnly ? 0.55 : 1,
+            boxShadow: fefoOnly ? '0 0 0 2px #7c3aed' : undefined,
+          }}
+          title={fefoOnly ? 'คลิกซ้ำเพื่อยกเลิก' : 'คลิกเพื่อกรอง FEFO Violations เท่านั้น'}
+        >
           <p className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
             ⚠️ FEFO Violations
+            <span onClick={e => e.stopPropagation()}>
             <InfoTooltip title="FEFO Violation">
               <p className="mb-2">
                 SKU ที่มี <strong>lot อายุ ≥ 180 วัน</strong> ทั้งที่มี <strong>lot ใหม่กว่า</strong> ในคลังเดียวกัน
@@ -1513,16 +1577,18 @@ function SlowMovingTab() {
                 </div>
               </div>
             </InfoTooltip>
+            </span>
           </p>
           <p className="text-2xl font-bold" style={{ color: '#7c3aed' }}>{formatNumber(summary.fefoCount, 0)}</p>
           <p className="text-sm tabular-nums" style={{ color: 'var(--text-muted)' }}>฿{formatCompact(summary.fefoVal)}</p>
-        </div>
+        </button>
       </div>
 
       <div className="card">
         <div className="flex flex-wrap items-center gap-4">
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-          <select className="select" value={status} onChange={e => setStatus(e.target.value)}>
+          <select className="select" value={status}
+                  onChange={e => { setStatus(e.target.value); setAtRisk(false); }}>
             <option value="">All Statuses</option>
             <option value="dead_stock">Dead Stock</option>
             <option value="slow_moving">Slow Moving</option>
