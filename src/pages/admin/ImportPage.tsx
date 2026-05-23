@@ -85,6 +85,12 @@ export function ImportPage() {
 
   const [progress, setProgress] = useState<ProgressState>({ step: '', detail: '', percent: 0, error: '', done: false });
 
+  /** Per-sheet import status for the live checklist.
+   *  pending = ยังไม่เริ่ม · importing = กำลังนำเข้า · done = สำเร็จ (บันทึกแล้ว)
+   *  · error = ค้าง/พลาด (ยังไม่บันทึก ต้อง re-import) */
+  type SheetStatus = 'pending' | 'importing' | 'done' | 'error';
+  const [sheetStatus, setSheetStatus] = useState<Record<SheetConfigKey, SheetStatus>>({} as any);
+
 
   const setSheetInclude = (key: SheetConfigKey, val: boolean) => setIncludeSheets(p => ({ ...p, [key]: val }));
   const togglePreview = (key: string) => setPreviewOpen(p => ({ ...p, [key]: !p[key] }));
@@ -119,6 +125,16 @@ export function ImportPage() {
     setImporting(true);
     setProgress({ step: 'Initializing Import...', detail: '', percent: 10, error: '', done: false });
 
+    // Seed checklist: sheets in scope w/ rows = pending; others stay unset.
+    setSheetStatus(() => {
+      const init: any = {};
+      for (const c of SHEET_CONFIG) {
+        const n = importState.parsedData?.[c.key]?.length ?? 0;
+        if (includeSheets[c.key] && n > 0) init[c.key] = 'pending';
+      }
+      return init;
+    });
+
     // Drop user-excluded rows from each sheet before sending to the importer.
     const cleanedData: any = { ...importState.parsedData };
     for (const c of SHEET_CONFIG) {
@@ -132,7 +148,8 @@ export function ImportPage() {
       cleanedData,
       includeSheets,
       txnMode,
-      (step, detail, pct) => setProgress({ step, detail, percent: pct, error: '', done: false })
+      (step, detail, pct) => setProgress({ step, detail, percent: pct, error: '', done: false }),
+      (key, status) => setSheetStatus(prev => ({ ...prev, [key]: status })),
     );
 
     setImporting(false);
@@ -457,6 +474,39 @@ export function ImportPage() {
                  <div className="flex justify-between text-xs font-medium mb-2"><span>{progress.step}</span><span className="text-primary">{Math.round(progress.percent)}%</span></div>
                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden mb-1"><div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress.percent}%` }} /></div>
                  {progress.error ? <p className="text-xs text-red-600 mt-2">{progress.error}</p> : <p className="text-xs text-muted-foreground mt-1">{progress.detail}</p>}
+               </div>
+             )}
+
+             {/* ── Per-sheet checklist ─────────────────────────────────── */}
+             {Object.keys(sheetStatus).length > 0 && (
+               <div className="p-4 rounded-xl border bg-background space-y-2">
+                 <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>สถานะการนำเข้าแต่ละ Sheet</p>
+                 {SHEET_CONFIG.filter(c => sheetStatus[c.key]).map(c => {
+                   const st = sheetStatus[c.key];
+                   const n = importState?.parsedData?.[c.key]?.length ?? 0;
+                   const ex = (excluded[c.key]?.size ?? 0);
+                   const meta =
+                     st === 'done'      ? { icon: '✅', label: 'สำเร็จ — บันทึกแล้ว',          color: '#16a34a' } :
+                     st === 'importing' ? { icon: '⟳', label: 'กำลังนำเข้า…',                color: 'var(--color-primary)' } :
+                     st === 'error'     ? { icon: '❌', label: 'ค้าง/พลาด — ยังไม่บันทึก',     color: '#dc2626' } :
+                                          { icon: '○', label: 'รอคิว',                       color: 'var(--text-muted)' };
+                   return (
+                     <div key={c.key} className="flex items-center gap-2 text-xs">
+                       <span className={st === 'importing' ? 'animate-spin inline-block' : ''} style={{ color: meta.color }}>{meta.icon}</span>
+                       <span className="font-medium" style={{ color: 'var(--text)' }}>{c.label}</span>
+                       <span style={{ color: 'var(--text-muted)' }}>· {formatNumber(n - ex)} rows</span>
+                       <span className="ml-auto font-medium" style={{ color: meta.color }}>{meta.label}</span>
+                     </div>
+                   );
+                 })}
+                 {/* Retry guidance when something failed */}
+                 {Object.values(sheetStatus).includes('error') && (
+                   <p className="text-[11px] mt-1 px-2 py-1.5 rounded leading-relaxed"
+                      style={{ backgroundColor: 'rgba(234,88,12,0.08)', color: '#9a3412' }}>
+                     💡 Sheet ที่ ❌ ยังไม่ถูกบันทึก — ปิด toggle Sheet ที่ ✅ แล้ว import เฉพาะ Sheet ที่เหลือใหม่ได้
+                     (ทุก Sheet เป็น upsert/snapshot replace → re-run ปลอดภัย ไม่ซ้ำ)
+                   </p>
+                 )}
                </div>
              )}
           </div>

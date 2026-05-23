@@ -596,14 +596,22 @@ export const executeComprehensiveImport = async (
   data: ParsedData,
   includeSheets: Record<SheetConfigKey, boolean>,
   txnMode: 'replace' | 'append',
-  onProgress: (step: string, detail: string, percent: number) => void
-): Promise<{ success: boolean; error?: string }> => {
+  onProgress: (step: string, detail: string, percent: number) => void,
+  /** Per-sheet status callback so the UI can render a live checklist.
+   *  'importing' before a sheet starts, 'done' after it commits, 'error'
+   *  if it throws. Sheets that never reach 'done' remain un-checked. */
+  onSheetStatus?: (key: SheetConfigKey, status: 'importing' | 'done' | 'error') => void,
+): Promise<{ success: boolean; error?: string; failedSheet?: SheetConfigKey }> => {
+  // Tracks which sheet is mid-flight so the catch block can mark it 'error'.
+  let currentSheet: SheetConfigKey | null = null;
   try {
     let pct = 10;
     const progressSegment = 90 / Object.values(includeSheets).filter(Boolean).length;
 
     const executeTable = async (key: SheetConfigKey, table: string, conflictKey: string | null, label: string) => {
       if (!includeSheets[key] || data[key].length === 0) return;
+      currentSheet = key;
+      onSheetStatus?.(key, 'importing');
       onProgress(`กำลังอัปเดต ${label}...`, `0 / ${formatNumber(data[key].length)} rows`, pct);
 
       if (conflictKey) {
@@ -647,6 +655,8 @@ export const executeComprehensiveImport = async (
         }
       }
       pct += progressSegment;
+      onSheetStatus?.(key, 'done');
+      currentSheet = null;
     };
 
     // ── Execute in STRICT FOREIGN KEY ORDER ──
@@ -659,6 +669,8 @@ export const executeComprehensiveImport = async (
     // ── Inventory Lots: snapshot-style replace ──
     // Find the snapshot_date(s) being imported; delete existing rows for those dates, then bulk insert.
     if (includeSheets.inventory_lots && data.inventory_lots.length > 0) {
+      currentSheet = 'inventory_lots';
+      onSheetStatus?.('inventory_lots', 'importing');
       // Self-heal FK references the same way transactions does — lots can
       // also point at warehouses / items the master doesn't list.
       await ensureWarehouses(
@@ -680,13 +692,16 @@ export const executeComprehensiveImport = async (
         onProgress(`กำลังอัปเดต Inventory Lots...`, `${formatNumber(d)} / ${formatNumber(t)} rows`, pct + (d / t) * progressSegment);
       });
       pct += progressSegment;
+      onSheetStatus?.('inventory_lots', 'done');
+      currentSheet = null;
     }
 
     await supabase.from('system_config').upsert({ key: 'last_sync_at', value: new Date().toISOString() }, { onConflict: 'key' });
 
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err.message || String(err) };
+    if (currentSheet) onSheetStatus?.(currentSheet, 'error');
+    return { success: false, error: err.message || String(err), failedSheet: currentSheet ?? undefined };
   }
 };
 
