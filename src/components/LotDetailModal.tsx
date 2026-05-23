@@ -171,19 +171,36 @@ export function LotDetailModal({
 
         {/* Summary strip */}
         <div className="px-6 py-3 border-b grid grid-cols-2 md:grid-cols-5 gap-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
-          <SummaryStat label="Lots"            value={formatNumber(lots.length)} icon={<Layers size={12} />} />
+          <SummaryStat label="Lots"            value={formatNumber(lots.length)} icon={<Layers size={12} />}
+                       tip="จำนวน lot (batch) ของรายการนี้ในขอบเขตที่แสดง (คลังเดียว หรือ ทุกคลัง)" />
           <SummaryStat label="Total Qty"       value={formatNumber(totalQty, 2)}
-                       sub={lots[0]?.uom ?? ''} />
-          <SummaryStat label="Total Value"     value={`฿${formatCompact(totalVal)}`} color="#1F3864" />
+                       sub={lots[0]?.uom ?? ''}
+                       tip="ปริมาณคงเหลือรวมของทุก lot ที่แสดง" />
+          <SummaryStat label="Total Value"     value={`฿${formatCompact(totalVal)}`} color="#1F3864"
+                       tip="มูลค่าคงเหลือรวม = Σ (qty × unit cost) ของทุก lot ที่แสดง" />
           <SummaryStat label="Oldest Lot"
                        value={oldestInDays != null ? `${formatNumber(oldestInDays)}d` : '—'}
                        color={oldestInDays != null && oldestInDays >= 180 ? '#7c3aed'
                             : oldestInDays != null && oldestInDays >= 90  ? '#d97706'
-                            :                                                undefined} />
+                            :                                                undefined}
+                       tip={
+                         'Oldest Lot = อายุของ lot ที่ "อยู่ในคลังนานที่สุด"\n\n' +
+                         'คำนวณจาก: วันนี้ − วันที่รับเข้า (in_date) ของ lot ที่เก่าที่สุด\n\n' +
+                         '⚠️ ไม่ใช่วันที่จะหมดอายุ — lot อาจอยู่นานแต่ยังมี Days Left เหลือเยอะได้\n' +
+                         'สี: ม่วง ≥ 180 วัน · ส้ม ≥ 90 วัน\n\n' +
+                         'ใช้ดูว่าของค้างคลังนานแค่ไหน → ยิ่งนานยิ่งควรเร่งระบายตาม FEFO'
+                       } />
           <SummaryStat label="At Risk"
                        value={`${formatNumber(expiredCount)} + ${formatNumber(expiringSoonCount)}`}
                        sub="หมดแล้ว / ≤30d"
-                       color={expiredCount > 0 ? '#dc2626' : expiringSoonCount > 0 ? '#d97706' : undefined} />
+                       color={expiredCount > 0 ? '#dc2626' : expiringSoonCount > 0 ? '#d97706' : undefined}
+                       tip={
+                         'At Risk = จำนวน lot ที่เสี่ยง (วัดจากวันหมดอายุ ไม่ใช่อายุการเก็บ)\n\n' +
+                         '• ตัวเลขซ้าย = lot ที่หมดอายุแล้ว (Days Left < 0)\n' +
+                         '• ตัวเลขขวา = lot ที่ใกล้หมดอายุ (Days Left ≤ 30 วัน)\n\n' +
+                         'ต่างจาก Oldest Lot: At Risk ดู "เหลือกี่วันถึงหมดอายุ" ' +
+                         'ส่วน Oldest Lot ดู "อยู่ในคลังมานานกี่วัน"'
+                       } />
         </div>
 
         {/* FEFO violation banner */}
@@ -330,13 +347,14 @@ export function LotDetailModal({
   );
 }
 
-function SummaryStat({ label, value, sub, icon, color }: {
-  label: string; value: string; sub?: string; icon?: React.ReactNode; color?: string;
+function SummaryStat({ label, value, sub, icon, color, tip }: {
+  label: string; value: string; sub?: string; icon?: React.ReactNode; color?: string; tip?: string;
 }) {
   return (
-    <div>
+    <div className={tip ? 'cursor-help' : undefined} title={tip}>
       <div className="text-[10px] flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
         {icon}<span>{label}</span>
+        {tip && <span style={{ opacity: 0.5 }}>ⓘ</span>}
       </div>
       <div className="text-base font-bold tabular-nums" style={{ color: color ?? 'var(--text)' }}>{value}</div>
       {sub && <div className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>{sub}</div>}
