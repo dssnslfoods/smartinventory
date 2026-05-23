@@ -706,15 +706,24 @@ export function useLotDetail(filters?: {
   });
 }
 
-/** Lots of one item+warehouse — used for the expand-row drilldown */
-export function useLotsForItemWarehouse(itemCode?: string, warehouse?: string, snapshotDate?: string) {
+/**
+ * Lots of one item — used for the drill-down modal.
+ *
+ * By default fetches EVERY warehouse for the item (so the modal can offer a
+ * "show all warehouses" toggle). The modal filters client-side to the clicked
+ * warehouse for its default view. Pass a warehouse only if you specifically
+ * want to scope the query server-side.
+ */
+export function useLotsForItemWarehouse(itemCode?: string, _warehouse?: string, snapshotDate?: string) {
   return useQuery({
-    queryKey: ['lotDetail.itemWhs', itemCode, warehouse, snapshotDate],
-    enabled: !!itemCode && !!warehouse,
+    // NOTE: warehouse intentionally NOT in the key — we always fetch all
+    // warehouses for the item and slice client-side, so the toggle is instant
+    // and the cache is shared across warehouse rows of the same item.
+    queryKey: ['lotDetail.item', itemCode, snapshotDate],
+    enabled: !!itemCode,
     queryFn: async () => {
       let q = supabase.from('v_lot_detail').select('*')
-        .eq('item_code', itemCode!)
-        .eq('warehouse', warehouse!);
+        .eq('item_code', itemCode!);
       if (snapshotDate) q = q.eq('snapshot_date', snapshotDate);
       const { data, error } = await q.order('expire_date', { ascending: true, nullsFirst: false }).limit(500);
       if (error) throw error;

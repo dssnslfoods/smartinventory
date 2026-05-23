@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { X, Package, Calendar, Layers, AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { X, Package, Calendar, Layers, AlertTriangle, Building2 } from 'lucide-react';
 import { useLotsForItemWarehouse } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
 
@@ -27,11 +27,19 @@ export function LotDetailModal({
 }: Props) {
   const open = !!itemCode && !!warehouse;
 
-  const { data: lots = [], isLoading } = useLotsForItemWarehouse(
+  /** 'warehouse' = only the clicked warehouse (default, matches the source row)
+   *  'all'       = every warehouse this item lives in (executive cross-whs view) */
+  const [scope, setScope] = useState<'warehouse' | 'all'>('warehouse');
+
+  // The hook now returns ALL warehouses for the item; we slice client-side.
+  const { data: allLots = [], isLoading } = useLotsForItemWarehouse(
     itemCode ?? undefined,
     warehouse ?? undefined,
     snapshotDate,
   );
+
+  // Reset to the single-warehouse view each time a new item/warehouse opens.
+  useEffect(() => { setScope('warehouse'); }, [itemCode, warehouse]);
 
   // Close on Escape
   useEffect(() => {
@@ -41,9 +49,16 @@ export function LotDetailModal({
     return () => document.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
+  // How many distinct warehouses + a per-scope count for the toggle labels
+  const whCount = useMemo(() => new Set(allLots.map(l => l.warehouse)).size, [allLots]);
+  const whLots  = useMemo(() => allLots.filter(l => l.warehouse === warehouse), [allLots, warehouse]);
+  const lots    = scope === 'all' ? allLots : whLots;
+  const hasOtherWarehouses = whCount > 1;
+  const showWarehouseCol = scope === 'all';
+
   if (!open) return null;
 
-  // Compute aggregates
+  // Compute aggregates (over the lots currently in scope)
   const totalQty = lots.reduce((s, l) => s + Number(l.qty ?? 0), 0);
   const totalVal = lots.reduce((s, l) => s + Number(l.amount ?? 0), 0);
   const today = Date.now();
@@ -55,6 +70,9 @@ export function LotDetailModal({
   const expiredCount = lots.filter(l => l.days_remaining != null && l.days_remaining < 0).length;
   const expiringSoonCount = lots.filter(l => l.days_remaining != null && l.days_remaining >= 0 && l.days_remaining <= 30).length;
   const hasFefoViolation = oldestInDays != null && oldestInDays >= 180 && lots.length > 1;
+  // Value held in OTHER warehouses (for the "show all" nudge)
+  const otherWhValue = allLots.filter(l => l.warehouse !== warehouse).reduce((s, l) => s + Number(l.amount ?? 0), 0);
+  const otherWhLots  = allLots.length - whLots.length;
 
   return (
     <div
@@ -78,16 +96,62 @@ export function LotDetailModal({
                   {itemCode}
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-                  {warehouse}{whsName && ` — ${whsName}`}
+                  {scope === 'all'
+                    ? `ทุกคลัง (${formatNumber(whCount)})`
+                    : `${warehouse}${whsName ? ` — ${whsName}` : ''}`}
                 </span>
               </div>
               <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{itemName ?? '—'}</p>
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" className="p-1.5 rounded hover:bg-[var(--bg-alt)]" style={{ color: 'var(--text-muted)' }}>
-            <X size={20} />
-          </button>
+
+          <div className="flex items-center gap-2">
+            {/* Scope toggle — only meaningful when the item spans >1 warehouse */}
+            {hasOtherWarehouses && (
+              <div className="flex rounded-lg border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={() => setScope('warehouse')}
+                  className="px-2.5 py-1.5 transition-colors"
+                  style={scope === 'warehouse'
+                    ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                    : { color: 'var(--text-muted)' }}
+                  title="แสดงเฉพาะคลังที่เลือก"
+                >
+                  {warehouse} ({formatNumber(whLots.length)})
+                </button>
+                <button
+                  onClick={() => setScope('all')}
+                  className="px-2.5 py-1.5 flex items-center gap-1 transition-colors"
+                  style={scope === 'all'
+                    ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                    : { color: 'var(--text-muted)' }}
+                  title="แสดงทุกคลังที่ item นี้กระจายอยู่"
+                >
+                  <Building2 size={12} /> ทุกคลัง ({formatNumber(allLots.length)})
+                </button>
+              </div>
+            )}
+            <button onClick={onClose} aria-label="Close" className="p-1.5 rounded hover:bg-[var(--bg-alt)]" style={{ color: 'var(--text-muted)' }}>
+              <X size={20} />
+            </button>
+          </div>
         </div>
+
+        {/* Cross-warehouse nudge — shown only in single-warehouse view when
+            the item also lives in other warehouses */}
+        {scope === 'warehouse' && hasOtherWarehouses && (
+          <button
+            onClick={() => setScope('all')}
+            className="w-full px-6 py-2 flex items-center gap-2 text-xs text-left hover:underline"
+            style={{ backgroundColor: 'rgba(31,56,100,0.05)', borderBottom: '1px solid var(--border)', color: 'var(--color-primary)' }}
+          >
+            <Building2 size={13} className="flex-shrink-0" />
+            <span>
+              ℹ️ item นี้ยังมีอีก <strong>{formatNumber(otherWhLots)} lots</strong> ในคลังอื่น
+              {' '}รวม <strong>฿{formatCompact(otherWhValue)}</strong> — คลิกเพื่อดูทุกคลัง
+            </span>
+          </button>
+        )}
 
         {/* Summary strip */}
         <div className="px-6 py-3 border-b grid grid-cols-2 md:grid-cols-5 gap-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
@@ -112,7 +176,8 @@ export function LotDetailModal({
                style={{ backgroundColor: 'rgba(124,58,237,0.08)', borderBottom: '1px solid var(--border)', color: '#7c3aed' }}>
             <AlertTriangle size={14} />
             <span>
-              <strong>⚠️ FEFO Violation</strong> — มี lot อายุ {formatNumber(oldestInDays!)} วัน ทั้งที่มี lot ใหม่กว่าในคลังเดียวกัน · ทีมควรหยิบ lot เก่าก่อน
+              <strong>⚠️ FEFO Violation</strong> — มี lot อายุ {formatNumber(oldestInDays!)} วัน ทั้งที่มี lot ใหม่กว่า
+              {scope === 'all' ? ' (รวมทุกคลัง)' : 'ในคลังเดียวกัน'} · ทีมควรหยิบ lot เก่าก่อน
             </span>
           </div>
         )}
@@ -133,6 +198,7 @@ export function LotDetailModal({
               <thead className="sticky top-0" style={{ backgroundColor: 'var(--bg-card)', boxShadow: '0 1px 0 var(--border)' }}>
                 <tr style={{ color: 'var(--text-muted)' }}>
                   <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase">#</th>
+                  {showWarehouseCol && <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase">คลัง</th>}
                   <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase">Batch / Lot</th>
                   <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase">Qty</th>
                   <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase">Unit Cost</th>
@@ -163,6 +229,14 @@ export function LotDetailModal({
                       <td className="px-3 py-2 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
                         {idx + 1}
                       </td>
+                      {showWarehouseCol && (
+                        <td className="px-3 py-2 text-xs whitespace-nowrap"
+                            style={{ color: l.warehouse === warehouse ? 'var(--color-primary-light)' : 'var(--text-muted)',
+                                     fontWeight: l.warehouse === warehouse ? 600 : 400 }}
+                            title={l.whs_name ?? l.warehouse}>
+                          {l.warehouse}
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {l.batch_num ?? '—'}
                         {isOldestFefoRisk && (
