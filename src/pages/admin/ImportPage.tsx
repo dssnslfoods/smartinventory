@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Upload, AlertTriangle, Package, ArrowLeftRight,
   ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Download, Archive, Layers,
+  X, Plus,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { recordAudit } from '@/lib/auditLog';
@@ -29,14 +30,21 @@ interface ProgressState {
   done: boolean;
 }
 
-const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any; cols: string[]; headers: string[] }[] = [
-  { key: 'warehouses', label: 'Warehouses', sub: 'คลังสินค้า', icon: <Archive size={20}/>, cols: ['code', 'whs_name', 'whs_type'], headers: ['Code', 'Name', 'Type'] },
-  { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'] },
-  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'fs_category'], headers: ['Code', 'Name', 'UOM', 'FS Category'] },
-  { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'] },
-  { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'] },
-  { key: 'inventory_lots', label: 'Lot Inventory', sub: 'สต็อกต่อ lot', icon: <Layers size={20}/>, cols: ['item_code', 'warehouse', 'batch_num', 'qty', 'expire_date'], headers: ['Item', 'Whs', 'Batch', 'Qty', 'Expire'] },
+const SHEET_CONFIG: { key: SheetConfigKey; label: string; sub: string; icon: any; cols: string[]; headers: string[]; requiredCols: string[] }[] = [
+  { key: 'warehouses', label: 'Warehouses', sub: 'คลังสินค้า', icon: <Archive size={20}/>, cols: ['code', 'whs_name', 'whs_type'], headers: ['Code', 'Name', 'Type'], requiredCols: ['code', 'whs_name'] },
+  { key: 'item_groups', label: 'Item Groups', sub: 'กลุ่มสินค้า', icon: <Package size={20}/>, cols: ['group_code', 'group_name'], headers: ['Code', 'Name'], requiredCols: ['group_code', 'group_name'] },
+  { key: 'items', label: 'Items', sub: 'สินค้า', icon: <Package size={20}/>, cols: ['item_code', 'itemname', 'uom', 'fs_category'], headers: ['Code', 'Name', 'UOM', 'FS Category'], requiredCols: ['item_code', 'itemname'] },
+  { key: 'stock_thresholds', label: 'Thresholds', sub: 'จุดสั่งซื้อ', icon: <AlertTriangle size={20}/>, cols: ['item_code', 'warehouse', 'min_level'], headers: ['Item', 'Whs', 'Min'], requiredCols: ['item_code', 'warehouse'] },
+  { key: 'inventory_transactions', label: 'Transactions', sub: 'เคลื่อนไหว', icon: <ArrowLeftRight size={20}/>, cols: ['item_code', 'doc_date', 'direction', 'warehouse'], headers: ['Item', 'Date', 'Type', 'Whs'], requiredCols: ['item_code', 'doc_date', 'warehouse'] },
+  { key: 'inventory_lots', label: 'Lot Inventory', sub: 'สต็อกต่อ lot', icon: <Layers size={20}/>, cols: ['item_code', 'warehouse', 'batch_num', 'qty', 'expire_date'], headers: ['Item', 'Whs', 'Batch', 'Qty', 'Expire'], requiredCols: ['item_code', 'warehouse'] },
 ];
+
+/** A row is "incomplete" if any required column is empty/null/blank. */
+const isRowIncomplete = (requiredCols: string[], row: any): boolean =>
+  requiredCols.some(col => {
+    const v = row?.[col];
+    return v === undefined || v === null || String(v).trim() === '';
+  });
 
 export function ImportPage() {
   const { refetch: refetchLogs } = useImportLogs();
@@ -52,6 +60,28 @@ export function ImportPage() {
   
   const [txnMode, setTxnMode] = useState<'replace' | 'append'>('replace');
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
+
+  /** Row indices (within parsedData[key]) the user has chosen to exclude from
+   *  the import. Lets them drop junk rows (e.g. items with no name) before
+   *  committing. */
+  const [excluded, setExcluded] = useState<Record<SheetConfigKey, Set<number>>>(() =>
+    SHEET_CONFIG.reduce((acc, c) => ({ ...acc, [c.key]: new Set<number>() }), {} as any)
+  );
+  const toggleRowExclude = (key: SheetConfigKey, idx: number) => setExcluded(prev => {
+    const next = new Set(prev[key]); next.has(idx) ? next.delete(idx) : next.add(idx);
+    return { ...prev, [key]: next };
+  });
+  const excludeAllIncomplete = (key: SheetConfigKey) => {
+    const c = SHEET_CONFIG.find(x => x.key === key)!;
+    const rows = importState?.parsedData?.[key] ?? [];
+    setExcluded(prev => {
+      const next = new Set(prev[key]);
+      rows.forEach((r: any, i: number) => { if (isRowIncomplete(c.requiredCols, r)) next.add(i); });
+      return { ...prev, [key]: next };
+    });
+  };
+  const clearExclusions = (key: SheetConfigKey) =>
+    setExcluded(prev => ({ ...prev, [key]: new Set<number>() }));
 
   const [progress, setProgress] = useState<ProgressState>({ step: '', detail: '', percent: 0, error: '', done: false });
 
@@ -88,9 +118,18 @@ export function ImportPage() {
     if (!importState || !importState.parsedData) return;
     setImporting(true);
     setProgress({ step: 'Initializing Import...', detail: '', percent: 10, error: '', done: false });
-    
+
+    // Drop user-excluded rows from each sheet before sending to the importer.
+    const cleanedData: any = { ...importState.parsedData };
+    for (const c of SHEET_CONFIG) {
+      const ex = excluded[c.key];
+      if (ex && ex.size > 0 && Array.isArray(cleanedData[c.key])) {
+        cleanedData[c.key] = cleanedData[c.key].filter((_: any, i: number) => !ex.has(i));
+      }
+    }
+
     const result = await executeComprehensiveImport(
-      importState.parsedData,
+      cleanedData,
       includeSheets,
       txnMode,
       (step, detail, pct) => setProgress({ step, detail, percent: pct, error: '', done: false })
@@ -306,26 +345,98 @@ export function ImportPage() {
                            </div>
                          )}
 
-                         <div className="mt-3">
-                           <button onClick={() => togglePreview(c.key)} className="flex items-center justify-between w-full p-2 bg-background border rounded-lg text-xs font-medium hover:bg-muted">
-                             <span>Preview ({Math.min(5, count)} rows)</span>
-                             {previewOpen[c.key] ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                           </button>
-                           {previewOpen[c.key] && (
-                             <div className="mt-2 text-xs overflow-x-auto border rounded bg-background">
-                               <table className="w-full text-left whitespace-nowrap">
-                                 <thead className="bg-muted">
-                                   <tr>{c.headers.map(h => <th key={h} className="px-2 py-1.5">{h}</th>)}</tr>
-                                 </thead>
-                                 <tbody>
-                                   {importState?.parsedData?.[c.key]?.slice(0, 5).map((row: any, i: number) => (
-                                     <tr key={i} className="border-t">{c.cols.map(col => <td key={col} className="px-2 py-1.5">{String(row[col] ?? '')}</td>)}</tr>
-                                   ))}
-                                 </tbody>
-                               </table>
+                         {(() => {
+                           const allRows: any[] = importState?.parsedData?.[c.key] ?? [];
+                           const exSet = excluded[c.key] ?? new Set<number>();
+                           // index incompleteness once
+                           const incompleteIdx = allRows.reduce<number[]>((acc, r, i) => {
+                             if (isRowIncomplete(c.requiredCols, r)) acc.push(i);
+                             return acc;
+                           }, []);
+                           const incompleteCount = incompleteIdx.length;
+                           const effectiveCount = allRows.length - exSet.size;
+                           // Build the preview list: incomplete rows first, then a few valid ones (cap 25)
+                           const validIdx = allRows.map((_, i) => i).filter(i => !incompleteIdx.includes(i));
+                           const previewIdx = [...incompleteIdx, ...validIdx].slice(0, 25);
+                           return (
+                             <div className="mt-3">
+                               {/* Incomplete-rows banner */}
+                               {incompleteCount > 0 && (
+                                 <div className="mb-2 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                                      style={{ backgroundColor: 'rgba(234,88,12,0.08)', color: '#9a3412' }}>
+                                   <AlertTriangle size={13} className="flex-shrink-0" />
+                                   <span>พบ <strong>{incompleteCount}</strong> แถวไม่สมบูรณ์ (เว้นว่างคอลัมน์: {c.requiredCols.join(', ')})</span>
+                                   <button
+                                     onClick={() => excludeAllIncomplete(c.key)}
+                                     className="ml-auto px-2 py-0.5 rounded border text-[11px] font-medium hover:bg-white/40"
+                                     style={{ borderColor: '#ea580c', color: '#9a3412' }}
+                                   >
+                                     ตัดออกทั้งหมด
+                                   </button>
+                                 </div>
+                               )}
+
+                               <button onClick={() => togglePreview(c.key)} className="flex items-center justify-between w-full p-2 bg-background border rounded-lg text-xs font-medium hover:bg-muted">
+                                 <span>
+                                   Preview · {formatNumber(effectiveCount)} / {formatNumber(allRows.length)} rows
+                                   {exSet.size > 0 && <span style={{ color: '#dc2626' }}> · ตัดออก {formatNumber(exSet.size)}</span>}
+                                 </span>
+                                 {previewOpen[c.key] ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                               </button>
+
+                               {previewOpen[c.key] && (
+                                 <div className="mt-2 text-xs overflow-x-auto border rounded bg-background">
+                                   <table className="w-full text-left whitespace-nowrap">
+                                     <thead className="bg-muted">
+                                       <tr>
+                                         <th className="px-2 py-1.5 w-8"></th>
+                                         {c.headers.map(h => <th key={h} className="px-2 py-1.5">{h}</th>)}
+                                       </tr>
+                                     </thead>
+                                     <tbody>
+                                       {previewIdx.map((rowIdx) => {
+                                         const row = allRows[rowIdx];
+                                         const isExcluded = exSet.has(rowIdx);
+                                         const isIncomplete = incompleteIdx.includes(rowIdx);
+                                         return (
+                                           <tr key={rowIdx} className="border-t"
+                                               style={{
+                                                 backgroundColor: isExcluded ? 'rgba(148,163,184,0.12)'
+                                                                : isIncomplete ? 'rgba(234,88,12,0.06)' : undefined,
+                                                 opacity: isExcluded ? 0.5 : 1,
+                                                 textDecoration: isExcluded ? 'line-through' : undefined,
+                                               }}>
+                                             <td className="px-2 py-1.5">
+                                               <button
+                                                 onClick={() => toggleRowExclude(c.key, rowIdx)}
+                                                 title={isExcluded ? 'นำกลับเข้า import' : 'ตัดแถวนี้ออกจาก import'}
+                                                 className="p-0.5 rounded hover:bg-muted"
+                                                 style={{ color: isExcluded ? '#16a34a' : '#dc2626' }}
+                                               >
+                                                 {isExcluded ? <Plus size={13}/> : <X size={13}/>}
+                                               </button>
+                                             </td>
+                                             {c.cols.map(col => <td key={col} className="px-2 py-1.5">{String(row[col] ?? '')}</td>)}
+                                           </tr>
+                                         );
+                                       })}
+                                     </tbody>
+                                   </table>
+                                   {allRows.length > previewIdx.length && (
+                                     <p className="px-2 py-1.5 text-[10px] border-t" style={{ color: 'var(--text-muted)' }}>
+                                       แสดง {previewIdx.length} จาก {formatNumber(allRows.length)} แถว (แถวไม่สมบูรณ์ขึ้นก่อน) ·
+                                       {exSet.size > 0 && (
+                                         <button onClick={() => clearExclusions(c.key)} className="ml-1 underline" style={{ color: 'var(--color-primary)' }}>
+                                           ยกเลิกการตัดออกทั้งหมด
+                                         </button>
+                                       )}
+                                     </p>
+                                   )}
+                                 </div>
+                               )}
                              </div>
-                           )}
-                         </div>
+                           );
+                         })()}
                        </div>
                      )}
                    </div>
