@@ -198,6 +198,14 @@ export interface SlowMovingItem {
   /** TRUE when oldest lot ≥ 180 days AND newer lots exist in the same warehouse.
    *  Surfaces SKUs that look "Normal" but have aging stock stuck behind newer lots. */
   fefo_violation:      boolean;
+  /** TRUE when this warehouse has no matching lot, but the item DOES have lots
+   *  in OTHER warehouses — so the Lot column "—" means "lot is elsewhere",
+   *  not "no lot data at all". */
+  lot_in_other_wh:     boolean;
+  /** Lot count for the item across ALL warehouses (snapshot). */
+  lot_count_all_wh:    number;
+  /** Number of distinct warehouses this item's lots live in. */
+  wh_count_all:        number;
 }
 
 /** v_inventory_turnover — annual turnover ratio per item */

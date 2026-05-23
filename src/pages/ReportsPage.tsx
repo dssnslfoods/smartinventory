@@ -1722,6 +1722,7 @@ function SlowMovingTab() {
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums text-xs whitespace-nowrap">
                       {row.oldest_lot_age_days != null ? (
+                        // Case 1: lot in THIS warehouse → show age + count
                         <span style={{
                           color: row.oldest_lot_age_days >= 180 ? '#7c3aed'
                                : row.oldest_lot_age_days >= 90  ? '#d97706'
@@ -1735,8 +1736,27 @@ function SlowMovingTab() {
                             </span>
                           )}
                         </span>
+                      ) : row.lot_in_other_wh ? (
+                        // Case 2: lot exists, but only in OTHER warehouses
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded cursor-help"
+                          style={{ backgroundColor: 'rgba(31,56,100,0.08)', color: 'var(--color-primary)' }}
+                          title={
+                            `lot ของ item นี้ไม่ได้อยู่ในคลัง ${row.warehouse} ` +
+                            `แต่มี ${formatNumber(row.lot_count_all_wh)} lots ใน ${formatNumber(row.wh_count_all)} คลังอื่น\n\n` +
+                            `(stock ที่นี่มาจาก inventory_transactions ส่วน lot มาจาก snapshot — ` +
+                            `คนละคลังกัน) คลิกแถวแล้วกด "ทุกคลัง" เพื่อดู lot ทั้งหมด`
+                          }
+                        >
+                          ↗ {formatNumber(row.wh_count_all)} คลังอื่น
+                        </span>
                       ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>—</span>
+                        // Case 3: truly no lot data anywhere
+                        <span
+                          className="cursor-help"
+                          style={{ color: 'var(--text-muted)' }}
+                          title="ไม่มีข้อมูล lot ของ item นี้ใน snapshot ล่าสุด (ทุกคลัง)"
+                        >—</span>
                       )}
                     </td>
                   </tr>

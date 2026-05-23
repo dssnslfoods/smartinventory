@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { X, Package, Calendar, Layers, AlertTriangle, Building2 } from 'lucide-react';
 import { useLotsForItemWarehouse } from '@/hooks/useSupabaseQuery';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
@@ -38,8 +38,12 @@ export function LotDetailModal({
     snapshotDate,
   );
 
-  // Reset to the single-warehouse view each time a new item/warehouse opens.
-  useEffect(() => { setScope('warehouse'); }, [itemCode, warehouse]);
+  // Reset scope each time a new item/warehouse opens.
+  const autoScopedKey = useRef<string | null>(null);
+  useEffect(() => {
+    setScope('warehouse');
+    autoScopedKey.current = null;
+  }, [itemCode, warehouse]);
 
   // Close on Escape
   useEffect(() => {
@@ -55,6 +59,18 @@ export function LotDetailModal({
   const lots    = scope === 'all' ? allLots : whLots;
   const hasOtherWarehouses = whCount > 1;
   const showWarehouseCol = scope === 'all';
+
+  // Auto-open the all-warehouses view (once per item/warehouse) when the
+  // clicked warehouse holds no lots but the item has lots elsewhere — so
+  // clicking a "↗ คลังอื่น" row doesn't land on an empty table.
+  useEffect(() => {
+    const key = `${itemCode}|${warehouse}`;
+    if (autoScopedKey.current === key) return;
+    if (allLots.length > 0 && whLots.length === 0) {
+      setScope('all');
+      autoScopedKey.current = key;
+    }
+  }, [itemCode, warehouse, allLots.length, whLots.length]);
 
   if (!open) return null;
 
