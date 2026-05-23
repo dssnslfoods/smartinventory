@@ -1420,19 +1420,25 @@ function SlowMovingTab() {
   } | null>(null);
   const { data: latestSnap } = useLatestLotSnapshot();
 
+  // NOTE: status is NOT sent to the server — only warehouse/group are. If we
+  // server-filtered by status, rawData would shrink to one status and the
+  // summary cards (Dead / Slow / Active) would all read 0 except the active
+  // one. The cards must always show the full breakdown within the current
+  // warehouse/group scope, so the status filter is applied client-side below.
   const { data: rawData, isLoading } = useSlowMoving({
-    movementStatus: status    || undefined,
     warehouse:      warehouse || undefined,
     groupName:      groupCode ? ITEM_GROUPS[groupCode] : undefined,
   });
 
-  // Apply client-side filters (RPC view doesn't expose these as params)
+  // Apply status + at-risk + FEFO filters client-side so the summary cards
+  // (computed from rawData) keep showing the full picture.
   const data = useMemo(() => {
     let rows = rawData ?? [];
+    if (status)   rows = rows.filter(r => r.movement_status === status);
     if (atRisk)   rows = rows.filter(r => r.movement_status === 'dead_stock' || r.movement_status === 'slow_moving');
     if (fefoOnly) rows = rows.filter(r => r.fefo_violation);
     return rows;
-  }, [rawData, atRisk, fefoOnly]);
+  }, [rawData, status, atRisk, fefoOnly]);
 
   // ── KPI card click handlers — each acts as a preset (clears the others) ───
   const toggleStatus = (s: string) => {
