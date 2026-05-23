@@ -31,20 +31,38 @@ const BUCKET_LABELS: Record<string, string> = {
 
 const BUCKET_ORDER = ['expired', '0-30', '31-60', '61-90', '91-180', '180+', 'unknown'];
 
+/** Exact day-range per aging bucket — must mirror v_lot_aging's CASE so the
+ *  table count matches the card count exactly. */
+const BUCKET_RANGE: Record<string, { min?: number; max?: number; nullDays?: boolean }> = {
+  expired:  { max: -1 },          // days_remaining < 0
+  '0-30':   { min: 0,   max: 30 },
+  '31-60':  { min: 31,  max: 60 },
+  '61-90':  { min: 61,  max: 90 },
+  '91-180': { min: 91,  max: 180 },
+  '180+':   { min: 181 },          // days_remaining > 180
+  unknown:  { nullDays: true },    // days_remaining IS NULL
+};
+
 export function LotInventoryPage() {
   const { data: snap } = useLatestLotSnapshot();
   const [warehouse, setWarehouse] = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
   const [search, setSearch] = useState('');
-  const [daysMax, setDaysMax] = useState<number | undefined>();
+  /** Selected aging bucket (null = no filter). Clicking a card sets this to
+   *  an EXACT bucket so the table count matches the card count. */
+  const [bucket, setBucket] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+
+  const range = bucket ? BUCKET_RANGE[bucket] : {};
 
   const { data: result, isLoading } = useLotDetail({
     warehouse: warehouse || undefined,
     groupCode,
     search: search || undefined,
     snapshotDate: snap,
-    daysRemainingMax: daysMax,
+    daysRemainingMin:  range.min,
+    daysRemainingMax:  range.max,
+    daysRemainingNull: range.nullDays,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -121,46 +139,52 @@ export function LotInventoryPage() {
 
       {/* Aging Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {bucketTotals.map(b => (
-          <button
-            key={b.key}
-            onClick={() => {
-              // Quick filter — clicking a card sets daysMax
-              if (b.key === 'expired')      setDaysMax(0);
-              else if (b.key === '0-30')    setDaysMax(30);
-              else if (b.key === '31-60')   setDaysMax(60);
-              else if (b.key === '61-90')   setDaysMax(90);
-              else if (b.key === '91-180')  setDaysMax(180);
-              else                          setDaysMax(undefined);
-              setPage(0);
-            }}
-            className="card text-left hover:shadow-md transition-shadow"
-            style={{ borderLeft: `4px solid ${b.color}` }}
-          >
-            <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: b.color }}>
-              <Clock size={13} /> {b.label}
-            </div>
-            <div className="mt-1 text-lg font-bold tabular-nums" style={{ color: 'var(--text)' }}>
-              {formatNumber(b.lots)} <span className="text-xs font-normal" style={{ color: 'var(--text-muted)' }}>lots</span>
-            </div>
-            <div className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
-              ฿{formatCompact(b.value)}
-            </div>
-          </button>
-        ))}
+        {bucketTotals.map(b => {
+          const isActive = bucket === b.key;
+          const isDimmed = bucket !== null && !isActive;
+          return (
+            <button
+              key={b.key}
+              onClick={() => {
+                // Toggle exact-bucket filter — click same card again to clear
+                setBucket(prev => (prev === b.key ? null : b.key));
+                setPage(0);
+              }}
+              className="card text-left transition-all"
+              style={{
+                borderLeft: `4px solid ${b.color}`,
+                opacity: isDimmed ? 0.5 : 1,
+                boxShadow: isActive ? `0 0 0 2px ${b.color}` : undefined,
+                backgroundColor: isActive ? `${b.color}0d` : undefined,
+              }}
+              title={isActive ? 'คลิกซ้ำเพื่อยกเลิกตัวกรอง' : `คลิกเพื่อดูเฉพาะ ${b.label} (${formatNumber(b.lots)} lots)`}
+            >
+              <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: b.color }}>
+                <Clock size={13} /> {b.label}
+              </div>
+              <div className="mt-1 text-lg font-bold tabular-nums" style={{ color: 'var(--text)' }}>
+                {formatNumber(b.lots)} <span className="text-xs font-normal" style={{ color: 'var(--text-muted)' }}>lots</span>
+              </div>
+              <div className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                ฿{formatCompact(b.value)}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Totals row */}
       <div className="flex flex-wrap items-center gap-4 px-1 text-sm" style={{ color: 'var(--text-muted)' }}>
         <span><Layers size={13} className="inline mr-1" /> รวม <strong style={{ color: 'var(--text)' }}>{formatNumber(totalLots)}</strong> lots</span>
         <span>· มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></span>
-        {daysMax !== undefined && (
+        {bucket !== null && (
           <button
-            onClick={() => { setDaysMax(undefined); setPage(0); }}
+            onClick={() => { setBucket(null); setPage(0); }}
             className="ml-auto text-xs px-3 py-1 rounded-full border hover:bg-[var(--bg-alt)]"
-            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            style={{ borderColor: BUCKET_COLORS[bucket] ?? 'var(--border)', color: 'var(--text)' }}
           >
-            <AlertTriangle size={12} className="inline mr-1" /> กรอง: ≤ {daysMax} วัน — คลิกเพื่อลบ
+            <AlertTriangle size={12} className="inline mr-1" /> กรอง: {BUCKET_LABELS[bucket]}
+            {' '}({formatNumber(totalRows)} lots) — คลิกเพื่อลบ
           </button>
         )}
       </div>

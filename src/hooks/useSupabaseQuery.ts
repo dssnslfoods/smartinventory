@@ -659,6 +659,12 @@ export function useLotDetail(filters?: {
   search?: string;
   snapshotDate?: string;
   daysRemainingMax?: number;
+  /** Lower bound (inclusive). Combine with daysRemainingMax for an exact
+   *  aging-bucket range, e.g. 61-90 → min 61, max 90. */
+  daysRemainingMin?: number;
+  /** When true, return only lots with no expire date (days_remaining IS NULL)
+   *  — the "unknown" aging bucket. Takes precedence over min/max. */
+  daysRemainingNull?: boolean;
   page?: number;
   pageSize?: number;
 }) {
@@ -672,8 +678,14 @@ export function useLotDetail(filters?: {
       if (filters?.warehouse)       query = query.eq('warehouse',     filters.warehouse);
       if (filters?.groupCode)       query = query.eq('group_code',    filters.groupCode);
       if (filters?.snapshotDate)    query = query.eq('snapshot_date', filters.snapshotDate);
-      if (filters?.daysRemainingMax !== undefined)
+      if (filters?.daysRemainingNull) {
+        query = query.is('days_remaining', null);
+      } else {
+        if (filters?.daysRemainingMin !== undefined)
+                                    query = query.gte('days_remaining', filters.daysRemainingMin);
+        if (filters?.daysRemainingMax !== undefined)
                                     query = query.lte('days_remaining', filters.daysRemainingMax);
+      }
       if (filters?.search) {
         query = query.or(`item_code.ilike.%${filters.search}%,itemname.ilike.%${filters.search}%,batch_num.ilike.%${filters.search}%`);
       }
