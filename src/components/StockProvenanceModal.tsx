@@ -8,16 +8,19 @@ interface Props {
   itemCode: string | null;
   itemName?: string;
   uom?: string;
+  /** Physical (lot-based) current_stock shown on the page, for reconciliation. */
+  physicalStock?: number;
   onClose: () => void;
 }
 
 /**
- * "ที่มา Stock" — audits how an item's current_stock was derived from raw
- * transactions. Per (item × warehouse): tx count, Σ in, Σ out, and the
- * resulting net = current_stock. Shows ALL warehouses (incl. zero/negative)
- * so data anomalies (negative stock) are visible.
+ * "ที่มา & การกระทบยอด Stock" — reconciles the PHYSICAL stock (now derived from
+ * the lot snapshot, inventory_lots) against the transaction BOOK movement.
+ * Per (item × warehouse) it shows tx count, Σ in, Σ out and the book net. When
+ * book net ≠ physical, the gap is almost always the SAP transfer-imbalance
+ * (transfer-OUT legs recorded as in_qty). Physical (lot) is the source of truth.
  */
-export function StockProvenanceModal({ itemCode, itemName, uom, onClose }: Props) {
+export function StockProvenanceModal({ itemCode, itemName, uom, physicalStock, onClose }: Props) {
   const open = !!itemCode;
   const { data: rows = [], isLoading } = useStockProvenance(itemCode ?? undefined);
 
@@ -53,7 +56,7 @@ export function StockProvenanceModal({ itemCode, itemName, uom, onClose }: Props
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm font-semibold" style={{ color: 'var(--color-primary-light)' }}>{itemCode}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-                  ที่มา Current Stock
+                  กระทบยอด: นับจริง vs Book
                 </span>
               </div>
               <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{itemName ?? '—'}</p>
@@ -67,9 +70,48 @@ export function StockProvenanceModal({ itemCode, itemName, uom, onClose }: Props
         {/* Formula strip */}
         <div className="px-6 py-2.5 border-b text-xs flex items-center gap-2 flex-wrap"
              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-          <span className="font-mono">current_stock = Σ รับเข้า (In) − Σ จ่ายออก (Out)</span>
-          <span>· คำนวณต่อ (สินค้า × คลัง) จากทุก transaction ในประวัติ</span>
+          <span className="font-mono">current_stock (นับจริง) = Σ qty ของ Lot คงเหลือ ณ snapshot ล่าสุด</span>
+          <span>· ตารางด้านล่าง = ยอดเคลื่อนไหว (Σ In − Σ Out) จาก transactions เพื่อกระทบยอด</span>
         </div>
+
+        {/* Reconciliation banner: physical (lot) vs book (tx) */}
+        {physicalStock != null && !isLoading && rows.length > 0 && (() => {
+          const gap = totNet - physicalStock;
+          const matched = Math.abs(gap) < 0.005;
+          return (
+            <div className="px-6 py-3 border-b grid grid-cols-3 gap-2 text-center"
+                 style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <div className="text-[10px] uppercase" style={{ color: 'var(--text-muted)' }}>นับจริง (Lot)</div>
+                <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-primary-light)' }}>
+                  {formatNumber(physicalStock, 2)} {u}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase" style={{ color: 'var(--text-muted)' }}>Book (Σ In − Out)</div>
+                <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--text)' }}>
+                  {formatNumber(totNet, 2)} {u}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase" style={{ color: 'var(--text-muted)' }}>ส่วนต่าง</div>
+                <div className="text-sm font-bold tabular-nums"
+                     style={{ color: matched ? '#16a34a' : '#d97706' }}>
+                  {matched ? '✓ ตรงกัน' : `${gap > 0 ? '+' : ''}${formatNumber(gap, 2)}`}
+                </div>
+              </div>
+              {!matched && (
+                <div className="col-span-3 text-[11px] leading-relaxed mt-1 px-2 py-1.5 rounded"
+                     style={{ backgroundColor: 'rgba(217,119,6,0.08)', color: '#92400e' }}>
+                  <AlertTriangle size={11} className="inline mr-1" />
+                  Book ≠ นับจริง — มักเกิดจาก SAP บันทึกขา transfer-out เป็น in_qty
+                  ทำให้ยอดเคลื่อนไหวเพี้ยน · <strong>ยอด "นับจริง" จาก Lot คือค่าที่ถูกต้อง</strong>
+                  และเป็นค่าที่ระบบใช้แสดง
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
@@ -143,7 +185,7 @@ export function StockProvenanceModal({ itemCode, itemName, uom, onClose }: Props
             const maxDate = lasts.reduce((a, b) => (b > a ? b : a));
             return <>ช่วงข้อมูล: {formatDate(minDate)} – {formatDate(maxDate)} · </>;
           })()}
-          แถวที่ stock ≤ 0 ไม่แสดงในหน้า Stock On-Hand แต่แสดงที่นี่เพื่อให้เห็นที่มาครบ · กด Esc เพื่อปิด
+          ตารางนี้คือยอดเคลื่อนไหว (book) จาก transactions ทุกคลัง เพื่อกระทบยอดกับการนับ Lot จริง · กด Esc เพื่อปิด
         </div>
       </div>
     </div>

@@ -96,9 +96,9 @@ function OverviewTab() {
   });
   const { data: monthlyData } = useMovementMonthly({ warehouse: warehouse || undefined, months: 12 });
 
-  // B2: net basis — transfers excluded in v_stock_onhand; sum ALL non-zero
-  // lines (positive + negative) so the total reflects true net inventory,
-  // consistent with Dashboard's Working Capital.
+  // current_stock is now the physical lot snapshot (inventory_lots) — always
+  // ≥ 0 and free of transfer inflation. Keep lines that hold stock, consistent
+  // with Dashboard's Working Capital.
   const positiveStock = useMemo(
     () => (stockData ?? []).filter(s => Number(s.current_stock) !== 0),
     [stockData],
@@ -409,7 +409,7 @@ function CostAnalyticsTab() {
 
     for (const s of stockData) {
       const stock = Number(s.current_stock);
-      if (stock === 0) continue;   // B2 net: keep negatives, skip only depleted
+      if (stock === 0) continue;   // lot-based physical stock (≥ 0); skip empty
       const ma = Number(s.moving_avg);
       const std = Number(s.std_cost);
       invValueMA  += stock * ma;
@@ -464,7 +464,7 @@ function CostAnalyticsTab() {
     const valueByGroup = new Map<string, number>();
     for (const s of stockData) {
       const stock = Number(s.current_stock);
-      if (stock === 0) continue;   // B2 net: keep negatives
+      if (stock === 0) continue;   // lot-based physical stock (≥ 0); skip empty
       const v = stock * Number(s.moving_avg);
       valueByGroup.set(s.group_name, (valueByGroup.get(s.group_name) ?? 0) + v);
     }
@@ -663,6 +663,10 @@ function CostAnalyticsTab() {
           tooltip={<>
             <p className="mb-2"><strong>มูลค่ารวม Moving Average</strong> ของสินค้าทุกตัวในคลัง</p>
             <p className="mb-2">= "เงินสด" ที่บริษัท <strong>จมไว้ในของ</strong> ตอนนี้</p>
+            <p className="mb-2 text-[11px] p-2 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              <strong>Moving Avg (WAC ฝั่งรับเข้า)</strong> = Σ มูลค่ารับเข้า (In + ปรับต้นทุน) ÷ Σ จำนวนรับเข้า
+              คำนวณ as-of วันที่ snapshot ล่าสุดจาก transactions (ไม่ใช้ค่า master คงที่)
+            </p>
             <p>ยิ่งสูง → ยิ่งเสีย Carrying Cost ต่อปี (ดูการ์ดถัดไป)</p>
           </>}
         />

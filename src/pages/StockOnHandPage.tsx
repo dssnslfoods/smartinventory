@@ -27,9 +27,10 @@ export function StockOnHandPage() {
   const [drillDown, setDrillDown] = useState<{
     item_code: string; itemname: string; warehouse: string; whs_name?: string;
   } | null>(null);
-  /** "ที่มา Stock" provenance modal — opened by clicking a Current Stock value. */
+  /** "ที่มา & กระทบยอด Stock" modal — opened by clicking a Current Stock value.
+   *  Reconciles the physical lot count (shown) against the transaction book. */
   const [provenance, setProvenance] = useState<{
-    item_code: string; itemname: string; uom: string;
+    item_code: string; itemname: string; uom: string; physicalStock: number;
   } | null>(null);
   const { data: latestSnap } = useLatestLotSnapshot();
   const PAGE_SIZE = 50;
@@ -69,9 +70,9 @@ export function StockOnHandPage() {
     }
   }, [valueBucket]);
 
-  // Data anomaly: rows where net stock is negative. Since transfers are now
-  // excluded (the SAP export drops transfer-OUT legs), shipping warehouses can
-  // go negative — these ARE included in the net total (B2), and flagged here.
+  // current_stock now comes from the physical Lot snapshot (inventory_lots),
+  // so it is always ≥ 0. A negative row would mean corrupt lot data; we still
+  // defensively flag it here so it can't silently skew the total.
   const anomalies = useMemo(() => {
     const neg = (stockData ?? []).filter(r => Number(r.current_stock) < 0);
     return {
@@ -83,8 +84,8 @@ export function StockOnHandPage() {
   const sortedData = useMemo(() => {
     if (!stockData) return [];
     const filtered = stockData.filter((r) => {
-      // B2: include positive AND negative (net), exclude only exactly-zero
-      // (depleted) lines. Net total = Σ stock_value across pos + neg.
+      // Lot-based stock: every row already has physical qty (> 0). Guard against
+      // a stray zero just in case.
       if (Number(r.current_stock) === 0) return false;
       // FS Category
       if (fsCategory && (r as any).fs_category !== fsCategory) return false;
@@ -202,11 +203,9 @@ export function StockOnHandPage() {
           <span className="text-base leading-none mt-0.5">⚠️</span>
           <div className="text-xs leading-relaxed" style={{ color: '#991b1b' }}>
             <strong>พบ {formatNumber(anomalies.negCount)} บรรทัดที่ stock ติดลบ</strong>
-            {' '}(รวม {formatCurrency(anomalies.negValue)}) — เกิดจากระบบ<strong>ตัด Transfers ออก</strong>
-            (SAP export ขา transfer-out หาย) → คลังที่ส่งของออกเลยติดลบ
-            <br />
-            ระบบ <strong>นับรวมบรรทัดเหล่านี้ใน net total</strong> (B2) เพื่อให้มูลค่ารวมสะท้อนของจริง
-            {' '}· ตัวเลขรายคลังจะถูกต้องเมื่อทีม ERP แก้ขา transfer-out ที่ต้นทาง
+            {' '}(รวม {formatCurrency(anomalies.negValue)}) — current_stock มาจากการนับ Lot จริง
+            จึงไม่ควรติดลบ ค่าติดลบบ่งชี้ว่า<strong>ข้อมูล Lot ของรายการนั้นผิดพลาด</strong>
+            {' '}· แนะนำให้ตรวจสอบ snapshot ล่าสุดในตาราง inventory_lots
           </div>
         </div>
       )}
@@ -513,7 +512,8 @@ export function StockOnHandPage() {
                     Current Stock {sortField === 'current_stock' && (sortDir === 'asc' ? '↑' : '↓')}
                   </th>
                   <th>UOM</th>
-                  <th onClick={() => handleSort('moving_avg')} className="text-right">
+                  <th onClick={() => handleSort('moving_avg')} className="text-right"
+                      title="Moving Average Cost (WAC ฝั่งรับเข้า) = Σ มูลค่ารับเข้า (In + ปรับต้นทุน) ÷ Σ จำนวนรับเข้า — คำนวณ as-of วันที่ snapshot ล่าสุด">
                     Moving Avg {sortField === 'moving_avg' && (sortDir === 'asc' ? '↑' : '↓')}
                   </th>
                   <th onClick={() => handleSort('stock_value')} className="text-right">
@@ -551,10 +551,11 @@ export function StockOnHandPage() {
                             item_code: row.item_code,
                             itemname:  row.itemname || (row as any).item_name || '',
                             uom:       row.uom,
+                            physicalStock: Number(row.current_stock),
                           });
                         }}
                         className="font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)] transition-colors"
-                        title="คลิกเพื่อดูที่มา (รับเข้า − จ่ายออก ต่อคลัง)"
+                        title="คลิกเพื่อกระทบยอด: นับจริงจาก Lot เทียบกับยอดเคลื่อนไหว (transactions)"
                       >
                         {formatNumber(Number(row.current_stock), 2)}
                       </button>
@@ -646,6 +647,7 @@ export function StockOnHandPage() {
         itemCode={provenance?.item_code ?? null}
         itemName={provenance?.itemname}
         uom={provenance?.uom}
+        physicalStock={provenance?.physicalStock}
         onClose={() => setProvenance(null)}
       />
     </div>

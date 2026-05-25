@@ -15,7 +15,7 @@ import type {
 // Right-sized for current data volume (≈66k transactions, ≈4k stock rows, ≈600 turnover rows)
 // to avoid concurrent-load timeouts on the reporting views.
 const LIMIT_ITEMS        = 5_000;
-const LIMIT_STOCK        = 5_000;   // covers ~3.8k onhand rows with headroom
+const LIMIT_STOCK        = 5_000;   // covers lot-based onhand rows with headroom
 const LIMIT_MOVEMENT     = 5_000;   // monthly buckets — never close to this
 const LIMIT_THRESHOLDS   = 5_000;
 const LIMIT_TRANSACTIONS = 100_000; // export only — UI uses pagination
