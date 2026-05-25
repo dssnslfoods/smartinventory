@@ -198,8 +198,15 @@ function UserRow({
 
 export function UsersPage() {
   const qc = useQueryClient();
-  const { company } = useAuthStore();
-  const { data: users = [], isLoading } = useCompanyUsers(company?.id ?? null);
+  const { company, profile } = useAuthStore();
+  const { data: allUsers = [], isLoading } = useCompanyUsers(company?.id ?? null);
+  // Admins (and below) must not see super_admin accounts — only a super_admin
+  // viewer may see super_admin rows.
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const users = useMemo(
+    () => (isSuperAdmin ? allUsers : allUsers.filter(u => u.role !== 'super_admin')),
+    [allUsers, isSuperAdmin],
+  );
   const [search, setSearch]         = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkReset, setShowBulkReset] = useState(false);
