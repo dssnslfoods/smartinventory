@@ -88,28 +88,43 @@ function OverviewTab() {
   const [warehouse, setWarehouse] = useState('');
   const [groupCode, setGroupCode] = useState<number | undefined>();
 
+  // NOTE: no isActive filter — Working Capital counts ALL stock we physically
+  // hold (incl. discontinued items), to match Dashboard + Stock On-Hand.
   const { data: stockData, isLoading } = useStockOnHand({
     warehouse: warehouse || undefined,
     groupCode,
-    isActive: true,
   });
   const { data: monthlyData } = useMovementMonthly({ warehouse: warehouse || undefined, months: 12 });
 
+  // Base set for all valuation math = lines that actually hold stock (> 0).
+  // Negative = data anomaly, zero = depleted — both excluded so the totals
+  // match Dashboard's Working Capital exactly.
+  const positiveStock = useMemo(
+    () => (stockData ?? []).filter(s => Number(s.current_stock) > 0),
+    [stockData],
+  );
+  // Insight: discontinued (is_active=false) items that still hold stock.
+  const inactiveWithStock = useMemo(() => {
+    const rows = positiveStock.filter(s => (s as any).is_active === false);
+    return {
+      count: rows.length,
+      value: rows.reduce((sum, s) => sum + Number(s.current_stock) * Number(s.moving_avg), 0),
+    };
+  }, [positiveStock]);
+
   const totals = useMemo(() => {
-    if (!stockData) return { maValue: 0, stdValue: 0, items: 0 };
     let maValue = 0, stdValue = 0;
-    for (const s of stockData) {
+    for (const s of positiveStock) {
       const stock = Number(s.current_stock);
       maValue += stock * Number(s.moving_avg);
       stdValue += stock * Number(s.std_cost);
     }
-    return { maValue, stdValue, items: stockData.length };
-  }, [stockData]);
+    return { maValue, stdValue, items: positiveStock.length };
+  }, [positiveStock]);
 
   const groupBreakdown = useMemo(() => {
-    if (!stockData) return [];
     const map = new Map<string, { group: string; maValue: number; stdValue: number; count: number }>();
-    for (const s of stockData) {
+    for (const s of positiveStock) {
       const key = s.group_name;
       const prev = map.get(key) ?? { group: key, maValue: 0, stdValue: 0, count: 0 };
       const stock = Number(s.current_stock);
@@ -119,12 +134,11 @@ function OverviewTab() {
       map.set(key, prev);
     }
     return Array.from(map.values());
-  }, [stockData]);
+  }, [positiveStock]);
 
   const whsBreakdown = useMemo(() => {
-    if (!stockData) return [];
     const map = new Map<string, { warehouse: string; whsName: string; maValue: number; stdValue: number }>();
-    for (const s of stockData) {
+    for (const s of positiveStock) {
       const key = s.warehouse;
       const prev = map.get(key) ?? { warehouse: key, whsName: s.whs_name, maValue: 0, stdValue: 0 };
       const stock = Number(s.current_stock);
@@ -133,12 +147,11 @@ function OverviewTab() {
       map.set(key, prev);
     }
     return Array.from(map.values()).sort((a, b) => b.maValue - a.maValue);
-  }, [stockData]);
+  }, [positiveStock]);
 
   const varianceData = useMemo(() => {
-    if (!stockData) return [];
     const map = new Map<string, { item_code: string; itemname: string; moving_avg: number; std_cost: number; variance: number; stock: number }>();
-    for (const s of stockData) {
+    for (const s of positiveStock) {
       if (Number(s.std_cost) <= 0) continue;
       const existing = map.get(s.item_code);
       if (existing) {
@@ -159,7 +172,7 @@ function OverviewTab() {
     return Array.from(map.values())
       .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
       .slice(0, 15);
-  }, [stockData]);
+  }, [positiveStock]);
 
   const valueTrend = useMemo(() => {
     if (!monthlyData) return [];
@@ -208,6 +221,19 @@ function OverviewTab() {
           </p>
         </div>
       </div>
+
+      {/* Inactive-items-with-stock insight */}
+      {inactiveWithStock.count > 0 && (
+        <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg"
+             style={{ backgroundColor: 'rgba(234,88,12,0.07)', border: '1px solid rgba(234,88,12,0.25)' }}>
+          <span className="text-base leading-none mt-0.5">📦</span>
+          <div className="text-xs leading-relaxed" style={{ color: '#9a3412' }}>
+            <strong>{formatNumber(inactiveWithStock.count)} รายการที่เลิกขายแล้ว (inactive) แต่ยังมีสต็อกค้าง</strong>
+            {' '}มูลค่า <strong>{formatCurrency(inactiveWithStock.value)}</strong> — รวมอยู่ใน Inventory Value ด้านบน
+            (เพราะเป็นเงินจมจริง) · แนะนำให้เร่งระบายหรือ write-off เพื่อปลดล็อก Working Capital
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card">
@@ -361,7 +387,9 @@ const GROUP_COLORS = ['#1F3864', '#2E75B6', '#16a34a', '#d97706', '#dc2626', '#7
 function CostAnalyticsTab() {
   const [carryingRate, setCarryingRate] = useState<number>(CARRYING_COST_RATE_DEFAULT);
 
-  const { data: stockData = [],     isLoading: stockLoading }    = useStockOnHand({ isActive: true });
+  // No isActive filter — count all physically-held stock, consistent with the
+  // Overview tab + Dashboard. current_stock > 0 is enforced in the loops below.
+  const { data: stockData = [],     isLoading: stockLoading }    = useStockOnHand();
   const { data: turnoverData = [] } = useInventoryTurnover();
   const { data: slowData = [] }     = useSlowMoving();
   // Fetch 24 months so we can take the last 12 with actual data
@@ -381,6 +409,7 @@ function CostAnalyticsTab() {
 
     for (const s of stockData) {
       const stock = Number(s.current_stock);
+      if (stock <= 0) continue;   // exclude depleted / negative-stock anomalies
       const ma = Number(s.moving_avg);
       const std = Number(s.std_cost);
       invValueMA  += stock * ma;
@@ -434,7 +463,9 @@ function CostAnalyticsTab() {
     // Aggregate inventory value per group from stockData
     const valueByGroup = new Map<string, number>();
     for (const s of stockData) {
-      const v = Number(s.current_stock) * Number(s.moving_avg);
+      const stock = Number(s.current_stock);
+      if (stock <= 0) continue;
+      const v = stock * Number(s.moving_avg);
       valueByGroup.set(s.group_name, (valueByGroup.get(s.group_name) ?? 0) + v);
     }
 
