@@ -115,15 +115,23 @@ export function DashboardPage() {
   // from today" would include 2 empty months → COGS undercounted by ~17%
   // → DIO inflated. Slicing the last 12 entries with data fixes that.
   const financialKpi = useMemo(() => {
-    const invValue = stockData.reduce((s, x) => s + Number(x.stock_value), 0);
+    const withStock = stockData.filter(x => Number(x.current_stock) > 0);
+    const invValue = withStock.reduce((s, x) => s + Number(x.stock_value), 0);
     // monthlyTotal is ordered ASC by month — take the last 12 entries
     // (i.e. the most recent 12 months that actually have data)
     const last12 = monthlyTotal.slice(-12);
     const cogs12mo = last12.reduce((s, m) => s + Number(m.out_value ?? 0), 0);
     const turnover = invValue > 0 ? cogs12mo / invValue : 0;
     const dio = turnover > 0 ? Math.round(365 / turnover) : null;
+    // Concrete worked example for the tooltip = the single highest-value line.
+    const topLine = withStock.reduce<typeof withStock[number] | null>(
+      (best, x) => (best == null || Number(x.stock_value) > Number(best.stock_value) ? x : best),
+      null,
+    );
     return {
       invValue, cogs12mo, turnover, dio,
+      lineCount:     withStock.length,
+      topLine,
       monthsCounted: last12.length,
       windowStart:   last12[0]?.month ?? null,
       windowEnd:     last12[last12.length - 1]?.month ?? null,
@@ -353,11 +361,40 @@ export function DashboardPage() {
           color={COLORS.primary}
           tooltipTitle="Working Capital"
           tooltip={<>
-            <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน (Moving Avg)</p>
-            <CalcBlock formula="Σ (current_stock × moving_avg) ทุก SKU × คลัง">
-              <CalcLine label="Inventory Value" value={`฿${formatNumber(financialKpi.invValue, 0)}`} bold />
-              <CalcLine label="≈" value={`฿${formatCompact(financialKpi.invValue)}`} muted />
+            <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน (Moving Avg) — เงินสดที่จมในสินค้าคงคลัง</p>
+
+            <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ</p>
+
+            {/* Step 1 — value of one line */}
+            <CalcBlock formula="STEP 1 · ต่อ 1 บรรทัด: stock_value = current_stock × moving_avg">
+              {financialKpi.topLine ? (
+                <>
+                  <CalcLine label={`${financialKpi.topLine.item_code} @ ${financialKpi.topLine.warehouse}`}
+                            value={`ตัวอย่างบรรทัดที่ใหญ่สุด`} muted />
+                  <CalcLine label="current_stock"
+                            value={`${formatNumber(Number(financialKpi.topLine.current_stock), 2)} ${financialKpi.topLine.uom ?? ''}`} />
+                  <CalcLine label="× moving_avg"
+                            value={`฿${formatNumber(Number(financialKpi.topLine.moving_avg), 2)}`} />
+                  <CalcLine label="= stock_value"
+                            value={`฿${formatNumber(Number(financialKpi.topLine.stock_value), 0)}`} bold />
+                </>
+              ) : <CalcLine label="—" value="ไม่มีข้อมูล" muted />}
             </CalcBlock>
+
+            {/* Step 2 — sum every line */}
+            <CalcBlock formula="STEP 2 · รวมทุกบรรทัด (สินค้า × คลัง)">
+              <CalcLine label="จำนวนบรรทัด" value={`${formatNumber(financialKpi.lineCount, 0)} บรรทัด`} />
+              <CalcLine label="Σ stock_value" value={`฿${formatNumber(financialKpi.invValue, 0)}`} bold />
+            </CalcBlock>
+
+            {/* Step 3 — result */}
+            <CalcBlock formula="STEP 3 · Working Capital">
+              <CalcLine label="= Working Capital" value={`฿${formatCompact(financialKpi.invValue)}`} bold />
+            </CalcBlock>
+
+            <p className="text-[10px] mt-1.5 italic" style={{ color: 'var(--text-muted)' }}>
+              current_stock = Σ(รับเข้า − จ่ายออก) จาก transactions · moving_avg = ต้นทุนเฉลี่ยจาก items master
+            </p>
             <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
             {(() => {
               const carry15 = financialKpi.invValue * 0.15;
