@@ -2849,7 +2849,10 @@ function FEFOPickListTab() {
                           {idx + 1}{idx === 0 ? ' ↓' : ''}
                         </td>
                         <td className="px-4 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{l.batch_num}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-xs">{formatNumber(Number(l.qty), 2)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">
+                          {formatNumber(Number(l.qty), 2)}
+                          {g.uom && <span className="ml-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>{g.uom}</span>}
+                        </td>
                         <td className="px-4 py-2 text-right tabular-nums text-xs">฿{formatNumber(Number(l.amount), 2)}</td>
                         <td className="px-4 py-2 text-xs">{l.expire_date ? formatDate(l.expire_date) : '—'}</td>
                         <td className="px-4 py-2 text-right">
