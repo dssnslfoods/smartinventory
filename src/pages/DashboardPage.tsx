@@ -388,6 +388,22 @@ export function DashboardPage() {
               <strong>Std cost</strong> = ต้นทุนมาตรฐานจาก master ใช้เทียบหา variance
             </p>
 
+            {/* Usage guidance — which cost basis to use for what */}
+            <div className="text-[11px] mb-2 rounded p-2 leading-relaxed" style={{ backgroundColor: 'var(--bg-alt)' }}>
+              <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>💡 ควรใช้ตัวไหนกับงานอะไร</p>
+              <p className="mb-1.5">
+                <strong>Actual / Moving Avg</strong> — ใช้กับงาน<strong>การเงิน/บัญชีจริง</strong>:
+                ตีมูลค่าสินค้าคงเหลือในงบดุล, คำนวณ Working Capital / เงินจม, COGS, Inventory Turnover,
+                Carrying Cost — เพราะสะท้อน "เงินที่จ่ายจริง" ตามต้นทุนที่ซื้อมา (รวมค่าขนส่ง/ภาษี)
+              </p>
+              <p>
+                <strong>Standard Cost</strong> — ใช้กับงาน<strong>วางแผน/ควบคุม</strong>:
+                ตั้งงบประมาณ, ตั้งราคาขาย, วัดประสิทธิภาพการจัดซื้อ — เอามา<strong>เทียบกับ Actual</strong>
+                ถ้าต่างกันมาก (Cost Variance สูง) = ราคาซื้อจริงเพี้ยนจากมาตรฐาน ควรทบทวนราคา/ผู้ขาย
+                หรืออัปเดต Std Cost ใหม่
+              </p>
+            </div>
+
             <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ</p>
 
             {/* Step 1 — per-item moving average */}
