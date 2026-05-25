@@ -96,16 +96,16 @@ function OverviewTab() {
   });
   const { data: monthlyData } = useMovementMonthly({ warehouse: warehouse || undefined, months: 12 });
 
-  // Base set for all valuation math = lines that actually hold stock (> 0).
-  // Negative = data anomaly, zero = depleted — both excluded so the totals
-  // match Dashboard's Working Capital exactly.
+  // B2: net basis — transfers excluded in v_stock_onhand; sum ALL non-zero
+  // lines (positive + negative) so the total reflects true net inventory,
+  // consistent with Dashboard's Working Capital.
   const positiveStock = useMemo(
-    () => (stockData ?? []).filter(s => Number(s.current_stock) > 0),
+    () => (stockData ?? []).filter(s => Number(s.current_stock) !== 0),
     [stockData],
   );
   // Insight: discontinued (is_active=false) items that still hold stock.
   const inactiveWithStock = useMemo(() => {
-    const rows = positiveStock.filter(s => (s as any).is_active === false);
+    const rows = positiveStock.filter(s => (s as any).is_active === false && Number(s.current_stock) > 0);
     return {
       count: rows.length,
       value: rows.reduce((sum, s) => sum + Number(s.current_stock) * Number(s.moving_avg), 0),
@@ -409,7 +409,7 @@ function CostAnalyticsTab() {
 
     for (const s of stockData) {
       const stock = Number(s.current_stock);
-      if (stock <= 0) continue;   // exclude depleted / negative-stock anomalies
+      if (stock === 0) continue;   // B2 net: keep negatives, skip only depleted
       const ma = Number(s.moving_avg);
       const std = Number(s.std_cost);
       invValueMA  += stock * ma;
@@ -464,7 +464,7 @@ function CostAnalyticsTab() {
     const valueByGroup = new Map<string, number>();
     for (const s of stockData) {
       const stock = Number(s.current_stock);
-      if (stock <= 0) continue;
+      if (stock === 0) continue;   // B2 net: keep negatives
       const v = stock * Number(s.moving_avg);
       valueByGroup.set(s.group_name, (valueByGroup.get(s.group_name) ?? 0) + v);
     }

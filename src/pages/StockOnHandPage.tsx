@@ -69,9 +69,9 @@ export function StockOnHandPage() {
     }
   }, [valueBucket]);
 
-  // Data anomaly: rows where recorded stock is negative (issued > received in
-  // the transaction history). These are surfaced as a warning, not counted in
-  // Working Capital — you can't have negative cash tied up in stock.
+  // Data anomaly: rows where net stock is negative. Since transfers are now
+  // excluded (the SAP export drops transfer-OUT legs), shipping warehouses can
+  // go negative — these ARE included in the net total (B2), and flagged here.
   const anomalies = useMemo(() => {
     const neg = (stockData ?? []).filter(r => Number(r.current_stock) < 0);
     return {
@@ -83,10 +83,9 @@ export function StockOnHandPage() {
   const sortedData = useMemo(() => {
     if (!stockData) return [];
     const filtered = stockData.filter((r) => {
-      // Only count lines that actually hold stock (> 0). Zero = depleted,
-      // negative = data anomaly — both excluded from the on-hand totals so
-      // they match the Dashboard's Working Capital.
-      if (Number(r.current_stock) <= 0) return false;
+      // B2: include positive AND negative (net), exclude only exactly-zero
+      // (depleted) lines. Net total = Σ stock_value across pos + neg.
+      if (Number(r.current_stock) === 0) return false;
       // FS Category
       if (fsCategory && (r as any).fs_category !== fsCategory) return false;
       // Min stock value
@@ -203,11 +202,11 @@ export function StockOnHandPage() {
           <span className="text-base leading-none mt-0.5">⚠️</span>
           <div className="text-xs leading-relaxed" style={{ color: '#991b1b' }}>
             <strong>พบ {formatNumber(anomalies.negCount)} บรรทัดที่ stock ติดลบ</strong>
-            {' '}(มูลค่ารวม {formatCurrency(anomalies.negValue)}) — เป็น data anomaly
-            (จ่ายออกมากกว่ารับเข้าในบันทึก transactions)
+            {' '}(รวม {formatCurrency(anomalies.negValue)}) — เกิดจากระบบ<strong>ตัด Transfers ออก</strong>
+            (SAP export ขา transfer-out หาย) → คลังที่ส่งของออกเลยติดลบ
             <br />
-            ระบบ <strong>ไม่นับบรรทัดเหล่านี้</strong> ในยอดรวมด้านล่าง (Working Capital สะท้อนเฉพาะของที่มีจริง stock &gt; 0)
-            {' '}· แนะนำให้ทีม NSL ตรวจสอบความถูกต้องของ transactions
+            ระบบ <strong>นับรวมบรรทัดเหล่านี้ใน net total</strong> (B2) เพื่อให้มูลค่ารวมสะท้อนของจริง
+            {' '}· ตัวเลขรายคลังจะถูกต้องเมื่อทีม ERP แก้ขา transfer-out ที่ต้นทาง
           </div>
         </div>
       )}

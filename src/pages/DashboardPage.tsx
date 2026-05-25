@@ -115,8 +115,11 @@ export function DashboardPage() {
   // from today" would include 2 empty months → COGS undercounted by ~17%
   // → DIO inflated. Slicing the last 12 entries with data fixes that.
   const financialKpi = useMemo(() => {
-    const withStock = stockData.filter(x => Number(x.current_stock) > 0);
-    const invValue = withStock.reduce((s, x) => s + Number(x.stock_value), 0);
+    // B2: net inventory — transfers already excluded in v_stock_onhand; here we
+    // sum ALL non-zero lines (positive + negative) so the total reflects the
+    // true net. Negative lines are data artifacts from missing transfer-out legs.
+    const nonZero = stockData.filter(x => Number(x.current_stock) !== 0);
+    const invValue = nonZero.reduce((s, x) => s + Number(x.stock_value), 0);
     // monthlyTotal is ordered ASC by month — take the last 12 entries
     // (i.e. the most recent 12 months that actually have data)
     const last12 = monthlyTotal.slice(-12);
@@ -124,13 +127,13 @@ export function DashboardPage() {
     const turnover = invValue > 0 ? cogs12mo / invValue : 0;
     const dio = turnover > 0 ? Math.round(365 / turnover) : null;
     // Concrete worked example for the tooltip = the single highest-value line.
-    const topLine = withStock.reduce<typeof withStock[number] | null>(
+    const topLine = nonZero.reduce<typeof nonZero[number] | null>(
       (best, x) => (best == null || Number(x.stock_value) > Number(best.stock_value) ? x : best),
       null,
     );
     return {
       invValue, cogs12mo, turnover, dio,
-      lineCount:     withStock.length,
+      lineCount:     nonZero.length,
       topLine,
       monthsCounted: last12.length,
       windowStart:   last12[0]?.month ?? null,
