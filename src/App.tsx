@@ -51,6 +51,13 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000,
+      // Keep fetched data in memory for 30 min after a query goes unused so
+      // returning to a page renders instantly from cache (no reload spinner).
+      gcTime: 30 * 60 * 1000,
+      // Don't refetch every time the browser tab regains focus — staleTime
+      // already governs freshness on navigation. Avoids a refetch storm /
+      // re-render burst when the user alt-tabs back. (No logic change.)
+      refetchOnWindowFocus: false,
       retry: 1,
     },
   },
