@@ -64,9 +64,24 @@ export function StockOnHandPage() {
     }
   }, [valueBucket]);
 
+  // Data anomaly: rows where recorded stock is negative (issued > received in
+  // the transaction history). These are surfaced as a warning, not counted in
+  // Working Capital — you can't have negative cash tied up in stock.
+  const anomalies = useMemo(() => {
+    const neg = (stockData ?? []).filter(r => Number(r.current_stock) < 0);
+    return {
+      negCount: neg.length,
+      negValue: neg.reduce((s, r) => s + Number(r.stock_value), 0),
+    };
+  }, [stockData]);
+
   const sortedData = useMemo(() => {
     if (!stockData) return [];
     const filtered = stockData.filter((r) => {
+      // Only count lines that actually hold stock (> 0). Zero = depleted,
+      // negative = data anomaly — both excluded from the on-hand totals so
+      // they match the Dashboard's Working Capital.
+      if (Number(r.current_stock) <= 0) return false;
       // FS Category
       if (fsCategory && (r as any).fs_category !== fsCategory) return false;
       // Min stock value
@@ -170,6 +185,22 @@ export function StockOnHandPage() {
           </HelpSection>
         </>)}
       />
+
+      {/* Negative-stock anomaly warning */}
+      {anomalies.negCount > 0 && (
+        <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg mb-1"
+             style={{ backgroundColor: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)' }}>
+          <span className="text-base leading-none mt-0.5">⚠️</span>
+          <div className="text-xs leading-relaxed" style={{ color: '#991b1b' }}>
+            <strong>พบ {formatNumber(anomalies.negCount)} บรรทัดที่ stock ติดลบ</strong>
+            {' '}(มูลค่ารวม {formatCurrency(anomalies.negValue)}) — เป็น data anomaly
+            (จ่ายออกมากกว่ารับเข้าในบันทึก transactions)
+            <br />
+            ระบบ <strong>ไม่นับบรรทัดเหล่านี้</strong> ในยอดรวมด้านล่าง (Working Capital สะท้อนเฉพาะของที่มีจริง stock &gt; 0)
+            {' '}· แนะนำให้ทีม NSL ตรวจสอบความถูกต้องของ transactions
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
