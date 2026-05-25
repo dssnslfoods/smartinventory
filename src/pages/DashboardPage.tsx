@@ -124,6 +124,9 @@ export function DashboardPage() {
     // money tied up = the Working-Capital / balance-sheet number.
     const invValue    = nonZero.reduce((s, x) => s + Number(x.stock_value), 0);
     const actualValue = nonZero.reduce((s, x) => s + Number(x.lot_value ?? x.stock_value), 0);
+    // stdValue = valuation at the master Standard Cost — the meaningfully
+    // different basis (vs actual/moving-avg which now converge under lot-based).
+    const stdValue    = nonZero.reduce((s, x) => s + Number(x.current_stock) * Number(x.std_cost), 0);
     // monthlyTotal is ordered ASC by month — take the last 12 entries
     // (i.e. the most recent 12 months that actually have data)
     const last12 = monthlyTotal.slice(-12);
@@ -136,7 +139,7 @@ export function DashboardPage() {
       null,
     );
     return {
-      invValue, actualValue, cogs12mo, turnover, dio,
+      invValue, actualValue, stdValue, cogs12mo, turnover, dio,
       lineCount:     nonZero.length,
       topLine,
       monthsCounted: last12.length,
@@ -364,15 +367,25 @@ export function DashboardPage() {
           icon={<Banknote size={18} />}
           label="Working Capital"
           value={kpiLoading ? '...' : `฿${formatCompact(financialKpi.actualValue)}`}
-          sublabel="เงินจมในคลัง (ต้นทุนจริง · moving average)"
+          sublabel={`Actual = Moving Avg · Std ฿${formatCompact(financialKpi.stdValue)}`}
           color={COLORS.primary}
           tooltipTitle="Working Capital"
           tooltip={<>
             <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน — เงินสดที่จมในสินค้าคงคลัง</p>
 
+            {/* 3 cost bases */}
+            <CalcBlock formula="ตีมูลค่าสต็อก 3 วิธี">
+              <CalcLine label="Actual cost (ต้นทุนจริงรายล็อต)"
+                        value={`฿${formatNumber(financialKpi.actualValue, 0)}`} bold />
+              <CalcLine label="Moving avg cost"
+                        value={`฿${formatNumber(financialKpi.invValue, 0)}`} bold />
+              <CalcLine label="Standard cost (master)"
+                        value={`฿${formatNumber(financialKpi.stdValue, 0)}`} muted />
+            </CalcBlock>
             <p className="text-[11px] mb-2 leading-relaxed">
-              ตีมูลค่าด้วย <strong>moving average cost</strong> = ต้นทุนเฉลี่ยถ่วงน้ำหนักของ Lot ที่เหลือจริง
-              (รวมต้นทุนแฝง/landed cost แล้ว) — ตรงกับงบดุล/บัญชี
+              <strong>Actual</strong> = Σ มูลค่าจริงของแต่ละ Lot · <strong>Moving avg</strong> = Σ มูลค่า Lot ÷ Σ จำนวน Lot
+              (รวม landed cost) — สองค่านี้ <strong>เท่ากันโดยปริยาย</strong> เพราะคำนวณจาก Lot ชุดเดียวกัน ·
+              <strong>Std cost</strong> = ต้นทุนมาตรฐานจาก master ใช้เทียบหา variance
             </p>
 
             <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ</p>
