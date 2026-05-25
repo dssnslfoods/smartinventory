@@ -1789,6 +1789,9 @@ function SlowMovingTab() {
 // ── Inventory Turnover Tab ────────────────────────────────────────────────────
 function TurnoverTab() {
   const [groupCode, setGroupCode] = useState<number | undefined>();
+  // Chart/table order: 'asc' surfaces the SLOWEST movers (turnover ต่ำสุด) first
+  // — the items that actually need management attention. Default to slow-first.
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // ── Per-column filters — drive table + chart + summary in one shot ────────
   const [filtCode,       setFiltCode]       = useState('');   // item_code substring
@@ -1804,19 +1807,23 @@ function TurnoverTab() {
   });
 
   /**
-   * Sort the entire dataset locally by turnover_ratio desc so the chart's
-   * Top-20 view and the full table below always agree on order, even if the
-   * DB query later changes its default ordering. nulls land at the bottom.
+   * Sort the entire dataset locally by turnover_ratio so the chart's Top-20
+   * view and the full table below always agree on order. Direction follows the
+   * toggle (asc = slowest first). Items with no ratio (null) ALWAYS land at the
+   * bottom in either direction — they're "no data", not the slowest movers.
    */
   const sortedData = useMemo(() => {
     const list = [...(data ?? [])];
     list.sort((a, b) => {
-      const av = a.turnover_ratio === null ? -Infinity : Number(a.turnover_ratio);
-      const bv = b.turnover_ratio === null ? -Infinity : Number(b.turnover_ratio);
-      return bv - av;
+      const an = a.turnover_ratio === null, bn = b.turnover_ratio === null;
+      if (an && bn) return 0;
+      if (an) return 1;          // null → bottom
+      if (bn) return -1;
+      const av = Number(a.turnover_ratio), bv = Number(b.turnover_ratio);
+      return sortDir === 'asc' ? av - bv : bv - av;
     });
     return list;
-  }, [data]);
+  }, [data, sortDir]);
 
   // ── Apply per-column filters — single source for table / chart / export ──
   const filtered = useMemo(() => {
@@ -1951,17 +1958,24 @@ function TurnoverTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            Top 20 Items by Turnover Ratio
+            {sortDir === 'asc' ? 'Bottom 20 — Turnover ต่ำสุด (หมุนช้า)' : 'Top 20 — Turnover สูงสุด (หมุนเร็ว)'}
             {activeFilterCount > 0 && (
               <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
                 (จาก {formatNumber(filtered.length)} รายการที่ผ่าน filter)
               </span>
             )}
           </h3>
-          <span className="text-[11px] px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-            ลำดับเดียวกับตารางด้านล่าง
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>ลำดับเดียวกับตารางด้านล่าง</span>
+            <button
+              onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+              className="text-[11px] px-2.5 py-1 rounded-full font-medium transition-colors"
+              style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+              title="สลับการเรียงลำดับ turnover"
+            >
+              {sortDir === 'asc' ? '▲ ต่ำ → สูง (หมุนช้าก่อน)' : '▼ สูง → ต่ำ (หมุนเร็วก่อน)'}
+            </button>
+          </div>
         </div>
         {/* Height scales with 20 items so all y-axis labels can show with interval=0 */}
         <div style={{ height: 520 }}>
