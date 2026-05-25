@@ -288,6 +288,25 @@ function OverviewTab() {
                 </tr>
               ))}
             </tbody>
+            {whsBreakdown.length > 0 && (() => {
+              const totMA  = whsBreakdown.reduce((s, r) => s + r.maValue, 0);
+              const totStd = whsBreakdown.reduce((s, r) => s + r.stdValue, 0);
+              const totVar = totMA - totStd;
+              return (
+                <tfoot>
+                  <tr className="border-t-2 font-bold"
+                      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-alt)' }}>
+                    <td className="font-bold">รวม</td>
+                    <td style={{ color: 'var(--text-muted)' }}>{whsBreakdown.length} คลัง</td>
+                    <td className="text-right font-mono font-bold">{formatCurrency(totMA)}</td>
+                    <td className="text-right font-mono font-bold">{formatCurrency(totStd)}</td>
+                    <td className={`text-right font-mono font-bold ${totVar >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(totVar)}
+                    </td>
+                  </tr>
+                </tfoot>
+              );
+            })()}
           </table>
         </div>
       </div>
