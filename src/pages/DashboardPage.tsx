@@ -119,7 +119,11 @@ export function DashboardPage() {
     // (inventory_lots) — always ≥ 0 and free of the SAP transfer inflation.
     // Sum every line with stock for true net inventory value.
     const nonZero = stockData.filter(x => Number(x.current_stock) !== 0);
-    const invValue = nonZero.reduce((s, x) => s + Number(x.stock_value), 0);
+    // invValue = WAC-based (consistent unit cost, used for turnover/COGS).
+    // actualValue = actual booked lot cost (Σ inventory_lots.amount) = the real
+    // money tied up = the Working-Capital / balance-sheet number.
+    const invValue    = nonZero.reduce((s, x) => s + Number(x.stock_value), 0);
+    const actualValue = nonZero.reduce((s, x) => s + Number(x.lot_value ?? x.stock_value), 0);
     // monthlyTotal is ordered ASC by month — take the last 12 entries
     // (i.e. the most recent 12 months that actually have data)
     const last12 = monthlyTotal.slice(-12);
@@ -132,7 +136,7 @@ export function DashboardPage() {
       null,
     );
     return {
-      invValue, cogs12mo, turnover, dio,
+      invValue, actualValue, cogs12mo, turnover, dio,
       lineCount:     nonZero.length,
       topLine,
       monthsCounted: last12.length,
@@ -359,14 +363,27 @@ export function DashboardPage() {
         <KpiCard
           icon={<Banknote size={18} />}
           label="Working Capital"
-          value={kpiLoading ? '...' : `฿${formatCompact(financialKpi.invValue)}`}
-          sublabel="เงินจมในคลัง (Moving Avg)"
+          value={kpiLoading ? '...' : `฿${formatCompact(financialKpi.actualValue)}`}
+          sublabel={`ต้นทุนจริงรายล็อต · WAC ฿${formatCompact(financialKpi.invValue)}`}
           color={COLORS.primary}
           tooltipTitle="Working Capital"
           tooltip={<>
-            <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน (Moving Avg) — เงินสดที่จมในสินค้าคงคลัง</p>
+            <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน — เงินสดที่จมในสินค้าคงคลัง</p>
 
-            <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ</p>
+            {/* Actual vs WAC — two valuation bases shown side by side */}
+            <CalcBlock formula="2 มุมมองของมูลค่าสต็อก">
+              <CalcLine label="ต้นทุนจริงรายล็อต (Working Capital)"
+                        value={`฿${formatNumber(financialKpi.actualValue, 0)}`} bold />
+              <CalcLine label="WAC (qty × ต้นทุนเฉลี่ย)"
+                        value={`฿${formatNumber(financialKpi.invValue, 0)}`} muted />
+            </CalcBlock>
+            <p className="text-[11px] mb-2 leading-relaxed">
+              <strong>Working Capital ใช้ "ต้นทุนจริงรายล็อต"</strong> = Σ มูลค่าที่บันทึกจริงของแต่ละ batch
+              (inventory_lots.amount) — ตรงกับงบดุล/บัญชี · <strong>WAC</strong> เป็นต้นทุนเฉลี่ยถ่วงน้ำหนัก
+              ใช้กับ Turnover/COGS เพื่อให้ต้นทุน/หน่วยสม่ำเสมอ
+            </p>
+
+            <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ (WAC)</p>
 
             {/* Step 1 — value of one line */}
             <CalcBlock formula="STEP 1 · ต่อ 1 บรรทัด: stock_value = current_stock × moving_avg">
@@ -391,8 +408,9 @@ export function DashboardPage() {
             </CalcBlock>
 
             {/* Step 3 — result */}
-            <CalcBlock formula="STEP 3 · Working Capital">
-              <CalcLine label="= Working Capital" value={`฿${formatCompact(financialKpi.invValue)}`} bold />
+            <CalcBlock formula="STEP 3 · Inventory Value (WAC)">
+              <CalcLine label="= Inventory Value (WAC)" value={`฿${formatCompact(financialKpi.invValue)}`} bold />
+              <CalcLine label="= Working Capital (ต้นทุนจริง)" value={`฿${formatCompact(financialKpi.actualValue)}`} bold />
             </CalcBlock>
 
             <p className="text-[10px] mt-1.5 italic" style={{ color: 'var(--text-muted)' }}>
@@ -400,21 +418,21 @@ export function DashboardPage() {
             </p>
             <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
             {(() => {
-              const carry15 = financialKpi.invValue * 0.15;
+              const carry15 = financialKpi.actualValue * 0.15;
               const coverYears = financialKpi.cogs12mo > 0
-                ? financialKpi.invValue / financialKpi.cogs12mo
+                ? financialKpi.actualValue / financialKpi.cogs12mo
                 : null;
               if (coverYears != null && coverYears >= 3) {
                 return <Insight tone="critical">
                   <strong>วิกฤต — เงินจมในคลังสูงผิดปกติ</strong><br />
-                  ฿{formatCompact(financialKpi.invValue)} เทียบกับ COGS 12 เดือน (฿{formatCompact(financialKpi.cogs12mo)})
+                  ฿{formatCompact(financialKpi.actualValue)} เทียบกับ COGS 12 เดือน (฿{formatCompact(financialKpi.cogs12mo)})
                   → เก็บสต็อกมากกว่ายอดขายในรอบ {coverYears.toFixed(1)} ปี ·
                   ถือต้นทุน (15%/ปี) ประมาณ <strong>฿{formatCompact(carry15)}/ปี</strong>
                 </Insight>;
               }
               if (coverYears != null && coverYears >= 1) {
                 return <Insight tone="warn">
-                  Working Capital ฿{formatCompact(financialKpi.invValue)} ≈ COGS {coverYears.toFixed(1)} ปี ·
+                  Working Capital ฿{formatCompact(financialKpi.actualValue)} ≈ COGS {coverYears.toFixed(1)} ปี ·
                   Carrying Cost ≈ <strong>฿{formatCompact(carry15)}/ปี</strong> (15%/ปี)
                 </Insight>;
               }

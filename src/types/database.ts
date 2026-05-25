@@ -139,6 +139,8 @@ export interface StockOnHand {
   is_active: boolean;
   expire_date: string | null;
   fs_category?: string | null;
+  /** Actual booked cost of the physical lots (Σ inventory_lots.amount). */
+  lot_value?: number;
 }
 
 /** v_movement_monthly — monthly movement aggregates for trend charts */
