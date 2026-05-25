@@ -5,7 +5,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { isSupabaseConfigured, setRememberDevice } from '@/lib/supabase';
 import { useLoginStats, type LoginPublicStats } from '@/hooks/useLoginStats';
 
 // ─── Brand tokens (from design handoff) ────────────────────────────────────
@@ -406,18 +406,13 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
 
-    // Remember-this-device toggle:
-    // Default (UNchecked) → clear session on tab/browser close. The user
-    // must explicitly tick the box to keep the session in localStorage.
-    if (!remember) {
-      try {
-        window.addEventListener('beforeunload', () => {
-          for (const k of Object.keys(localStorage)) {
-            if (k.startsWith('sb-') && k.endsWith('-auth-token')) localStorage.removeItem(k);
-          }
-        }, { once: true });
-      } catch { /* no-op */ }
-    }
+    // Remember-this-device toggle (set BEFORE signIn so the session token is
+    // written to the right store):
+    //   ON  → localStorage (survives browser close)
+    //   OFF → sessionStorage (survives REFRESH, cleared on tab close)
+    // This replaces the old beforeunload hack that wiped the token on every
+    // refresh and logged the user straight out.
+    setRememberDevice(remember);
 
     const result = await signIn(email, password);
     if (result.error) {

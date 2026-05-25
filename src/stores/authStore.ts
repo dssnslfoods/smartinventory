@@ -161,9 +161,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Belt-and-braces: wipe any persisted Supabase auth tokens that might
     // survive a failed signOut, then hard-redirect to /login.
     try {
-      Object.keys(localStorage)
-        .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
-        .forEach(k => localStorage.removeItem(k));
+      for (const store of [localStorage, sessionStorage]) {
+        Object.keys(store)
+          .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+          .forEach(k => store.removeItem(k));
+      }
     } catch { /* ignore storage errors (private mode etc.) */ }
 
     if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
