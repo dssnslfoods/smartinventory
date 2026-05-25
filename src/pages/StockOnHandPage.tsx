@@ -8,6 +8,7 @@ import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import { PageHeader } from '@/components/PageHeader';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { LotDetailModal } from '@/components/LotDetailModal';
+import { StockProvenanceModal } from '@/components/StockProvenanceModal';
 
 export function StockOnHandPage() {
   const [warehouse, setWarehouse] = useState('');
@@ -25,6 +26,10 @@ export function StockOnHandPage() {
   /** Drill-down state — click a row to see all lots for that (item × warehouse). */
   const [drillDown, setDrillDown] = useState<{
     item_code: string; itemname: string; warehouse: string; whs_name?: string;
+  } | null>(null);
+  /** "ที่มา Stock" provenance modal — opened by clicking a Current Stock value. */
+  const [provenance, setProvenance] = useState<{
+    item_code: string; itemname: string; uom: string;
   } | null>(null);
   const { data: latestSnap } = useLatestLotSnapshot();
   const PAGE_SIZE = 50;
@@ -539,7 +544,22 @@ export function StockOnHandPage() {
                       <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{row.whs_name}</div>
                     </td>
                     <td><span className="badge badge-info">{row.group_name.split('-')[0]}</span></td>
-                    <td className="text-right font-mono">{formatNumber(Number(row.current_stock), 2)}</td>
+                    <td className="text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setProvenance({
+                            item_code: row.item_code,
+                            itemname:  row.itemname || (row as any).item_name || '',
+                            uom:       row.uom,
+                          });
+                        }}
+                        className="font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)] transition-colors"
+                        title="คลิกเพื่อดูที่มา (รับเข้า − จ่ายออก ต่อคลัง)"
+                      >
+                        {formatNumber(Number(row.current_stock), 2)}
+                      </button>
+                    </td>
                     <td style={{ color: 'var(--text-muted)' }}>{row.uom}</td>
                     <td className="text-right">{formatCurrency(Number(row.moving_avg))}</td>
                     <td className="text-right font-semibold">{formatCurrency(Number(row.stock_value))}</td>
@@ -620,6 +640,14 @@ export function StockOnHandPage() {
         whsName={drillDown?.whs_name}
         snapshotDate={latestSnap}
         onClose={() => setDrillDown(null)}
+      />
+
+      {/* Current-stock provenance modal */}
+      <StockProvenanceModal
+        itemCode={provenance?.item_code ?? null}
+        itemName={provenance?.itemname}
+        uom={provenance?.uom}
+        onClose={() => setProvenance(null)}
       />
     </div>
   );

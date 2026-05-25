@@ -706,6 +706,36 @@ export function useLotDetail(filters?: {
   });
 }
 
+export interface StockProvenanceRow {
+  item_code: string;
+  warehouse: string;
+  whs_name: string | null;
+  tx_count: number;
+  total_in: number;
+  total_out: number;
+  current_stock: number;
+  first_tx_date: string | null;
+  last_tx_date: string | null;
+  last_out_date: string | null;
+}
+
+/** Provenance of an item's current_stock — per-warehouse Σ in / Σ out / net. */
+export function useStockProvenance(itemCode?: string) {
+  return useQuery({
+    queryKey: ['stockProvenance', itemCode],
+    enabled: !!itemCode,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('v_stock_provenance')
+        .select('*')
+        .eq('item_code', itemCode!)
+        .order('current_stock', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as StockProvenanceRow[];
+    },
+  });
+}
+
 /**
  * Lots of one item — used for the drill-down modal.
  *
