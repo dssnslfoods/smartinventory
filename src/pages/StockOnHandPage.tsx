@@ -116,6 +116,11 @@ export function StockOnHandPage() {
 
   const totalValue = sortedData.reduce((sum, s) => sum + Number(s.stock_value), 0);
   const totalItems = sortedData.length;
+  // Total quantity — only meaningful as a single number when every row shares
+  // the same UOM (e.g. all KG). Mixed units → show "หน่วย" generic label.
+  const totalQty   = sortedData.reduce((sum, s) => sum + Number(s.current_stock), 0);
+  const uomSet     = new Set(sortedData.map(s => s.uom).filter(Boolean));
+  const singleUom  = uomSet.size === 1 ? [...uomSet][0] : null;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const safePage   = Math.min(page, totalPages - 1);
   const pageStart  = safePage * PAGE_SIZE;
@@ -427,7 +432,9 @@ export function StockOnHandPage() {
             {activeFilterCount === 0
               ? <>คลังมีทั้งหมด <strong style={{ color: 'var(--text)' }}>{formatNumber(stockData?.length ?? 0)}</strong> รายการ — กรุณาค้นหา/เลือก filter ก่อน</>
               : totalItems > 0
-                ? <>พบ <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong> รายการ · มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></>
+                ? <>พบ <strong style={{ color: 'var(--text)' }}>{formatNumber(totalItems)}</strong> รายการ
+                    {' '}· รวม <strong style={{ color: 'var(--text)' }}>{formatNumber(totalQty, 2)}</strong> {singleUom ?? 'หน่วย'}
+                    {' '}· มูลค่ารวม <strong style={{ color: 'var(--text)' }}>{formatCurrency(totalValue)}</strong></>
                 : <span style={{ color: '#dc2626' }}>ไม่พบรายการที่ตรงกับ filter</span>}
           </span>
         </div>
