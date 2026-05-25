@@ -153,8 +153,11 @@ async function handleCreate(
   if (!fullName)            return json({ error: 'full_name is required' }, 400);
   if (!companyId)           return json({ error: 'company_id is required' }, 400);
 
-  const validRoles: Role[] = ['admin', 'executive', 'supervisor', 'staff'];
-  if (callerRole === 'super_admin') validRoles.unshift('super_admin');
+  // Role governance: only super_admin may create admin/super_admin accounts.
+  // admin is confined to the basic roles within their own company.
+  const validRoles: Role[] = callerRole === 'super_admin'
+    ? ['super_admin', 'admin', 'executive', 'supervisor', 'staff']
+    : ['executive', 'supervisor', 'staff'];
   if (!validRoles.includes(role)) {
     return json({ error: `Role '${role}' is not assignable by ${callerRole}` }, 403);
   }
@@ -162,9 +165,6 @@ async function handleCreate(
   if (callerRole === 'admin') {
     if (companyId !== callerCompanyId) {
       return json({ error: 'Admin may only create users in their own company' }, 403);
-    }
-    if (role === 'super_admin') {
-      return json({ error: 'Admin may not create super_admin users' }, 403);
     }
   }
 

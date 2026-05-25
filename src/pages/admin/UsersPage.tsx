@@ -45,8 +45,10 @@ function UserRow({
   const [saving, setSaving] = useState(false);
   const [showReset, setShowReset] = useState(false);
 
-  // admin cannot assign super_admin; can assign up to admin
-  const allowedRoles: UserRole[] = ['admin', 'executive', 'supervisor', 'staff'];
+  // Role governance: admin may only assign basic roles (executive/supervisor/
+  // staff). Creating/changing admin or super_admin is super_admin-only and is
+  // enforced server-side by the user_profiles role-change trigger + edge fn.
+  const allowedRoles: UserRole[] = ['executive', 'supervisor', 'staff'];
 
   const handleSave = async () => {
     setSaving(true);
@@ -108,7 +110,7 @@ function UserRow({
             className="rounded-lg border px-2 py-1 text-sm"
             style={inputStyle}
           >
-            {allowedRoles.map(r => (
+            {(allowedRoles.includes(user.role) ? allowedRoles : [user.role, ...allowedRoles]).map(r => (
               <option key={r} value={r}>{ROLE_LABELS[r]}</option>
             ))}
           </select>
