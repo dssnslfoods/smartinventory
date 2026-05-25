@@ -513,7 +513,7 @@ export function StockOnHandPage() {
                   </th>
                   <th>UOM</th>
                   <th onClick={() => handleSort('moving_avg')} className="text-right"
-                      title="Moving Average Cost (WAC ฝั่งรับเข้า) = Σ มูลค่ารับเข้า (In + ปรับต้นทุน) ÷ Σ จำนวนรับเข้า — คำนวณ as-of วันที่ snapshot ล่าสุด">
+                      title="Moving Average Cost = Σ มูลค่า Lot คงเหลือ ÷ Σ จำนวน Lot คงเหลือ (ต้นทุนเฉลี่ยถ่วงน้ำหนักของของที่เหลือจริง · รวม landed cost) ณ snapshot ล่าสุด">
                     Moving Avg {sortField === 'moving_avg' && (sortDir === 'asc' ? '↑' : '↓')}
                   </th>
                   <th onClick={() => handleSort('stock_value')} className="text-right">
