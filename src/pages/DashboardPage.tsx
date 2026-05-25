@@ -115,9 +115,9 @@ export function DashboardPage() {
   // from today" would include 2 empty months → COGS undercounted by ~17%
   // → DIO inflated. Slicing the last 12 entries with data fixes that.
   const financialKpi = useMemo(() => {
-    // B2: net inventory — transfers already excluded in v_stock_onhand; here we
-    // sum ALL non-zero lines (positive + negative) so the total reflects the
-    // true net. Negative lines are data artifacts from missing transfer-out legs.
+    // current_stock in v_stock_onhand is now the PHYSICAL lot snapshot
+    // (inventory_lots) — always ≥ 0 and free of the SAP transfer inflation.
+    // Sum every line with stock for true net inventory value.
     const nonZero = stockData.filter(x => Number(x.current_stock) !== 0);
     const invValue = nonZero.reduce((s, x) => s + Number(x.stock_value), 0);
     // monthlyTotal is ordered ASC by month — take the last 12 entries
@@ -396,7 +396,7 @@ export function DashboardPage() {
             </CalcBlock>
 
             <p className="text-[10px] mt-1.5 italic" style={{ color: 'var(--text-muted)' }}>
-              current_stock = Σ(รับเข้า − จ่ายออก) จาก transactions · moving_avg = ต้นทุนเฉลี่ยจาก items master
+              current_stock = ผลรวม qty ของ Lot คงเหลือจริง ณ snapshot ล่าสุด (นับจริง · ไม่รวม transfer ผี) · moving_avg = WAC ฝั่งรับเข้า: Σ มูลค่ารับเข้า ÷ Σ จำนวนรับเข้า (as-of วันที่ snapshot)
             </p>
             <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
             {(() => {

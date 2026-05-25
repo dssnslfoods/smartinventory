@@ -295,6 +295,7 @@ export function LotDetailModal({
                       </td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums">
                         {formatNumber(Number(l.qty ?? 0), 2)}
+                        {l.uom && <span className="ml-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>{l.uom}</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: 'var(--text-muted)' }}>
                         {l.unit_cost != null ? formatCurrency(Number(l.unit_cost)) : '—'}
