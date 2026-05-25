@@ -364,29 +364,21 @@ export function DashboardPage() {
           icon={<Banknote size={18} />}
           label="Working Capital"
           value={kpiLoading ? '...' : `฿${formatCompact(financialKpi.actualValue)}`}
-          sublabel={`ต้นทุนจริงรายล็อต · WAC ฿${formatCompact(financialKpi.invValue)}`}
+          sublabel="เงินจมในคลัง (ต้นทุนจริง · moving average)"
           color={COLORS.primary}
           tooltipTitle="Working Capital"
           tooltip={<>
             <p className="mb-2">มูลค่ารวมสต็อก ณ ปัจจุบัน — เงินสดที่จมในสินค้าคงคลัง</p>
 
-            {/* Actual vs WAC — two valuation bases shown side by side */}
-            <CalcBlock formula="2 มุมมองของมูลค่าสต็อก">
-              <CalcLine label="ต้นทุนจริงรายล็อต (Working Capital)"
-                        value={`฿${formatNumber(financialKpi.actualValue, 0)}`} bold />
-              <CalcLine label="WAC (qty × ต้นทุนเฉลี่ย)"
-                        value={`฿${formatNumber(financialKpi.invValue, 0)}`} muted />
-            </CalcBlock>
             <p className="text-[11px] mb-2 leading-relaxed">
-              <strong>Working Capital ใช้ "ต้นทุนจริงรายล็อต"</strong> = Σ มูลค่าที่บันทึกจริงของแต่ละ batch
-              (inventory_lots.amount) — ตรงกับงบดุล/บัญชี · <strong>WAC</strong> เป็นต้นทุนเฉลี่ยถ่วงน้ำหนัก
-              ใช้กับ Turnover/COGS เพื่อให้ต้นทุน/หน่วยสม่ำเสมอ
+              ตีมูลค่าด้วย <strong>moving average cost</strong> = ต้นทุนเฉลี่ยถ่วงน้ำหนักของ Lot ที่เหลือจริง
+              (รวมต้นทุนแฝง/landed cost แล้ว) — ตรงกับงบดุล/บัญชี
             </p>
 
-            <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ (WAC)</p>
+            <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text)' }}>ขั้นตอนการคำนวณ</p>
 
-            {/* Step 1 — value of one line */}
-            <CalcBlock formula="STEP 1 · ต่อ 1 บรรทัด: stock_value = current_stock × moving_avg">
+            {/* Step 1 — per-item moving average */}
+            <CalcBlock formula="STEP 1 · moving average ต่อสินค้า = Σ มูลค่า Lot ÷ Σ จำนวน Lot">
               {financialKpi.topLine ? (
                 <>
                   <CalcLine label={`${financialKpi.topLine.item_code} @ ${financialKpi.topLine.warehouse}`}
@@ -404,17 +396,11 @@ export function DashboardPage() {
             {/* Step 2 — sum every line */}
             <CalcBlock formula="STEP 2 · รวมทุกบรรทัด (สินค้า × คลัง)">
               <CalcLine label="จำนวนบรรทัด" value={`${formatNumber(financialKpi.lineCount, 0)} บรรทัด`} />
-              <CalcLine label="Σ stock_value" value={`฿${formatNumber(financialKpi.invValue, 0)}`} bold />
-            </CalcBlock>
-
-            {/* Step 3 — result */}
-            <CalcBlock formula="STEP 3 · Inventory Value (WAC)">
-              <CalcLine label="= Inventory Value (WAC)" value={`฿${formatCompact(financialKpi.invValue)}`} bold />
-              <CalcLine label="= Working Capital (ต้นทุนจริง)" value={`฿${formatCompact(financialKpi.actualValue)}`} bold />
+              <CalcLine label="= Working Capital" value={`฿${formatCompact(financialKpi.actualValue)}`} bold />
             </CalcBlock>
 
             <p className="text-[10px] mt-1.5 italic" style={{ color: 'var(--text-muted)' }}>
-              current_stock = ผลรวม qty ของ Lot คงเหลือจริง ณ snapshot ล่าสุด (นับจริง · ไม่รวม transfer ผี) · moving_avg = WAC ฝั่งรับเข้า: Σ มูลค่ารับเข้า ÷ Σ จำนวนรับเข้า (as-of วันที่ snapshot)
+              current_stock = ผลรวม qty ของ Lot คงเหลือจริง ณ snapshot ล่าสุด (นับจริง · ไม่รวม transfer ผี) · moving_avg = Σ มูลค่า Lot ÷ Σ จำนวน Lot คงเหลือ (moving average · รวม landed cost)
             </p>
             <p className="mt-2">ยิ่งสูง → ต้องการเงินสดมาก · เสีย Carrying Cost ต่อปี</p>
             {(() => {

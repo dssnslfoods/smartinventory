@@ -664,8 +664,8 @@ function CostAnalyticsTab() {
             <p className="mb-2"><strong>มูลค่ารวม Moving Average</strong> ของสินค้าทุกตัวในคลัง</p>
             <p className="mb-2">= "เงินสด" ที่บริษัท <strong>จมไว้ในของ</strong> ตอนนี้</p>
             <p className="mb-2 text-[11px] p-2 rounded" style={{ backgroundColor: 'var(--bg-alt)' }}>
-              <strong>Moving Avg (WAC ฝั่งรับเข้า)</strong> = Σ มูลค่ารับเข้า (In + ปรับต้นทุน) ÷ Σ จำนวนรับเข้า
-              คำนวณ as-of วันที่ snapshot ล่าสุดจาก transactions (ไม่ใช้ค่า master คงที่)
+              <strong>Moving Avg</strong> = Σ มูลค่า Lot คงเหลือ ÷ Σ จำนวน Lot คงเหลือ
+              (ต้นทุนเฉลี่ยถ่วงน้ำหนักของของที่เหลือจริง · รวม landed cost) ณ snapshot ล่าสุด
             </p>
             <p>ยิ่งสูง → ยิ่งเสีย Carrying Cost ต่อปี (ดูการ์ดถัดไป)</p>
           </>}
