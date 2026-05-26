@@ -4,7 +4,7 @@ import {
   TrendingUp, TrendingDown, Minus, FolderTree,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   Scatter, ScatterChart, ZAxis, ResponsiveContainer,
 } from 'recharts';
 import {
@@ -24,8 +24,17 @@ import { LotDetailModal } from '@/components/LotDetailModal';
 // ── Color palettes ─────────────────────────────────────────────────────────────
 const VV_COLORS   = { A: '#16a34a', B: '#d97706', C: '#dc2626' } as const;
 const SLOW_COLORS = { dead_stock: '#C62828', slow_moving: '#E65100', normal: '#2E7D32' };
-const TURNOVER_HIGH = '#1F3864';
-const TURNOVER_LOW  = '#90A4AE';
+// Four turnover bands for the bubble chart — each band has its own colour and
+// bubble size (z). max is exclusive; the last band has max = Infinity.
+const TURNOVER_BANDS = [
+  { key: 'dead', label: 'หมุนช้ามาก', range: '< 1×',     min: 0,  max: 1,        color: '#C62828', z: 1 },
+  { key: 'low',  label: 'ต่ำ',        range: '1–4×',     min: 1,  max: 4,        color: '#E65100', z: 2 },
+  { key: 'mid',  label: 'ปานกลาง',    range: '4–12×',    min: 4,  max: 12,       color: '#2E75B6', z: 3 },
+  { key: 'high', label: 'หมุนเร็ว',   range: '≥ 12×',    min: 12, max: Infinity, color: '#2E7D32', z: 4 },
+] as const;
+type TurnoverBandKey = typeof TURNOVER_BANDS[number]['key'];
+const bandOf = (turnover: number): TurnoverBandKey =>
+  (TURNOVER_BANDS.find(b => turnover >= b.min && turnover < b.max) ?? TURNOVER_BANDS[0]).key;
 
 const tooltipStyle = {
   contentStyle: {
@@ -1792,6 +1801,8 @@ function TurnoverTab() {
   // Chart/table order: 'asc' surfaces the SLOWEST movers (turnover ต่ำสุด) first
   // — the items that actually need management attention. Default to slow-first.
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  // Selected turnover band (chart legend) — filters the table to that range.
+  const [selectedBand, setSelectedBand] = useState<TurnoverBandKey | null>(null);
 
   // ── Per-column filters — drive table + chart + summary in one shot ────────
   const [filtCode,       setFiltCode]       = useState('');   // item_code substring
@@ -1835,6 +1846,8 @@ function TurnoverTab() {
     const maxDoh    = parseFloat(filtMaxDoh);
     const minMonths = parseFloat(filtMinMonths);
 
+    const band = selectedBand ? TURNOVER_BANDS.find(b => b.key === selectedBand) : null;
+
     return sortedData.filter(r => {
       if (codeQ && !r.item_code.toLowerCase().includes(codeQ)) return false;
       if (nameQ && !(r.itemname ?? '').toLowerCase().includes(nameQ)) return false;
@@ -1849,17 +1862,24 @@ function TurnoverTab() {
         if (Number(r.days_on_hand) > maxDoh) return false;
       }
       if (Number.isFinite(minMonths) && Number(r.active_months) < minMonths) return false;
+      // Selected turnover band (from the bubble-chart legend)
+      if (band) {
+        if (r.turnover_ratio == null) return false;
+        const t = Number(r.turnover_ratio);
+        if (t < band.min || t >= band.max) return false;
+      }
       return true;
     });
-  }, [sortedData, filtCode, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths]);
+  }, [sortedData, filtCode, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths, selectedBand]);
 
   const activeFilterCount = [
     filtCode, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths,
+    selectedBand,
   ].filter(Boolean).length;
 
   const resetFilters = () => {
     setFiltCode(''); setFiltName(''); setFiltMinCogs(''); setFiltMinValue('');
-    setFiltMinTurn(''); setFiltMaxDoh(''); setFiltMinMonths('');
+    setFiltMinTurn(''); setFiltMaxDoh(''); setFiltMinMonths(''); setSelectedBand(null);
   };
 
   // Summary KPI cards react to filters too — what users see in the table is
@@ -1904,16 +1924,29 @@ function TurnoverTab() {
         if (Number.isFinite(minMonths) && Number(r.active_months) < minMonths) return false;
         return true;
       })
-      .map(r => ({
-        item_code:      r.item_code,
-        itemname:       r.itemname,
-        group_name:     r.group_name,
-        turnover_ratio: Number(r.turnover_ratio ?? 0),
-        days_on_hand:   Number(r.days_on_hand   ?? 0),
-        stock_value:    Number(r.current_stock_value ?? 0),
-        annual_cogs:    Number(r.annual_cogs ?? 0),
-      }));
+      .map(r => {
+        const turnover = Number(r.turnover_ratio ?? 0);
+        const band = bandOf(turnover);
+        return {
+          item_code:      r.item_code,
+          itemname:       r.itemname,
+          group_name:     r.group_name,
+          turnover_ratio: turnover,
+          days_on_hand:   Number(r.days_on_hand   ?? 0),
+          stock_value:    Number(r.current_stock_value ?? 0),
+          annual_cogs:    Number(r.annual_cogs ?? 0),
+          band,
+          z:              TURNOVER_BANDS.find(b => b.key === band)!.z,
+        };
+      });
   }, [sortedData, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths]);
+
+  // Count of items per band (for the legend chips).
+  const bandCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const d of chartData) c[d.band] = (c[d.band] ?? 0) + 1;
+    return c;
+  }, [chartData]);
 
   const handleExport = () => {
     exportToExcel(filtered.map(r => ({
@@ -1986,9 +2019,9 @@ function TurnoverTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            Inventory Turnover Bubble — คลิก bubble เพื่อ filter ตาราง
+            Inventory Turnover Bubble — แบ่ง 4 กลุ่มตามความเร็วหมุน
             <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
-              ({formatNumber(chartData.length)} รายการ · ลูกใหญ่ = turnover สูง/หมุนเร็ว)
+              ({formatNumber(chartData.length)} รายการ · คลิกกลุ่มหรือ bubble เพื่อ filter)
             </span>
           </h3>
           <div className="flex items-center gap-2">
@@ -2002,6 +2035,43 @@ function TurnoverTab() {
               {sortDir === 'asc' ? '▲ ต่ำ → สูง (หมุนช้าก่อน)' : '▼ สูง → ต่ำ (หมุนเร็วก่อน)'}
             </button>
           </div>
+        </div>
+
+        {/* Clickable 4-band legend — each band: colour + size + range + count.
+            Click a band to filter the table to that turnover range. */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {TURNOVER_BANDS.map(b => {
+            const active = selectedBand === b.key;
+            const dim    = selectedBand !== null && !active;
+            const dotPx  = 8 + b.z * 4; // 12 → 24 px, mirrors bubble sizing
+            return (
+              <button
+                key={b.key}
+                onClick={() => setSelectedBand(active ? null : b.key)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-all"
+                style={{
+                  borderColor: active ? b.color : 'var(--border)',
+                  backgroundColor: active ? `${b.color}1A` : 'transparent',
+                  opacity: dim ? 0.45 : 1,
+                  color: 'var(--text)',
+                }}
+                title={`กรองตารางเฉพาะกลุ่ม ${b.label} (${b.range})`}
+              >
+                <span style={{ width: dotPx, height: dotPx, borderRadius: '9999px', backgroundColor: b.color, display: 'inline-block', flexShrink: 0 }} />
+                <span className="font-medium">{b.label}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{b.range}</span>
+                <span className="tabular-nums px-1.5 rounded-full" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+                  {formatNumber(bandCounts[b.key] ?? 0)}
+                </span>
+              </button>
+            );
+          })}
+          {selectedBand && (
+            <button onClick={() => setSelectedBand(null)}
+              className="text-[11px] underline" style={{ color: 'var(--text-muted)' }}>
+              ล้างกลุ่ม
+            </button>
+          )}
         </div>
         {/* Bubble chart: X = turnover, Y = days on hand, bubble size = inventory
             value. Bubbles left+low (slow turnover, big value) = problem money.
@@ -2020,24 +2090,19 @@ function TurnoverTab() {
                 stroke="var(--text-muted)" fontSize={11}
                 label={{ value: 'Days on Hand (วัน)', angle: -90, position: 'insideLeft', fontSize: 11 }}
               />
-              {/* Bubble size scales with the turnover ratio — big bubble = หมุนเร็ว */}
-              <ZAxis type="number" dataKey="turnover_ratio" range={[40, 1500]} name="Turnover" />
+              {/* Bubble size is discrete per band (z = 1..4) → 4 distinct sizes */}
+              <ZAxis type="number" dataKey="z" domain={[1, 4]} range={[80, 900]} name="กลุ่ม" />
               <Tooltip {...tooltipStyle}
                 cursor={{ strokeDasharray: '3 3' }}
-                formatter={(val: unknown, name?: string) => {
-                  if (name === 'Turnover')      return [`${Number(val).toFixed(2)}×`, name];
-                  if (name === 'Days on Hand')  return [`${Number(val).toFixed(0)} วัน`, name];
-                  if (name === 'มูลค่าสต็อก')    return [`฿${formatNumber(Number(val), 0)}`, name];
-                  return [String(val), name ?? ''];
-                }}
-                labelFormatter={() => ''}
                 content={(props: any) => {
                   const p = props?.payload?.[0]?.payload;
                   if (!p) return null;
+                  const b = TURNOVER_BANDS.find(x => x.key === p.band);
                   return (
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
                       <div style={{ fontWeight: 600, color: 'var(--color-primary-light)' }}>{p.item_code}</div>
                       <div style={{ color: 'var(--text)', marginBottom: 4 }}>{p.itemname}</div>
+                      <div style={{ color: b?.color, fontWeight: 600 }}>กลุ่ม: {b?.label} ({b?.range})</div>
                       <div style={{ color: 'var(--text-muted)' }}>Turnover: <b>{p.turnover_ratio.toFixed(2)}×</b></div>
                       <div style={{ color: 'var(--text-muted)' }}>Days on Hand: <b>{formatNumber(p.days_on_hand, 0)} วัน</b></div>
                       <div style={{ color: 'var(--text-muted)' }}>มูลค่าสต็อก: <b>฿{formatNumber(p.stock_value, 0)}</b></div>
@@ -2046,24 +2111,21 @@ function TurnoverTab() {
                   );
                 }}
               />
-              <Scatter
-                data={chartData}
-                onClick={(d: any) => { if (d?.item_code) setFiltCode(d.item_code); }}
-                cursor="pointer"
-              >
-                {chartData.map((d, i) => {
-                  const selected = filtCode && d.item_code === filtCode;
-                  return (
-                    <Cell
-                      key={i}
-                      fill={d.turnover_ratio >= summary.avg ? TURNOVER_HIGH : TURNOVER_LOW}
-                      fillOpacity={selected ? 1 : 0.55}
-                      stroke={selected ? 'var(--color-primary)' : 'transparent'}
-                      strokeWidth={selected ? 2 : 0}
-                    />
-                  );
-                })}
-              </Scatter>
+              {/* One Scatter series per band → its own colour + size */}
+              {TURNOVER_BANDS.map(b => {
+                const dim = selectedBand !== null && selectedBand !== b.key;
+                return (
+                  <Scatter
+                    key={b.key}
+                    name={b.label}
+                    data={chartData.filter(d => d.band === b.key)}
+                    fill={b.color}
+                    fillOpacity={dim ? 0.15 : 0.7}
+                    onClick={(d: any) => { if (d?.item_code) setFiltCode(d.item_code); }}
+                    cursor="pointer"
+                  />
+                );
+              })}
             </ScatterChart>
           </ResponsiveContainer>
         </div>
