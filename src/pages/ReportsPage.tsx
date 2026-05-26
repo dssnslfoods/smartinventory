@@ -2091,13 +2091,14 @@ function TurnoverTab() {
         {/* Four aggregate bubbles — one per turnover group. X = group, Y = total
             inventory value of the group, bubble size = number of SKUs. Click a
             bubble (or its legend chip) to filter the table to that group. */}
-        <div style={{ height: 420 }}>
+        <div style={{ height: 460 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ left: 30, right: 40, top: 20, bottom: 40 }}>
+            <ScatterChart margin={{ left: 40, right: 50, top: 40, bottom: 50 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
                 type="number" dataKey="x" name="กลุ่ม"
                 domain={[0.5, 4.5]} ticks={[1, 2, 3, 4]}
+                padding={{ left: 60, right: 60 }}
                 tickFormatter={(v: number) => {
                   const b = bandAgg.find(d => d.x === v);
                   return b ? `${b.label}\n${b.range}` : '';
@@ -2107,12 +2108,14 @@ function TurnoverTab() {
               />
               <YAxis
                 type="number" dataKey="value" name="มูลค่าสต็อกรวม"
+                domain={[0, (max: number) => max * 1.18]}
+                padding={{ top: 45, bottom: 45 }}
                 stroke="var(--text-muted)" fontSize={11}
                 tickFormatter={(v: number) => `฿${formatCompact(v)}`}
                 label={{ value: 'มูลค่าสต็อกรวมของกลุ่ม', angle: -90, position: 'insideLeft', fontSize: 11 }}
               />
               {/* Bubble size = SKU count in the group */}
-              <ZAxis type="number" dataKey="count" range={[400, 4000]} name="จำนวนสินค้า" />
+              <ZAxis type="number" dataKey="count" range={[400, 3000]} name="จำนวนสินค้า" />
               <Tooltip {...tooltipStyle}
                 cursor={{ strokeDasharray: '3 3' }}
                 content={(props: any) => {
