@@ -1986,9 +1986,9 @@ function TurnoverTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            Turnover Bubble — คลิก bubble เพื่อ filter ตาราง
+            Inventory Turnover Bubble — คลิก bubble เพื่อ filter ตาราง
             <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
-              ({formatNumber(chartData.length)} รายการ · ขนาด = มูลค่าสต็อก)
+              ({formatNumber(chartData.length)} รายการ · ลูกใหญ่ = turnover สูง/หมุนเร็ว)
             </span>
           </h3>
           <div className="flex items-center gap-2">
@@ -2020,8 +2020,8 @@ function TurnoverTab() {
                 stroke="var(--text-muted)" fontSize={11}
                 label={{ value: 'Days on Hand (วัน)', angle: -90, position: 'insideLeft', fontSize: 11 }}
               />
-              {/* Bubble size scales with inventory value */}
-              <ZAxis type="number" dataKey="stock_value" range={[40, 1200]} name="มูลค่าสต็อก" />
+              {/* Bubble size scales with the turnover ratio — big bubble = หมุนเร็ว */}
+              <ZAxis type="number" dataKey="turnover_ratio" range={[40, 1500]} name="Turnover" />
               <Tooltip {...tooltipStyle}
                 cursor={{ strokeDasharray: '3 3' }}
                 formatter={(val: unknown, name?: string) => {
