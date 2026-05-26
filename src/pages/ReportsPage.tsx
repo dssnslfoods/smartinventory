@@ -24,13 +24,13 @@ import { LotDetailModal } from '@/components/LotDetailModal';
 // ── Color palettes ─────────────────────────────────────────────────────────────
 const VV_COLORS   = { A: '#16a34a', B: '#d97706', C: '#dc2626' } as const;
 const SLOW_COLORS = { dead_stock: '#C62828', slow_moving: '#E65100', normal: '#2E7D32' };
-// Four turnover bands for the bubble chart — each band has its own colour and
-// bubble size (z). max is exclusive; the last band has max = Infinity.
+// Four turnover-ratio groups. Each is drawn as ONE aggregate bubble (size =
+// number of SKUs in the group). max is exclusive; the last group = Infinity.
 const TURNOVER_BANDS = [
-  { key: 'dead', label: 'หมุนช้ามาก', range: '< 1×',     min: 0,  max: 1,        color: '#C62828', z: 1 },
-  { key: 'low',  label: 'ต่ำ',        range: '1–4×',     min: 1,  max: 4,        color: '#E65100', z: 2 },
-  { key: 'mid',  label: 'ปานกลาง',    range: '4–12×',    min: 4,  max: 12,       color: '#2E75B6', z: 3 },
-  { key: 'high', label: 'หมุนเร็ว',   range: '≥ 12×',    min: 12, max: Infinity, color: '#2E7D32', z: 4 },
+  { key: 'b1', label: 'หมุนช้ามาก', range: '0–1.5×',  min: 0,   max: 1.5,      color: '#C62828' },
+  { key: 'b2', label: 'ค่อนข้างช้า', range: '1.5–3×', min: 1.5, max: 3,        color: '#E65100' },
+  { key: 'b3', label: 'ปานกลาง',    range: '3–10×',  min: 3,   max: 10,       color: '#2E75B6' },
+  { key: 'b4', label: 'หมุนเร็ว',   range: '≥ 10×',  min: 10,  max: Infinity, color: '#2E7D32' },
 ] as const;
 type TurnoverBandKey = typeof TURNOVER_BANDS[number]['key'];
 const bandOf = (turnover: number): TurnoverBandKey =>
@@ -1926,7 +1926,6 @@ function TurnoverTab() {
       })
       .map(r => {
         const turnover = Number(r.turnover_ratio ?? 0);
-        const band = bandOf(turnover);
         return {
           item_code:      r.item_code,
           itemname:       r.itemname,
@@ -1935,13 +1934,29 @@ function TurnoverTab() {
           days_on_hand:   Number(r.days_on_hand   ?? 0),
           stock_value:    Number(r.current_stock_value ?? 0),
           annual_cogs:    Number(r.annual_cogs ?? 0),
-          band,
-          z:              TURNOVER_BANDS.find(b => b.key === band)!.z,
+          band:           bandOf(turnover),
         };
       });
   }, [sortedData, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths]);
 
-  // Count of items per band (for the legend chips).
+  // Aggregate each turnover band into ONE bubble: count of SKUs + total stock
+  // value + average days-on-hand. x = band order (1..4) for chart positioning.
+  const bandAgg = useMemo(() =>
+    TURNOVER_BANDS.map((b, i) => {
+      const items = chartData.filter(d => d.band === b.key);
+      const value = items.reduce((s, d) => s + d.stock_value, 0);
+      const doh   = items.length
+        ? items.reduce((s, d) => s + d.days_on_hand, 0) / items.length : 0;
+      return {
+        ...b,
+        x: i + 1,
+        count: items.length,
+        value,
+        avg_doh: doh,
+      };
+    }),
+    [chartData],
+  );
   const bandCounts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const d of chartData) c[d.band] = (c[d.band] ?? 0) + 1;
@@ -2019,9 +2034,9 @@ function TurnoverTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            Inventory Turnover Bubble — แบ่ง 4 กลุ่มตามความเร็วหมุน
+            Inventory Turnover — 4 กลุ่มตามความเร็วหมุน
             <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
-              ({formatNumber(chartData.length)} รายการ · คลิกกลุ่มหรือ bubble เพื่อ filter)
+              ({formatNumber(chartData.length)} รายการ · ลูกใหญ่ = SKU เยอะ · คลิกกลุ่มเพื่อแสดงสินค้า)
             </span>
           </h3>
           <div className="flex items-center gap-2">
@@ -2043,7 +2058,7 @@ function TurnoverTab() {
           {TURNOVER_BANDS.map(b => {
             const active = selectedBand === b.key;
             const dim    = selectedBand !== null && !active;
-            const dotPx  = 8 + b.z * 4; // 12 → 24 px, mirrors bubble sizing
+            const dotPx  = 14;
             return (
               <button
                 key={b.key}
@@ -2073,55 +2088,60 @@ function TurnoverTab() {
             </button>
           )}
         </div>
-        {/* Bubble chart: X = turnover, Y = days on hand, bubble size = inventory
-            value. Bubbles left+low (slow turnover, big value) = problem money.
-            Click a bubble to filter the table to that item. */}
-        <div style={{ height: 520 }}>
+        {/* Four aggregate bubbles — one per turnover group. X = group, Y = total
+            inventory value of the group, bubble size = number of SKUs. Click a
+            bubble (or its legend chip) to filter the table to that group. */}
+        <div style={{ height: 420 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ left: 20, right: 30, top: 10, bottom: 36 }}>
+            <ScatterChart margin={{ left: 30, right: 40, top: 20, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
-                type="number" dataKey="turnover_ratio" name="Turnover"
-                stroke="var(--text-muted)" fontSize={11}
-                label={{ value: 'Turnover Ratio (×) — ยิ่งซ้าย ยิ่งหมุนช้า', position: 'insideBottom', offset: -20, fontSize: 11 }}
+                type="number" dataKey="x" name="กลุ่ม"
+                domain={[0.5, 4.5]} ticks={[1, 2, 3, 4]}
+                tickFormatter={(v: number) => {
+                  const b = bandAgg.find(d => d.x === v);
+                  return b ? `${b.label}\n${b.range}` : '';
+                }}
+                stroke="var(--text-muted)" fontSize={11} interval={0}
+                label={{ value: 'กลุ่ม Turnover (ช้า → เร็ว)', position: 'insideBottom', offset: -25, fontSize: 11 }}
               />
               <YAxis
-                type="number" dataKey="days_on_hand" name="Days on Hand"
+                type="number" dataKey="value" name="มูลค่าสต็อกรวม"
                 stroke="var(--text-muted)" fontSize={11}
-                label={{ value: 'Days on Hand (วัน)', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                tickFormatter={(v: number) => `฿${formatCompact(v)}`}
+                label={{ value: 'มูลค่าสต็อกรวมของกลุ่ม', angle: -90, position: 'insideLeft', fontSize: 11 }}
               />
-              {/* Bubble size is discrete per band (z = 1..4) → 4 distinct sizes */}
-              <ZAxis type="number" dataKey="z" domain={[1, 4]} range={[80, 900]} name="กลุ่ม" />
+              {/* Bubble size = SKU count in the group */}
+              <ZAxis type="number" dataKey="count" range={[400, 4000]} name="จำนวนสินค้า" />
               <Tooltip {...tooltipStyle}
                 cursor={{ strokeDasharray: '3 3' }}
                 content={(props: any) => {
                   const p = props?.payload?.[0]?.payload;
                   if (!p) return null;
-                  const b = TURNOVER_BANDS.find(x => x.key === p.band);
                   return (
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
-                      <div style={{ fontWeight: 600, color: 'var(--color-primary-light)' }}>{p.item_code}</div>
-                      <div style={{ color: 'var(--text)', marginBottom: 4 }}>{p.itemname}</div>
-                      <div style={{ color: b?.color, fontWeight: 600 }}>กลุ่ม: {b?.label} ({b?.range})</div>
-                      <div style={{ color: 'var(--text-muted)' }}>Turnover: <b>{p.turnover_ratio.toFixed(2)}×</b></div>
-                      <div style={{ color: 'var(--text-muted)' }}>Days on Hand: <b>{formatNumber(p.days_on_hand, 0)} วัน</b></div>
-                      <div style={{ color: 'var(--text-muted)' }}>มูลค่าสต็อก: <b>฿{formatNumber(p.stock_value, 0)}</b></div>
-                      <div style={{ color: 'var(--color-primary)', marginTop: 4 }}>คลิกเพื่อ filter ตาราง</div>
+                      <div style={{ fontWeight: 600, color: p.color }}>{p.label} ({p.range})</div>
+                      <div style={{ color: 'var(--text-muted)' }}>จำนวนสินค้า: <b>{formatNumber(p.count)} รายการ</b></div>
+                      <div style={{ color: 'var(--text-muted)' }}>มูลค่าสต็อกรวม: <b>฿{formatNumber(p.value, 0)}</b></div>
+                      <div style={{ color: 'var(--text-muted)' }}>เฉลี่ย Days on Hand: <b>{formatNumber(p.avg_doh, 0)} วัน</b></div>
+                      <div style={{ color: 'var(--color-primary)', marginTop: 4 }}>คลิกเพื่อแสดงสินค้าในกลุ่มนี้</div>
                     </div>
                   );
                 }}
               />
-              {/* One Scatter series per band → its own colour + size */}
-              {TURNOVER_BANDS.map(b => {
+              {/* One bubble per group so each gets its own colour */}
+              {bandAgg.map(b => {
                 const dim = selectedBand !== null && selectedBand !== b.key;
                 return (
                   <Scatter
                     key={b.key}
-                    name={b.label}
-                    data={chartData.filter(d => d.band === b.key)}
+                    name={`${b.label} (${b.range})`}
+                    data={[b]}
                     fill={b.color}
-                    fillOpacity={dim ? 0.15 : 0.7}
-                    onClick={(d: any) => { if (d?.item_code) setFiltCode(d.item_code); }}
+                    fillOpacity={dim ? 0.2 : 0.8}
+                    stroke={selectedBand === b.key ? 'var(--color-primary)' : 'transparent'}
+                    strokeWidth={selectedBand === b.key ? 3 : 0}
+                    onClick={() => setSelectedBand(selectedBand === b.key ? null : b.key)}
                     cursor="pointer"
                   />
                 );
