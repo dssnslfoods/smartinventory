@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend,
-  Scatter, ScatterChart, ResponsiveContainer,
+  Scatter, ScatterChart, ZAxis, ResponsiveContainer,
 } from 'recharts';
 import {
   useStockOnHand, useSlowMoving, useInventoryTurnover,
@@ -1877,15 +1877,43 @@ function TurnoverTab() {
     };
   }, [filtered]);
 
-  const chartData = useMemo(() =>
-    filtered.slice(0, 20).map(r => ({
-      item_code:      r.item_code,
-      itemname:       r.itemname,
-      turnover_ratio: Number(r.turnover_ratio ?? 0),
-      days_on_hand:   Number(r.days_on_hand   ?? 0),
-    })),
-    [filtered],
-  );
+  // Bubble chart: every item (passing all filters EXCEPT the item-code filter)
+  // is one bubble. X = turnover, Y = days on hand, bubble size = inventory value
+  // (เงินที่จม). Excluding filtCode here keeps the full bubble cloud visible
+  // after a click — the click sets filtCode which filters only the TABLE, while
+  // the clicked bubble is highlighted in place. Items with no turnover ratio are
+  // dropped (no meaningful X).
+  const chartData = useMemo(() => {
+    const nameQ = filtName.trim().toLowerCase();
+    const minCogs   = parseFloat(filtMinCogs);
+    const minValue  = parseFloat(filtMinValue);
+    const minTurn   = parseFloat(filtMinTurn);
+    const maxDoh    = parseFloat(filtMaxDoh);
+    const minMonths = parseFloat(filtMinMonths);
+    return sortedData
+      .filter(r => {
+        if (r.turnover_ratio === null) return false;
+        if (nameQ && !(r.itemname ?? '').toLowerCase().includes(nameQ)) return false;
+        if (Number.isFinite(minCogs)   && Number(r.annual_cogs)         < minCogs)   return false;
+        if (Number.isFinite(minValue)  && Number(r.current_stock_value) < minValue)  return false;
+        if (Number.isFinite(minTurn)   && Number(r.turnover_ratio)      < minTurn)   return false;
+        if (Number.isFinite(maxDoh)) {
+          if (r.days_on_hand == null) return false;
+          if (Number(r.days_on_hand) > maxDoh) return false;
+        }
+        if (Number.isFinite(minMonths) && Number(r.active_months) < minMonths) return false;
+        return true;
+      })
+      .map(r => ({
+        item_code:      r.item_code,
+        itemname:       r.itemname,
+        group_name:     r.group_name,
+        turnover_ratio: Number(r.turnover_ratio ?? 0),
+        days_on_hand:   Number(r.days_on_hand   ?? 0),
+        stock_value:    Number(r.current_stock_value ?? 0),
+        annual_cogs:    Number(r.annual_cogs ?? 0),
+      }));
+  }, [sortedData, filtName, filtMinCogs, filtMinValue, filtMinTurn, filtMaxDoh, filtMinMonths]);
 
   const handleExport = () => {
     exportToExcel(filtered.map(r => ({
@@ -1958,15 +1986,13 @@ function TurnoverTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            {sortDir === 'asc' ? 'Bottom 20 — Turnover ต่ำสุด (หมุนช้า)' : 'Top 20 — Turnover สูงสุด (หมุนเร็ว)'}
-            {activeFilterCount > 0 && (
-              <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
-                (จาก {formatNumber(filtered.length)} รายการที่ผ่าน filter)
-              </span>
-            )}
+            Turnover Bubble — คลิก bubble เพื่อ filter ตาราง
+            <span className="ml-2 text-xs font-normal" style={{ color: 'var(--color-primary)' }}>
+              ({formatNumber(chartData.length)} รายการ · ขนาด = มูลค่าสต็อก)
+            </span>
           </h3>
           <div className="flex items-center gap-2">
-            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>ลำดับเดียวกับตารางด้านล่าง</span>
+            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>ตารางด้านล่างเรียงตามปุ่มนี้</span>
             <button
               onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
               className="text-[11px] px-2.5 py-1 rounded-full font-medium transition-colors"
@@ -1977,48 +2003,68 @@ function TurnoverTab() {
             </button>
           </div>
         </div>
-        {/* Height scales with 20 items so all y-axis labels can show with interval=0 */}
+        {/* Bubble chart: X = turnover, Y = days on hand, bubble size = inventory
+            value. Bubbles left+low (slow turnover, big value) = problem money.
+            Click a bubble to filter the table to that item. */}
         <div style={{ height: 520 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={chartData}
-              layout="vertical"
-              margin={{ left: 10, right: 50, top: 5, bottom: 30 }}
-              barCategoryGap="22%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+            <ScatterChart margin={{ left: 20, right: 30, top: 10, bottom: 36 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
-                type="number" stroke="var(--text-muted)" fontSize={11}
-                label={{ value: 'Turnover Ratio (×)', position: 'insideBottomRight', offset: -10, fontSize: 11 }}
+                type="number" dataKey="turnover_ratio" name="Turnover"
+                stroke="var(--text-muted)" fontSize={11}
+                label={{ value: 'Turnover Ratio (×) — ยิ่งซ้าย ยิ่งหมุนช้า', position: 'insideBottom', offset: -20, fontSize: 11 }}
               />
-              {/* interval={0} forces ALL 20 labels to render so the visual order
-                  exactly matches the table below — Recharts default auto-skips
-                  labels when they overlap, which was making the chart look like
-                  it was sorted differently. */}
               <YAxis
-                type="category"
-                dataKey="item_code"
-                width={104}
-                stroke="var(--text-muted)"
-                fontSize={10}
-                interval={0}
-                tickMargin={4}
+                type="number" dataKey="days_on_hand" name="Days on Hand"
+                stroke="var(--text-muted)" fontSize={11}
+                label={{ value: 'Days on Hand (วัน)', angle: -90, position: 'insideLeft', fontSize: 11 }}
               />
+              {/* Bubble size scales with inventory value */}
+              <ZAxis type="number" dataKey="stock_value" range={[40, 1200]} name="มูลค่าสต็อก" />
               <Tooltip {...tooltipStyle}
-                formatter={(val: unknown, name?: string) =>
-                  name === 'turnover_ratio' ? [`${Number(val).toFixed(2)}×`, 'Turnover'] : [`${Number(val).toFixed(0)} days`, 'Days on Hand']}
-                labelFormatter={(itemCode) => {
-                  const code = String(itemCode ?? '');
-                  const row = chartData.find(d => d.item_code === code);
-                  return row ? `${code} — ${row.itemname}` : code;
+                cursor={{ strokeDasharray: '3 3' }}
+                formatter={(val: unknown, name?: string) => {
+                  if (name === 'Turnover')      return [`${Number(val).toFixed(2)}×`, name];
+                  if (name === 'Days on Hand')  return [`${Number(val).toFixed(0)} วัน`, name];
+                  if (name === 'มูลค่าสต็อก')    return [`฿${formatNumber(Number(val), 0)}`, name];
+                  return [String(val), name ?? ''];
+                }}
+                labelFormatter={() => ''}
+                content={(props: any) => {
+                  const p = props?.payload?.[0]?.payload;
+                  if (!p) return null;
+                  return (
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--color-primary-light)' }}>{p.item_code}</div>
+                      <div style={{ color: 'var(--text)', marginBottom: 4 }}>{p.itemname}</div>
+                      <div style={{ color: 'var(--text-muted)' }}>Turnover: <b>{p.turnover_ratio.toFixed(2)}×</b></div>
+                      <div style={{ color: 'var(--text-muted)' }}>Days on Hand: <b>{formatNumber(p.days_on_hand, 0)} วัน</b></div>
+                      <div style={{ color: 'var(--text-muted)' }}>มูลค่าสต็อก: <b>฿{formatNumber(p.stock_value, 0)}</b></div>
+                      <div style={{ color: 'var(--color-primary)', marginTop: 4 }}>คลิกเพื่อ filter ตาราง</div>
+                    </div>
+                  );
                 }}
               />
-              <Bar dataKey="turnover_ratio" name="turnover_ratio" radius={[0, 4, 4, 0]} barSize={14}>
-                {chartData.map((d, i) => (
-                  <Cell key={i} fill={d.turnover_ratio >= summary.avg ? TURNOVER_HIGH : TURNOVER_LOW} />
-                ))}
-              </Bar>
-            </BarChart>
+              <Scatter
+                data={chartData}
+                onClick={(d: any) => { if (d?.item_code) setFiltCode(d.item_code); }}
+                cursor="pointer"
+              >
+                {chartData.map((d, i) => {
+                  const selected = filtCode && d.item_code === filtCode;
+                  return (
+                    <Cell
+                      key={i}
+                      fill={d.turnover_ratio >= summary.avg ? TURNOVER_HIGH : TURNOVER_LOW}
+                      fillOpacity={selected ? 1 : 0.55}
+                      stroke={selected ? 'var(--color-primary)' : 'transparent'}
+                      strokeWidth={selected ? 2 : 0}
+                    />
+                  );
+                })}
+              </Scatter>
+            </ScatterChart>
           </ResponsiveContainer>
         </div>
       </div>
