@@ -22,6 +22,10 @@ export function StockOnHandPage() {
   const [minValue, setMinValue] = useState('');     // ฿
   const [minQty, setMinQty] = useState('');         // units
   const [valueBucket, setValueBucket] = useState<'all' | '100k' | '1M' | '10M'>('all');
+  /** Display mode:
+   *   'by-wh'   = 1 แถวต่อ (สินค้า × คลัง) — ดีฟอลต์, เห็นรายคลัง
+   *   'by-item' = 1 แถวต่อสินค้า — รวม qty/มูลค่าทุกคลัง */
+  const [viewMode, setViewMode] = useState<'by-wh' | 'by-item'>('by-wh');
 
   /** Drill-down state — click a row to see all lots for that (item × warehouse). */
   const [drillDown, setDrillDown] = useState<{
@@ -119,23 +123,73 @@ export function StockOnHandPage() {
     setPage(0);
   };
 
-  const totalValue = sortedData.reduce((sum, s) => sum + Number(s.stock_value), 0);
-  const totalItems = sortedData.length;
+  /** Aggregate per-warehouse rows into one row per item. */
+  const aggregatedData = useMemo(() => {
+    type Row = (typeof sortedData)[number];
+    const byItem = new Map<string, Row & {
+      warehouse: string; whs_name: string; wh_count: number;
+      warehouses: string[]; lot_value: number;
+    }>();
+    for (const r of sortedData) {
+      const key = r.item_code;
+      const existing = byItem.get(key);
+      const qty   = Number(r.current_stock);
+      const val   = Number(r.stock_value);
+      const lotV  = Number((r as any).lot_value ?? r.stock_value);
+      if (!existing) {
+        byItem.set(key, {
+          ...r,
+          current_stock: qty,
+          stock_value:   val,
+          lot_value:     lotV,
+          warehouse:     'ALL',
+          whs_name:      'ทุกคลัง',
+          wh_count:      1,
+          warehouses:    [r.warehouse],
+        });
+      } else {
+        existing.current_stock = Number(existing.current_stock) + qty;
+        existing.stock_value   = Number(existing.stock_value)   + val;
+        existing.lot_value     = Number(existing.lot_value)     + lotV;
+        existing.wh_count     += 1;
+        existing.warehouses.push(r.warehouse);
+      }
+    }
+    const list = [...byItem.values()];
+    // Re-sort aggregates by the active sort field/direction
+    list.sort((a, b) => {
+      const aVal = (a as unknown as Record<string, unknown>)[sortField];
+      const bVal = (b as unknown as Record<string, unknown>)[sortField];
+      const aNum = typeof aVal === 'number' ? aVal : Number(aVal) || 0;
+      const bNum = typeof bVal === 'number' ? bVal : Number(bVal) || 0;
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
+    });
+    return list;
+  }, [sortedData, sortField, sortDir]);
+
+  /** What the table actually renders — switches with viewMode. */
+  const displayData = viewMode === 'by-item' ? aggregatedData : sortedData;
+
+  const totalValue = displayData.reduce((sum, s) => sum + Number(s.stock_value), 0);
+  const totalItems = displayData.length;
   // Total quantity — only meaningful as a single number when every row shares
   // the same UOM (e.g. all KG). Mixed units → show "หน่วย" generic label.
-  const totalQty   = sortedData.reduce((sum, s) => sum + Number(s.current_stock), 0);
-  const uomSet     = new Set(sortedData.map(s => s.uom).filter(Boolean));
+  const totalQty   = displayData.reduce((sum, s) => sum + Number(s.current_stock), 0);
+  const uomSet     = new Set(displayData.map(s => s.uom).filter(Boolean));
   const singleUom  = uomSet.size === 1 ? [...uomSet][0] : null;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const safePage   = Math.min(page, totalPages - 1);
   const pageStart  = safePage * PAGE_SIZE;
   const pageEnd    = Math.min(pageStart + PAGE_SIZE, totalItems);
-  const pagedData  = sortedData.slice(pageStart, pageEnd);
+  const pagedData  = displayData.slice(pageStart, pageEnd);
 
-  // Reset to page 0 whenever any filter/search input changes.
+  // Reset to page 0 whenever any filter/search input or the view mode changes.
   useEffect(() => {
     setPage(0);
-  }, [warehouse, groupCode, isActive, search, fsCategory, minValueNum, minQtyNum, bucketThreshold]);
+  }, [warehouse, groupCode, isActive, search, fsCategory, minValueNum, minQtyNum, bucketThreshold, viewMode]);
 
   const resetFilters = () => {
     setSearch(''); setWarehouse(''); setGroupCode(undefined);
@@ -150,19 +204,35 @@ export function StockOnHandPage() {
   ].filter(Boolean).length;
 
   const handleExport = () => {
-    exportToExcel(sortedData.map(s => ({
-      'Item Code': s.item_code,
-      'Item Name': s.itemname,
-      'Warehouse': s.warehouse,
-      'Warehouse Name': s.whs_name,
-      'Group': s.group_name,
-      'Current Stock': Number(s.current_stock),
-      'UOM': s.uom,
-      'Moving Avg Cost': Number(s.moving_avg),
-      'Std Cost': Number(s.std_cost),
-      'Stock Value': Number(s.stock_value),
-      'Status': s.is_active ? 'Active' : 'Inactive',
-    })), 'Stock_OnHand');
+    if (viewMode === 'by-item') {
+      exportToExcel(aggregatedData.map(s => ({
+        'Item Code':       s.item_code,
+        'Item Name':       s.itemname,
+        'Group':           s.group_name,
+        'Warehouses':      s.warehouses.join(', '),
+        '# Warehouses':    s.wh_count,
+        'Total Stock':     Number(s.current_stock),
+        'UOM':             s.uom,
+        'Moving Avg Cost': Number(s.moving_avg),
+        'Std Cost':        Number(s.std_cost),
+        'Stock Value':     Number(s.stock_value),
+        'Status':          s.is_active ? 'Active' : 'Inactive',
+      })), 'Stock_OnHand_ByItem');
+    } else {
+      exportToExcel(sortedData.map(s => ({
+        'Item Code':       s.item_code,
+        'Item Name':       s.itemname,
+        'Warehouse':       s.warehouse,
+        'Warehouse Name':  s.whs_name,
+        'Group':           s.group_name,
+        'Current Stock':   Number(s.current_stock),
+        'UOM':             s.uom,
+        'Moving Avg Cost': Number(s.moving_avg),
+        'Std Cost':        Number(s.std_cost),
+        'Stock Value':     Number(s.stock_value),
+        'Status':          s.is_active ? 'Active' : 'Inactive',
+      })), 'Stock_OnHand');
+    }
   };
 
   return (
@@ -323,6 +393,40 @@ export function StockOnHandPage() {
               <Download size={16} /> Export ({totalItems})
             </button>
           </div>
+        </div>
+
+        {/* View-mode toggle: per-warehouse vs. summed-per-item */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>มุมมอง:</span>
+          <div className="inline-flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={() => setViewMode('by-wh')}
+              className="px-3 py-1.5 text-xs font-medium transition-colors"
+              style={{
+                backgroundColor: viewMode === 'by-wh' ? 'var(--color-primary)' : 'transparent',
+                color: viewMode === 'by-wh' ? '#fff' : 'var(--text)',
+              }}
+              title="1 แถว = สินค้า × คลัง (ดีฟอลต์)"
+            >
+              📋 ต่อคลัง
+            </button>
+            <button
+              onClick={() => setViewMode('by-item')}
+              className="px-3 py-1.5 text-xs font-medium transition-colors"
+              style={{
+                backgroundColor: viewMode === 'by-item' ? 'var(--color-primary)' : 'transparent',
+                color: viewMode === 'by-item' ? '#fff' : 'var(--text)',
+              }}
+              title="1 แถว = 1 สินค้า รวมทุกคลัง"
+            >
+              📦 รวมตามสินค้า
+            </button>
+          </div>
+          {viewMode === 'by-item' && (
+            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              · รวม qty/มูลค่าจากทุกคลัง · คอลัมน์ Warehouse จะแสดงจำนวนคลัง
+            </span>
+          )}
         </div>
 
         {/* Row 2 — dropdowns */}
@@ -505,7 +609,7 @@ export function StockOnHandPage() {
                     Item Name {sortField === 'item_name' && (sortDir === 'asc' ? '↑' : '↓')}
                   </th>
                   <th onClick={() => handleSort('warehouse')}>
-                    Warehouse {sortField === 'warehouse' && (sortDir === 'asc' ? '↑' : '↓')}
+                    {viewMode === 'by-item' ? '# คลัง' : 'Warehouse'} {sortField === 'warehouse' && (sortDir === 'asc' ? '↑' : '↓')}
                   </th>
                   <th>Group</th>
                   <th onClick={() => handleSort('current_stock')} className="text-right">
@@ -522,25 +626,45 @@ export function StockOnHandPage() {
                 </tr>
               </thead>
               <tbody>
-                {pagedData.map((row) => (
+                {pagedData.map((row) => {
+                  const agg = viewMode === 'by-item' ? (row as any) : null;
+                  const firstWh = agg ? (agg.warehouses?.[0] ?? row.warehouse) : row.warehouse;
+                  return (
                   <tr
                     key={`${row.item_code}-${row.warehouse}`}
                     onClick={() => setDrillDown({
                       item_code: row.item_code,
                       itemname:  row.itemname || (row as any).item_name || '',
-                      warehouse: row.warehouse,
-                      whs_name:  row.whs_name,
+                      warehouse: firstWh,
+                      whs_name:  agg ? 'ทุกคลัง' : row.whs_name,
                     })}
                     className="cursor-pointer hover:bg-[var(--bg-alt)] transition-colors"
-                    title="คลิกเพื่อดูรายละเอียด lot ทั้งหมดของรายการนี้"
+                    title={agg
+                      ? `คลิกเพื่อดู lot ทุกคลัง (${agg.wh_count} คลัง: ${agg.warehouses.join(', ')})`
+                      : 'คลิกเพื่อดูรายละเอียด lot ทั้งหมดของรายการนี้'}
                   >
                     <td className="font-medium" style={{ color: 'var(--color-primary-light)' }}>{row.item_code}</td>
                     <td style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {row.itemname || (row as any).item_name || '—'}
                     </td>
                     <td>
-                      <div style={{ color: 'var(--text)' }}>{row.warehouse}</div>
-                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{row.whs_name}</div>
+                      {agg ? (
+                        <>
+                          <div style={{ color: 'var(--text)' }}>
+                            <span className="font-semibold">{agg.wh_count}</span>
+                            <span className="text-xs ml-1" style={{ color: 'var(--text-muted)' }}>คลัง</span>
+                          </div>
+                          <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)', maxWidth: 160 }}
+                               title={agg.warehouses.join(', ')}>
+                            {agg.warehouses.join(', ')}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ color: 'var(--text)' }}>{row.warehouse}</div>
+                          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{row.whs_name}</div>
+                        </>
+                      )}
                     </td>
                     <td><span className="badge badge-info">{row.group_name.split('-')[0]}</span></td>
                     <td className="text-right">
@@ -564,8 +688,9 @@ export function StockOnHandPage() {
                     <td className="text-right">{formatCurrency(Number(row.moving_avg))}</td>
                     <td className="text-right font-semibold">{formatCurrency(Number(row.stock_value))}</td>
                   </tr>
-                ))}
-                {sortedData.length === 0 && (
+                  );
+                })}
+                {displayData.length === 0 && (
                   <tr>
                     <td colSpan={8} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
                       No stock data found
