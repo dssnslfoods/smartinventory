@@ -23,6 +23,51 @@ import { formatNumber, formatCurrency, formatCompact, formatDate } from '@/utils
 const num = (v: unknown) => Number(v ?? 0);
 const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
 
+/** Tiny markdown renderer for the Gemini output (## headers, **bold**, numbered
+ *  lists). Keeps bundle small — full markdown lib isn't justified here. */
+function renderMarkdown(src: string): React.ReactNode[] {
+  // Render bold inline within a line.
+  const renderInline = (line: string, k: string) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((p, i) => p.startsWith('**') && p.endsWith('**')
+      ? <strong key={`${k}-b${i}`} style={{ color: 'var(--text)' }}>{p.slice(2, -2)}</strong>
+      : <span key={`${k}-t${i}`}>{p}</span>);
+  };
+  return src.split('\n').map((raw, i) => {
+    const line = raw.trimEnd();
+    if (line.startsWith('### ')) {
+      return <h4 key={i} className="text-sm font-bold mt-3 mb-1" style={{ color: 'var(--text)' }}>{renderInline(line.slice(4), `h4-${i}`)}</h4>;
+    }
+    if (line.startsWith('## ')) {
+      return <h3 key={i} className="text-base font-bold mt-4 mb-1.5" style={{ color: 'var(--color-primary)' }}>{renderInline(line.slice(3), `h3-${i}`)}</h3>;
+    }
+    if (line.startsWith('# ')) {
+      return <h2 key={i} className="text-lg font-bold mt-4 mb-2" style={{ color: 'var(--color-primary)' }}>{renderInline(line.slice(2), `h2-${i}`)}</h2>;
+    }
+    if (line === '') return <div key={i} className="h-2" />;
+    // Numbered list "1. ..."
+    const numMatch = line.match(/^(\d+)\.\s+(.*)$/);
+    if (numMatch) {
+      return (
+        <div key={i} className="flex gap-2 text-sm leading-relaxed mb-1" style={{ color: 'var(--text)' }}>
+          <span className="font-semibold shrink-0" style={{ color: 'var(--color-primary-light)' }}>{numMatch[1]}.</span>
+          <span className="flex-1">{renderInline(numMatch[2], `ol-${i}`)}</span>
+        </div>
+      );
+    }
+    // Bullet "- ..."
+    if (line.startsWith('- ') || line.startsWith('• ')) {
+      return (
+        <div key={i} className="flex gap-2 text-sm leading-relaxed mb-1" style={{ color: 'var(--text)' }}>
+          <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>•</span>
+          <span className="flex-1">{renderInline(line.slice(2), `ul-${i}`)}</span>
+        </div>
+      );
+    }
+    return <p key={i} className="text-sm leading-relaxed mb-1" style={{ color: 'var(--text)' }}>{renderInline(line, `p-${i}`)}</p>;
+  });
+}
+
 const Section = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
   <section className="card" style={{ pageBreakInside: 'avoid' }}>
     <h2 className="flex items-center gap-2 text-base font-bold mb-3" style={{ color: 'var(--text)' }}>
@@ -327,9 +372,7 @@ export function SmartReportPage() {
         )}
 
         {ai.data?.text && (
-          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
-            {ai.data.text}
-          </div>
+          <div>{renderMarkdown(ai.data.text)}</div>
         )}
       </section>
 

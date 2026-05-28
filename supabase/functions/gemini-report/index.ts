@@ -1,6 +1,6 @@
-// Supabase Edge Function: gemini-report (v3)
-// Returns 200 with { ok:false, error, ... } on Gemini failures so supabase-js
-// surfaces the body cleanly to the client. Only fatal infra errors return 5xx.
+// Supabase Edge Function: gemini-report (v7)
+// Stronger structured prompt, larger output budget, thinking disabled for 2.5
+// (so all tokens go to the answer, not reasoning).
 
 // deno-lint-ignore no-explicit-any
 declare const Deno: any;
@@ -20,20 +20,45 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const SYSTEM_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการวิเคราะห์สต็อกสินค้าอาหารแช่แข็ง/แช่เย็น
-ทำหน้าที่เขียน Executive Summary ภาษาไทย กระชับ ตรงประเด็น ไม่ฟุ่มเฟือย
+const SYSTEM_PROMPT = `คุณคือ Senior Inventory Analyst ของบริษัทอาหารแช่แข็ง/แช่เย็น
+เขียนรายงานให้ CEO / COO อ่านเข้าใจใน 60 วินาที
 
-หลักการ:
-- ใช้ภาษาทางการแต่อ่านง่าย เหมือนผู้บริหารคุยกับผู้บริหาร
-- ห้ามคาดเดาตัวเลขนอกเหนือจากที่ได้รับ — ใช้เฉพาะตัวเลขในข้อมูล
-- ระบุ "สถานการณ์", "ความเสี่ยง", "โอกาส", "สิ่งที่ควรทำต่อ" ให้ครบ
-- ไม่ใช้ bullet เกินจำเป็น — เขียนเป็นย่อหน้า 3-5 ย่อหน้า รวมไม่เกิน 350 คำ
-- เกณฑ์มาตรฐานอาหาร: Turnover ≥ 4×/ปี = ดี, < 2× = วิกฤต · Dead stock > 25% = อันตราย · Carrying cost ≈ 15%/ปี
-- ปิดท้ายด้วย "คำแนะนำ 3 ข้อสูงสุด" เรียงความสำคัญ ใช้รูปแบบ:
-  คำแนะนำเชิงรุก
-  1. ...
-  2. ...
-  3. ...`;
+ห้ามเด็ดขาด:
+- ห้ามขึ้นต้นด้วยคำทักทาย (เรียนท่านผู้บริหาร ...) — ขึ้นต้นด้วยหัวข้อแรกเลย
+- ห้ามใช้ตัวเลขที่ไม่มีในข้อมูล
+- ห้ามบรรยายฟุ่มเฟือย — ตรงประเด็นทุกประโยค
+
+รูปแบบ output (ต้องมีครบทุกหัวข้อ ใช้ markdown ตามตัวอย่าง):
+
+## 🎯 บทสรุปสถานการณ์
+[2-3 ประโยค สั้น คม ระบุสถานะรวม "**ดี**"/"**ปกติ**"/"**น่ากังวล**"/"**วิกฤต**" + ตัวเลข headline]
+
+## 💰 ภาพ Working Capital
+[เงินจมเท่าไหร่ เทียบ COGS เป็นกี่ปี → หมายความว่าอย่างไร + Carrying cost ต่อปี]
+
+## ⚙️ ประสิทธิภาพการหมุนเวียน
+[Turnover ปัจจุบัน vs มาตรฐาน 4× · Dead stock + Slow moving มูลค่ารวม]
+
+## ⚠️ ความเสี่ยง Top 3
+1. **[ประเด็น]**: [มูลค่า/รายละเอียด]
+2. **[ประเด็น]**: ...
+3. **[ประเด็น]**: ...
+
+## 💸 มูลค่าที่ป้องกันกันได้
+[รวมมูลค่า expired + dead stock + lots ใกล้หมดอายุ → ตัวเลขรวมประมาณที่ป้องกันได้ถ้าจัดการทัน]
+
+## ✅ คำแนะนำเชิงรุก 3 ข้อ
+1. **[Action]**: [ผลที่คาดหวังเป็นตัวเลข]
+2. **[Action]**: ...
+3. **[Action]**: ...
+
+เกณฑ์มาตรฐานอาหาร:
+- Turnover ≥ 4×/ปี = ดี · 2-4× = ควรปรับปรุง · < 2× = วิกฤต
+- Dead stock > 25% = อันตราย · 15-25% = ต้องดูแล
+- Carrying cost ≈ 15%/ปี ของเงินจม
+- Inventory cover > 0.5 ปีของยอดขาย = สะสมเกิน
+
+ตัวเลข + หน่วย: ใช้ ฿ X.X M ถ้าเกิน 1 ล้าน · ขั้นต่ำล้านใช้จุลภาค · % ทศนิยม 1 ตำแหน่ง`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -43,7 +68,6 @@ Deno.serve(async (req: Request) => {
     return json({
       ok: false,
       error: 'GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Supabase secrets',
-      hint:  'Supabase Dashboard → Project Settings → Edge Functions → Secrets → Add GEMINI_API_KEY',
     }, 200);
   }
 
@@ -52,18 +76,19 @@ Deno.serve(async (req: Request) => {
   catch { return json({ ok: false, error: 'Invalid JSON body' }, 200); }
 
   const ctx = JSON.stringify(kpi, null, 2);
-  const userPrompt =
-`ข้อมูล KPI สถานการณ์สต็อก ณ snapshot ล่าสุด (ตัวเลขจริงจากระบบ):
-
-${ctx}
-
-โปรดเขียน Executive Summary ตามหลักการที่กำหนด`;
+  const userPrompt = `ข้อมูล KPI สถานการณ์สต็อกจริง ณ snapshot ล่าสุด:\n\n${ctx}\n\nเขียนรายงานตามโครงสร้างที่กำหนด ขึ้นต้นด้วย ## 🎯 บทสรุปสถานการณ์ อย่ามีคำทักทายใดๆ`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   const body = {
     contents:           [{ role: 'user', parts: [{ text: userPrompt }] }],
     systemInstruction:  { parts: [{ text: SYSTEM_PROMPT }] },
-    generationConfig:   { temperature: 0.4, maxOutputTokens: 1024, topP: 0.9 },
+    generationConfig:   {
+      temperature:     0.5,
+      maxOutputTokens: 4096,
+      topP:            0.9,
+      // Disable reasoning so all tokens go to the answer (2.5 family).
+      thinkingConfig:  { thinkingBudget: 0 },
+    },
     safetySettings: [
       { category: 'HARM_CATEGORY_HARASSMENT',       threshold: 'BLOCK_NONE' },
       { category: 'HARM_CATEGORY_HATE_SPEECH',      threshold: 'BLOCK_NONE' },
@@ -87,9 +112,7 @@ ${ctx}
         ok: false,
         error: data?.error?.message || `Gemini HTTP ${res.status}`,
         status: res.status,
-        gemini_status: data?.error?.status,
-        model: GEMINI_MODEL,
-        raw_first_200: raw.slice(0, 200),
+        model:  GEMINI_MODEL,
       }, 200);
     }
     const text: string =
@@ -99,7 +122,6 @@ ${ctx}
         ok: false,
         error: 'Gemini returned empty content',
         finish_reason: data?.candidates?.[0]?.finishReason ?? null,
-        safety: data?.candidates?.[0]?.safetyRatings ?? null,
       }, 200);
     }
     return json({ ok: true, model: GEMINI_MODEL, text, usage: data?.usageMetadata ?? null });
