@@ -80,9 +80,6 @@ export const PERMISSIONS = {
   MENU_REPORTS:     'menu.reports',
   MENU_LOTS:        'menu.lots',
   MENU_SMART_REPORT:'menu.smart_report',
-  MENU_SUPPLIERS:   'menu.procurement.suppliers',
-  MENU_ORDERS:      'menu.procurement.orders',
-  MENU_TRANSIT:     'menu.procurement.transit',
   MENU_IMPORT:      'menu.admin.import',
   MENU_SETTINGS:    'menu.admin.settings',
   MENU_USERS:       'menu.admin.users',
@@ -114,14 +111,6 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     ],
   },
   {
-    label: 'จัดซื้อ / Procurement',
-    keys: [
-      'menu.procurement.suppliers',
-      'menu.procurement.orders',
-      'menu.procurement.transit',
-    ],
-  },
-  {
     label: 'ผู้ดูแลระบบ / Admin',
     keys: [
       'menu.admin.import',
@@ -145,9 +134,6 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'menu.reports':               'ดู Management Reports',
   'menu.lots':                  'ดู Lot Inventory',
   'menu.smart_report':          'ดู Smart Report (AI)',
-  'menu.procurement.suppliers': 'ดู Suppliers',
-  'menu.procurement.orders':    'ดู Purchase Orders',
-  'menu.procurement.transit':   'ดู Goods in Transit',
   'menu.admin.import':          'เข้าหน้า Data Import',
   'menu.admin.settings':        'เข้าหน้า Settings',
   'menu.admin.users':           'เข้าหน้า User Management',
@@ -174,9 +160,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.reports',
     'menu.lots',
     'menu.smart_report',
-    'menu.procurement.suppliers',
-    'menu.procurement.orders',
-    'menu.procurement.transit',
   ],
   supervisor: [
     'menu.dashboard',
@@ -187,9 +170,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.reports',
     'menu.lots',
     'menu.smart_report',
-    'menu.procurement.suppliers',
-    'menu.procurement.orders',
-    'menu.procurement.transit',
     'menu.admin.import',
     'menu.admin.settings',
     'action.import.execute',
@@ -210,10 +190,6 @@ export const FEATURE_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
     label: 'โมดูลหลัก',
     keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots', 'menu.smart_report'],
-  },
-  {
-    label: 'จัดซื้อ',
-    keys: ['menu.procurement.suppliers', 'menu.procurement.orders', 'menu.procurement.transit'],
   },
   {
     label: 'Admin Tools',

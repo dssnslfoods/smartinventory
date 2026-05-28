@@ -11,8 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Building2,
-  ShoppingCart,
-  Truck,
   Users,
   ShieldCheck,
   Shield,
@@ -26,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useStockAlerts, useGoodsInTransit } from '@/hooks/useSupabaseQuery';
+import { useStockAlerts } from '@/hooks/useSupabaseQuery';
 import { cn } from '@/utils/format';
 import type { PermissionKey } from '@/types/auth';
 import { PERMISSIONS } from '@/types/auth';
@@ -38,7 +36,7 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   permission?: PermissionKey;
-  badge?: 'critical' | 'transit';
+  badge?: 'critical';
   external?: boolean;  // link to /superadmin/* (different layout)
   download?: boolean;  // render as <a> for static-file download
 };
@@ -56,10 +54,6 @@ const mainMenu: MenuEntry[] = [
   { path: '/reports',   label: 'Management Reports', icon: BarChart2,       permission: PERMISSIONS.MENU_REPORTS },
   { path: '/lots',      label: 'Lot Inventory',      icon: Layers,          permission: PERMISSIONS.MENU_LOTS },
   { path: '/smart-report', label: 'Smart Report (AI)', icon: Sparkles,     permission: PERMISSIONS.MENU_SMART_REPORT },
-  { type: 'divider' },
-  { path: '/procurement/suppliers', label: 'Suppliers',        icon: Building2,    permission: PERMISSIONS.MENU_SUPPLIERS },
-  { path: '/procurement/orders',    label: 'Purchase Orders',  icon: ShoppingCart, permission: PERMISSIONS.MENU_ORDERS },
-  { path: '/procurement/transit',   label: 'Goods in Transit', icon: Truck,        permission: PERMISSIONS.MENU_TRANSIT, badge: 'transit' },
   { type: 'divider' },
   { path: '/admin/import',   label: 'Data Import', icon: Upload,    permission: PERMISSIONS.MENU_IMPORT },
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },
@@ -153,10 +147,8 @@ export function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useAppStore();
   const { profile, company, hasPermission } = useAuthStore();
   const { data: alerts }  = useStockAlerts();
-  const { data: transit } = useGoodsInTransit();
 
   const criticalCount  = alerts?.filter(a => a.status === 'critical').length ?? 0;
-  const overdueTransit = transit?.filter(t => t.arrival_status === 'overdue').length ?? 0;
 
   const role         = profile?.role;
   const isSuperAdmin = role === 'super_admin';
@@ -230,8 +222,7 @@ export function Sidebar() {
             return <div key={`d-${idx}`} className="my-1.5 mx-4 border-t border-white/10" />;
           }
           const badgeCount =
-            item.badge === 'critical' ? criticalCount :
-            item.badge === 'transit'  ? overdueTransit : undefined;
+            item.badge === 'critical' ? criticalCount : undefined;
 
           return (
             <NavLink
