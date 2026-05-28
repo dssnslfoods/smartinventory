@@ -210,14 +210,22 @@ export function SmartReportPage() {
   const now = new Date();
 
   // ── Call the Gemini edge function for an AI-generated executive summary.
-  // Cache per snapshot date — refresh only on snapshot change or explicit click.
+  // Cache per snapshot+persona — refresh only on change or explicit click.
+  type Persona = 'noom' | 'suthichai';
+  const PERSONAS: { key: Persona; name: string; tagline: string }[] = [
+    { key: 'noom',      name: 'หนุ่มเมืองจันทร์', tagline: 'เล่าเรื่องเชิงวิเคราะห์ ภาษาน่าอ่าน' },
+    { key: 'suthichai', name: 'สุทธิชัย หยุ่น',    tagline: 'วิเคราะห์ข่าวเชิงลึก เฉียบคม ตั้งคำถาม' },
+  ];
+  const [persona, setPersona] = useState<Persona>('noom');
+  const personaInfo = PERSONAS.find(p => p.key === persona)!;
   const [refreshTick, setRefreshTick] = useState(0);
   const ai = useQuery({
-    queryKey: ['gemini-report', snapDate, refreshTick],
+    queryKey: ['gemini-report', snapDate, persona, refreshTick],
     enabled:  !!snapDate && r.totalItems > 0,
     staleTime: 60 * 60 * 1000, // 1 hour
     queryFn: async () => {
       const payload = {
+        persona,
         snapshot_date: snapDate,
         working_capital_actual_thb: Math.round(r.actualValue),
         working_capital_wac_thb:    Math.round(r.wacValue),
@@ -341,14 +349,14 @@ export function SmartReportPage() {
           <div>
             <h2 className="flex items-center gap-2 text-base font-bold" style={{ color: 'var(--text)' }}>
               <Bot size={18} style={{ color: '#4285F4' }} />
-              บทวิเคราะห์จาก <span style={{ color: '#4285F4' }}>หนุ่มเมืองจันทร์</span>
+              บทวิเคราะห์จาก <span style={{ color: '#4285F4' }}>{personaInfo.name}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded-full font-normal"
                     style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
                 AI Generated
               </span>
             </h2>
             <p className="text-[11px] mt-0.5 ml-7" style={{ color: 'var(--text-muted)' }}>
-              บทวิเคราะห์เชิงธุรกิจสไตล์เล่าเรื่อง · Powered by Gemini
+              {personaInfo.tagline} · Powered by Gemini
               {ai.data?.model && <span> · <span className="font-mono">{ai.data.model}</span></span>}
             </p>
           </div>
@@ -362,6 +370,27 @@ export function SmartReportPage() {
             <RefreshCw size={12} className={ai.isFetching ? 'animate-spin' : ''} />
             {ai.isFetching ? 'กำลังคิด...' : 'Regenerate'}
           </button>
+        </div>
+
+        {/* Persona picker — pick whose voice writes the analysis */}
+        <div className="flex items-center gap-2 mb-3 print:hidden">
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>เลือกผู้วิเคราะห์:</span>
+          <div className="inline-flex rounded-full border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+            {PERSONAS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPersona(p.key)}
+                className="px-3 py-1 text-xs font-medium transition-colors"
+                style={{
+                  backgroundColor: persona === p.key ? '#4285F4' : 'transparent',
+                  color: persona === p.key ? '#fff' : 'var(--text)',
+                }}
+                title={p.tagline}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
         </div>
 
         {ai.isLoading && (
