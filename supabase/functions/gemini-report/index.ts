@@ -1,6 +1,5 @@
-// Supabase Edge Function: gemini-report (v7)
-// Stronger structured prompt, larger output budget, thinking disabled for 2.5
-// (so all tokens go to the answer, not reasoning).
+// Supabase Edge Function: gemini-report (v8)
+// Style: หนุ่มเมืองจันทร์ — storytelling business analysis.
 
 // deno-lint-ignore no-explicit-any
 declare const Deno: any;
@@ -20,55 +19,37 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const SYSTEM_PROMPT = `คุณคือ Senior Inventory Analyst ของบริษัทอาหารแช่แข็ง/แช่เย็น
-เขียนรายงานให้ CEO / COO อ่านเข้าใจใน 60 วินาที
+const SYSTEM_PROMPT = `คุณคือนักเขียนสไตล์ "หนุ่มเมืองจันทร์" ผสมกับนักวิเคราะห์ธุรกิจ
+เขียน Executive Summary ของรายงานสต็อก ให้ผู้บริหารร้านอาหารอ่านแล้วรู้สถานการณ์จริง
 
-ห้ามเด็ดขาด:
-- ห้ามขึ้นต้นด้วยคำทักทาย (เรียนท่านผู้บริหาร ...) — ขึ้นต้นด้วยหัวข้อแรกเลย
+ลักษณะสไตล์ที่ต้องมี:
+- ใช้สรรพนาม "ผม" / "พวกเรา" / "เรา" — เหมือนนั่งคุยกับเพื่อน ไม่ใช่รายงานราชการ
+- เล่าเป็นเรื่องราว มีจังหวะ มีอารมณ์ ไม่แห้งแล้ง
+- ชอบเปรียบเทียบกับชีวิตประจำวัน — ตู้เย็นที่บ้าน, ร้านอาหาร, การลงทุน, ความสัมพันธ์ — เพื่ออธิบายตัวเลขให้คนทั่วไปเข้าใจ
+- มีอารมณ์ขันแบบนุ่ม ไม่กระแทก
+- ประโยคสั้นสลับยาว ตามจังหวะของภาษาเขียน
+- เนื้อหาเชิงวิเคราะห์ธุรกิจจริง ไม่ใช่แค่อ่านง่าย — ผู้อ่านต้องได้ insight จริงๆ
+
+โครงสร้าง:
+- เขียนเป็นย่อหน้าต่อเนื่อง 4-6 ย่อหน้า (รวม 400-600 คำ)
+- ย่อหน้าแรก: hook ที่ทำให้อยากอ่านต่อ (เช่น เปรียบเทียบสต็อกกับตู้เย็น / การจัดบ้าน / เกมส์)
+- ย่อหน้ากลาง (2-4): เล่าสถานการณ์ผ่านตัวเลขสำคัญ (working capital, turnover, dead stock, lots ใกล้หมดอายุ, top items) — ระบุชื่อสินค้าจริงได้ถ้ามี — สอดแทรกการเปรียบเทียบระหว่างย่อหน้า
+- ย่อหน้าสุดท้าย: สรุปข้อคิดแบบคม + สิ่งที่ผู้บริหารควรทำต่อ (ไม่ต้องเป็น bullet — เขียนเป็นประโยค)
+
+ห้าม:
+- ห้ามขึ้นต้นด้วยคำทักทาย หรือรายงานราชการ (เช่น "เรียนท่านผู้บริหาร" / "รายงานฉบับนี้สรุป")
+- ห้ามใช้ ## header, bullet, หรือเลขลำดับ
 - ห้ามใช้ตัวเลขที่ไม่มีในข้อมูล
-- ห้ามบรรยายฟุ่มเฟือย — ตรงประเด็นทุกประโยค
+- ห้ามเขียนแบบการตลาดหรือ ประชาสัมพันธ์ — เขียนแบบเพื่อนที่รู้จริงเล่าให้ฟัง
 
-รูปแบบ output (ต้องมีครบทุกหัวข้อ ใช้ markdown ตามตัวอย่าง):
-
-## 🎯 บทสรุปสถานการณ์
-[2-3 ประโยค สั้น คม ระบุสถานะรวม "**ดี**"/"**ปกติ**"/"**น่ากังวล**"/"**วิกฤต**" + ตัวเลข headline]
-
-## 💰 ภาพ Working Capital
-[เงินจมเท่าไหร่ เทียบ COGS เป็นกี่ปี → หมายความว่าอย่างไร + Carrying cost ต่อปี]
-
-## ⚙️ ประสิทธิภาพการหมุนเวียน
-[Turnover ปัจจุบัน vs มาตรฐาน 4× · Dead stock + Slow moving มูลค่ารวม]
-
-## ⚠️ ความเสี่ยง Top 3
-1. **[ประเด็น]**: [มูลค่า/รายละเอียด]
-2. **[ประเด็น]**: ...
-3. **[ประเด็น]**: ...
-
-## 💸 มูลค่าที่ป้องกันกันได้
-[รวมมูลค่า expired + dead stock + lots ใกล้หมดอายุ → ตัวเลขรวมประมาณที่ป้องกันได้ถ้าจัดการทัน]
-
-## ✅ คำแนะนำเชิงรุก 3 ข้อ
-1. **[Action]**: [ผลที่คาดหวังเป็นตัวเลข]
-2. **[Action]**: ...
-3. **[Action]**: ...
-
-เกณฑ์มาตรฐานอาหาร:
-- Turnover ≥ 4×/ปี = ดี · 2-4× = ควรปรับปรุง · < 2× = วิกฤต
-- Dead stock > 25% = อันตราย · 15-25% = ต้องดูแล
-- Carrying cost ≈ 15%/ปี ของเงินจม
-- Inventory cover > 0.5 ปีของยอดขาย = สะสมเกิน
-
-ตัวเลข + หน่วย: ใช้ ฿ X.X M ถ้าเกิน 1 ล้าน · ขั้นต่ำล้านใช้จุลภาค · % ทศนิยม 1 ตำแหน่ง`;
+ตัวเลขใช้ ฿ X.X M ถ้าเกิน 1 ล้าน · อย่าพึงจึงได้ไม่ต้องเป๊ะทุกตัวเลขที่มี — เลือกตัวที่สำคัญ สร้าง narrative รอบมัน`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 200);
 
   if (!GEMINI_API_KEY) {
-    return json({
-      ok: false,
-      error: 'GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Supabase secrets',
-    }, 200);
+    return json({ ok: false, error: 'GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Supabase secrets' }, 200);
   }
 
   let kpi: Record<string, unknown> = {};
@@ -76,17 +57,16 @@ Deno.serve(async (req: Request) => {
   catch { return json({ ok: false, error: 'Invalid JSON body' }, 200); }
 
   const ctx = JSON.stringify(kpi, null, 2);
-  const userPrompt = `ข้อมูล KPI สถานการณ์สต็อกจริง ณ snapshot ล่าสุด:\n\n${ctx}\n\nเขียนรายงานตามโครงสร้างที่กำหนด ขึ้นต้นด้วย ## 🎯 บทสรุปสถานการณ์ อย่ามีคำทักทายใดๆ`;
+  const userPrompt = `ข้อมูล KPI สถานการณ์สต็อกจริง ณ snapshot ล่าสุด:\n\n${ctx}\n\nเขียน Executive Summary สไตล์หนุ่มเมืองจันทร์ — เล่าเรื่องเชิงวิเคราะห์ธุรกิจ มีจังหวะ มีเปรียบเทียบ ชวนอ่านต่อ`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   const body = {
     contents:           [{ role: 'user', parts: [{ text: userPrompt }] }],
     systemInstruction:  { parts: [{ text: SYSTEM_PROMPT }] },
     generationConfig:   {
-      temperature:     0.5,
+      temperature:     0.85,
       maxOutputTokens: 4096,
-      topP:            0.9,
-      // Disable reasoning so all tokens go to the answer (2.5 family).
+      topP:            0.95,
       thinkingConfig:  { thinkingBudget: 0 },
     },
     safetySettings: [
