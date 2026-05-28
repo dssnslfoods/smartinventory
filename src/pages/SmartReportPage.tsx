@@ -226,6 +226,7 @@ export function SmartReportPage() {
     queryFn: async () => {
       const payload = {
         persona,
+        force: refreshTick > 0,
         snapshot_date: snapDate,
         working_capital_actual_thb: Math.round(r.actualValue),
         working_capital_wac_thb:    Math.round(r.wacValue),
@@ -275,7 +276,7 @@ export function SmartReportPage() {
       const { data, error } = await supabase.functions.invoke('gemini-report', { body: payload });
       if (error) throw new Error(error.message);
       if ((data as any)?.error) throw new Error((data as any).error + ((data as any).hint ? ` — ${(data as any).hint}` : ''));
-      return data as { ok: true; text: string; model: string };
+      return data as { ok: true; text: string; model: string; cached?: boolean; generated_at?: string };
     },
   });
 
@@ -412,7 +413,16 @@ export function SmartReportPage() {
         )}
 
         {ai.data?.text && (
-          <div>{renderMarkdown(ai.data.text)}</div>
+          <>
+            <div>{renderMarkdown(ai.data.text)}</div>
+            {ai.data.generated_at && (
+              <p className="text-[10px] mt-3 pt-2 border-t print:hidden" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+                {ai.data.cached
+                  ? `💾 จากแคช · บันทึกไว้เมื่อ ${new Date(ai.data.generated_at).toLocaleString('th-TH')}`
+                  : `✨ สร้างใหม่เมื่อ ${new Date(ai.data.generated_at).toLocaleString('th-TH')} · บันทึกไว้สำหรับการเปิดครั้งถัดไป`}
+              </p>
+            )}
+          </>
         )}
       </section>
 
