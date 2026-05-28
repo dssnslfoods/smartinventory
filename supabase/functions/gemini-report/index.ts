@@ -1,12 +1,6 @@
-// Supabase Edge Function: gemini-report
-// Generates a Thai executive-summary narrative for the Smart Inventory
-// Intelligent Report by calling Google Gemini. The frontend sends a structured
-// KPI snapshot (numbers only — no PII), this function builds a prompt, calls
-// Gemini, and returns the generated text. Auth: any signed-in user.
-//
-// Setup once:
-//   supabase secrets set GEMINI_API_KEY=<your_key>
-// (or via Supabase Dashboard → Project Settings → Edge Functions → Secrets)
+// Supabase Edge Function: gemini-report (v3)
+// Returns 200 with { ok:false, error, ... } on Gemini failures so supabase-js
+// surfaces the body cleanly to the client. Only fatal infra errors return 5xx.
 
 // deno-lint-ignore no-explicit-any
 declare const Deno: any;
@@ -26,7 +20,6 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// Tight word budget keeps cost low and forces Gemini to lead with insight.
 const SYSTEM_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการวิเคราะห์สต็อกสินค้าอาหารแช่แข็ง/แช่เย็น
 ทำหน้าที่เขียน Executive Summary ภาษาไทย กระชับ ตรงประเด็น ไม่ฟุ่มเฟือย
 
@@ -44,20 +37,20 @@ const SYSTEM_PROMPT = `คุณคือผู้เชี่ยวชาญด
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (req.method !== 'POST')    return json({ error: 'Method not allowed' }, 405);
+  if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 200);
 
   if (!GEMINI_API_KEY) {
     return json({
+      ok: false,
       error: 'GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Supabase secrets',
-      hint:  'ตั้งด้วยคำสั่ง: supabase secrets set GEMINI_API_KEY=<your_key>',
-    }, 503);
+      hint:  'Supabase Dashboard → Project Settings → Edge Functions → Secrets → Add GEMINI_API_KEY',
+    }, 200);
   }
 
   let kpi: Record<string, unknown> = {};
   try { kpi = await req.json(); }
-  catch { return json({ error: 'Invalid JSON body' }, 400); }
+  catch { return json({ ok: false, error: 'Invalid JSON body' }, 200); }
 
-  // Build a compact, deterministic context block.
   const ctx = JSON.stringify(kpi, null, 2);
   const userPrompt =
 `ข้อมูล KPI สถานการณ์สต็อก ณ snapshot ล่าสุด (ตัวเลขจริงจากระบบ):
@@ -85,21 +78,33 @@ ${ctx}
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
+    const raw = await res.text();
+    // deno-lint-ignore no-explicit-any
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch { /* not JSON */ }
     if (!res.ok) {
-      return json({ error: (data?.error?.message ?? 'Gemini API error'), status: res.status }, 502);
+      return json({
+        ok: false,
+        error: data?.error?.message || `Gemini HTTP ${res.status}`,
+        status: res.status,
+        gemini_status: data?.error?.status,
+        model: GEMINI_MODEL,
+        raw_first_200: raw.slice(0, 200),
+      }, 200);
     }
     const text: string =
       data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p?.text ?? '').join('') ?? '';
-    if (!text) return json({ error: 'Gemini returned empty content', raw: data }, 502);
-    return json({
-      ok:    true,
-      model: GEMINI_MODEL,
-      text,
-      usage: data?.usageMetadata ?? null,
-    });
+    if (!text) {
+      return json({
+        ok: false,
+        error: 'Gemini returned empty content',
+        finish_reason: data?.candidates?.[0]?.finishReason ?? null,
+        safety: data?.candidates?.[0]?.safetyRatings ?? null,
+      }, 200);
+    }
+    return json({ ok: true, model: GEMINI_MODEL, text, usage: data?.usageMetadata ?? null });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unexpected error';
-    return json({ error: msg }, 500);
+    return json({ ok: false, error: `Fetch error: ${msg}` }, 200);
   }
 });
