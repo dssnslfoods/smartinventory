@@ -251,8 +251,18 @@ export function SmartReportPage() {
           name: g.name, value_thb: Math.round(g.value), share_pct: Number(g.share.toFixed(1)),
         })),
         top_dead_stock: r.topDeadValue.slice(0, 5).map((s: any) => ({
-          item_code: s.item_code, value_thb: Math.round(num(s.stock_value)),
+          item_code: s.item_code, itemname: s.itemname, value_thb: Math.round(num(s.stock_value)),
         })),
+        top_slow_moving: r.topSlowValue.slice(0, 5).map((s: any) => ({
+          item_code: s.item_code, itemname: s.itemname, value_thb: Math.round(num(s.stock_value)),
+        })),
+        top_at_risk_lots: r.topExpiring.slice(0, 5).map((l: any) => ({
+          item_code: l.item_code, itemname: l.itemname,
+          days_remaining: num(l.days_remaining),
+          value_thb: Math.round(num(l.amount)),
+        })),
+        verdict: r.verdict, // 'good' | 'warn' | 'bad'
+        potential_savings_thb: Math.round(r.expiredValue + r.expiring30Val + r.carryingCost * 0.10),
       };
       const { data, error } = await supabase.functions.invoke('gemini-report', { body: payload });
       if (error) throw new Error(error.message);
