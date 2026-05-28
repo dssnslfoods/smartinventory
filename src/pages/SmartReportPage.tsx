@@ -8,13 +8,15 @@
  * LLM and is easy to audit; the structure is designed so a real Claude/OpenAI
  * call could later replace the synthesizer in one place if desired.
  */
-import { useMemo } from 'react';
-import { Sparkles, Printer, AlertTriangle, CheckCircle2, TrendingDown, Layers, Boxes, Coins, Calendar, ArrowDownRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Sparkles, Printer, AlertTriangle, CheckCircle2, TrendingDown, Layers, Boxes, Coins, Calendar, ArrowDownRight, RefreshCw, Bot } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import {
   useStockOnHand, useMonthlyTotal, useLotAging, useLotDetail, useSlowMoving,
   useInventoryTurnover, useLatestLotSnapshot,
 } from '@/hooks/useSupabaseQuery';
+import { supabase } from '@/lib/supabase';
 import { formatNumber, formatCurrency, formatCompact, formatDate } from '@/utils/format';
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -162,6 +164,58 @@ export function SmartReportPage() {
   const snapDate = latestSnap ?? null;
   const now = new Date();
 
+  // ── Call the Gemini edge function for an AI-generated executive summary.
+  // Cache per snapshot date — refresh only on snapshot change or explicit click.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const ai = useQuery({
+    queryKey: ['gemini-report', snapDate, refreshTick],
+    enabled:  !!snapDate && r.totalItems > 0,
+    staleTime: 60 * 60 * 1000, // 1 hour
+    queryFn: async () => {
+      const payload = {
+        snapshot_date: snapDate,
+        working_capital_actual_thb: Math.round(r.actualValue),
+        working_capital_wac_thb:    Math.round(r.wacValue),
+        std_cost_value_thb:         Math.round(r.stdValue),
+        cogs_12mo_thb:              Math.round(r.cogs12mo),
+        inventory_turnover_x:       Number(r.turn.toFixed(2)),
+        dio_days:                   r.dio,
+        inventory_cover_years:      r.coverYears != null ? Number(r.coverYears.toFixed(2)) : null,
+        carrying_cost_15pct_thb:    Math.round(r.carryingCost),
+        total_skus:                 r.totalItems,
+        total_lines:                r.totalLines,
+        total_warehouses:           r.totalWh,
+        total_lots:                 r.totalLots,
+        dead_stock_count:           r.dead.length,
+        dead_stock_pct:             Number(r.deadPct.toFixed(1)),
+        dead_stock_value_thb:       Math.round(r.deadValue),
+        slow_moving_count:          r.slow.length,
+        slow_moving_value_thb:      Math.round(r.slowValue),
+        lots_expired:               r.expired.length,
+        lots_expired_value_thb:     Math.round(r.expiredValue),
+        lots_expiring_30d:          r.expiring30.length,
+        lots_expiring_30d_value_thb:Math.round(r.expiring30Val),
+        lots_expiring_31_90d:       r.expiring90.length,
+        turnover_distribution: {
+          'lt_1.5x':  r.turnoverBands.veryLow,
+          '1.5_3x':   r.turnoverBands.low,
+          '3_10x':    r.turnoverBands.mid,
+          'gte_10x':  r.turnoverBands.high,
+        },
+        top_value_groups: r.groupBreakdown.slice(0, 5).map(g => ({
+          name: g.name, value_thb: Math.round(g.value), share_pct: Number(g.share.toFixed(1)),
+        })),
+        top_dead_stock: r.topDeadValue.slice(0, 5).map((s: any) => ({
+          item_code: s.item_code, value_thb: Math.round(num(s.stock_value)),
+        })),
+      };
+      const { data, error } = await supabase.functions.invoke('gemini-report', { body: payload });
+      if (error) throw new Error(error.message);
+      if ((data as any)?.error) throw new Error((data as any).error + ((data as any).hint ? ` — ${(data as any).hint}` : ''));
+      return data as { ok: true; text: string; model: string };
+    },
+  });
+
   // ── Narrative paragraphs (rule-based) ───────────────────────────────────
   const headline = (() => {
     if (r.verdict === 'good')
@@ -226,8 +280,61 @@ export function SmartReportPage() {
         </button>
       </div>
 
+      {/* 0. AI Executive Summary — Gemini-generated narrative */}
+      <section className="card" style={{ pageBreakInside: 'avoid', borderLeft: '4px solid #4285F4' }}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="flex items-center gap-2 text-base font-bold" style={{ color: 'var(--text)' }}>
+            <Bot size={18} style={{ color: '#4285F4' }} />
+            AI Executive Summary
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-normal"
+                  style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
+              Powered by Gemini
+            </span>
+            {ai.data?.model && (
+              <span className="text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                · {ai.data.model}
+              </span>
+            )}
+          </h2>
+          <button
+            onClick={() => setRefreshTick(t => t + 1)}
+            disabled={ai.isFetching}
+            className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)] print:hidden"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)', opacity: ai.isFetching ? 0.5 : 1 }}
+            title="สร้างใหม่ด้วย Gemini"
+          >
+            <RefreshCw size={12} className={ai.isFetching ? 'animate-spin' : ''} />
+            {ai.isFetching ? 'กำลังคิด...' : 'Regenerate'}
+          </button>
+        </div>
+
+        {ai.isLoading && (
+          <div className="flex items-center gap-3 py-6">
+            <div className="w-5 h-5 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Gemini กำลังวิเคราะห์ข้อมูล snapshot…</span>
+          </div>
+        )}
+
+        {ai.isError && (
+          <div className="px-3 py-3 rounded-lg text-xs leading-relaxed"
+               style={{ backgroundColor: 'rgba(220,38,38,0.06)', color: '#991b1b', border: '1px solid rgba(220,38,38,0.20)' }}>
+            <div className="font-semibold mb-1">⚠️ ไม่สามารถสร้าง AI summary ได้</div>
+            <div className="font-mono text-[11px]">{(ai.error as Error)?.message}</div>
+            <div className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              ส่วนสรุปด้านล่าง (rule-based) ยังใช้งานได้ปกติ · หากยังไม่ได้ตั้ง <code>GEMINI_API_KEY</code> ใน Supabase secrets ให้ตั้งก่อน
+            </div>
+          </div>
+        )}
+
+        {ai.data?.text && (
+          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+            {ai.data.text}
+          </div>
+        )}
+      </section>
+
       {/* 1. Executive Summary */}
-      <Section icon={<Sparkles size={18} />} title="1. Executive Summary">
+      <Section icon={<Sparkles size={18} />} title="1. Executive Summary (Rule-based snapshot)">
         <div className="text-sm leading-relaxed mb-3" style={{ color: 'var(--text)' }}
              dangerouslySetInnerHTML={{ __html: headline }} />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
