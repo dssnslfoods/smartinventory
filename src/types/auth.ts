@@ -79,6 +79,7 @@ export const PERMISSIONS = {
   MENU_VALUATION:   'menu.valuation',
   MENU_REPORTS:     'menu.reports',
   MENU_LOTS:        'menu.lots',
+  MENU_SMART_REPORT:'menu.smart_report',
   MENU_SUPPLIERS:   'menu.procurement.suppliers',
   MENU_ORDERS:      'menu.procurement.orders',
   MENU_TRANSIT:     'menu.procurement.transit',
@@ -92,9 +93,6 @@ export const PERMISSIONS = {
   ACTION_IMPORT_CLEAR:   'action.import.clear',
   ACTION_SETTINGS_EDIT:  'action.settings.edit',
   ACTION_THRESHOLDS_EDIT:'action.thresholds.edit',
-  ACTION_PO_CREATE:      'action.procurement.create',
-  ACTION_PO_EDIT:        'action.procurement.edit',
-  ACTION_PO_DELETE:      'action.procurement.delete',
 } as const;
 
 export type PermissionKey = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -112,6 +110,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       'menu.valuation',
       'menu.reports',
       'menu.lots',
+      'menu.smart_report',
     ],
   },
   {
@@ -120,9 +119,6 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       'menu.procurement.suppliers',
       'menu.procurement.orders',
       'menu.procurement.transit',
-      'action.procurement.create',
-      'action.procurement.edit',
-      'action.procurement.delete',
     ],
   },
   {
@@ -148,6 +144,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'menu.valuation':             'ดู Cost & Valuation',
   'menu.reports':               'ดู Management Reports',
   'menu.lots':                  'ดู Lot Inventory',
+  'menu.smart_report':          'ดู Smart Report (AI)',
   'menu.procurement.suppliers': 'ดู Suppliers',
   'menu.procurement.orders':    'ดู Purchase Orders',
   'menu.procurement.transit':   'ดู Goods in Transit',
@@ -159,9 +156,6 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'action.import.clear':        'ลบข้อมูลทั้งหมด (Clear All)',
   'action.settings.edit':       'แก้ไข Settings',
   'action.thresholds.edit':     'แก้ไข Stock Thresholds',
-  'action.procurement.create':  'สร้าง PO / Supplier',
-  'action.procurement.edit':    'แก้ไข PO / Supplier',
-  'action.procurement.delete':  'ลบ PO / Supplier',
 };
 
 // ── Default permissions per role ──────────────────────────────────────────────
@@ -179,6 +173,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.valuation',
     'menu.reports',
     'menu.lots',
+    'menu.smart_report',
     'menu.procurement.suppliers',
     'menu.procurement.orders',
     'menu.procurement.transit',
@@ -191,6 +186,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.valuation',
     'menu.reports',
     'menu.lots',
+    'menu.smart_report',
     'menu.procurement.suppliers',
     'menu.procurement.orders',
     'menu.procurement.transit',
@@ -199,8 +195,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'action.import.execute',
     'action.settings.edit',
     'action.thresholds.edit',
-    'action.procurement.create',
-    'action.procurement.edit',
   ],
   staff: [
     'menu.dashboard',
@@ -215,7 +209,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
 export const FEATURE_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
     label: 'โมดูลหลัก',
-    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots'],
+    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots', 'menu.smart_report'],
   },
   {
     label: 'จัดซื้อ',
