@@ -185,7 +185,7 @@ function App() {
                       <Route path="/alerts"    element={<RequirePermission permission="menu.alerts"><AlertsPage /></RequirePermission>} />
                       <Route path="/valuation" element={<RequirePermission permission="menu.valuation"><ValuationPage /></RequirePermission>} />
                       <Route path="/reports"   element={<RequirePermission permission="menu.reports"><ReportsPage /></RequirePermission>} />
-                      <Route path="/smart-report" element={<RequirePermission permission="menu.reports"><SmartReportPage /></RequirePermission>} />
+                      <Route path="/smart-report" element={<RequirePermission permission="menu.smart_report"><SmartReportPage /></RequirePermission>} />
                       <Route path="/lots"      element={<RequirePermission permission="menu.lots"><LotInventoryPage /></RequirePermission>} />
 
                       <Route path="/procurement/suppliers" element={<RequirePermission permission="menu.procurement.suppliers"><SuppliersPage /></RequirePermission>} />
