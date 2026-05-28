@@ -20,6 +20,7 @@ const MovementHistoryPage = lazy(() => import('@/pages/MovementHistoryPage').the
 const AlertsPage          = lazy(() => import('@/pages/AlertsPage').then(m => ({ default: m.AlertsPage })));
 const ValuationPage       = lazy(() => import('@/pages/ValuationPage').then(m => ({ default: m.ValuationPage })));
 const ReportsPage         = lazy(() => import('@/pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const SmartReportPage     = lazy(() => import('@/pages/SmartReportPage').then(m => ({ default: m.SmartReportPage })));
 const LotInventoryPage    = lazy(() => import('@/pages/LotInventoryPage').then(m => ({ default: m.LotInventoryPage })));
 const ImportPage          = lazy(() => import('@/pages/admin/ImportPage').then(m => ({ default: m.ImportPage })));
 const SettingsPage        = lazy(() => import('@/pages/admin/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -184,6 +185,7 @@ function App() {
                       <Route path="/alerts"    element={<RequirePermission permission="menu.alerts"><AlertsPage /></RequirePermission>} />
                       <Route path="/valuation" element={<RequirePermission permission="menu.valuation"><ValuationPage /></RequirePermission>} />
                       <Route path="/reports"   element={<RequirePermission permission="menu.reports"><ReportsPage /></RequirePermission>} />
+                      <Route path="/smart-report" element={<RequirePermission permission="menu.reports"><SmartReportPage /></RequirePermission>} />
                       <Route path="/lots"      element={<RequirePermission permission="menu.lots"><LotInventoryPage /></RequirePermission>} />
 
                       <Route path="/procurement/suppliers" element={<RequirePermission permission="menu.procurement.suppliers"><SuppliersPage /></RequirePermission>} />
