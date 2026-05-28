@@ -28,9 +28,6 @@ const AuditLogPage        = lazy(() => import('@/pages/admin/AuditLogPage').then
 const UsersPage           = lazy(() => import('@/pages/admin/UsersPage').then(m => ({ default: m.UsersPage })));
 const PermissionsPage     = lazy(() => import('@/pages/admin/PermissionsPage').then(m => ({ default: m.PermissionsPage })));
 const VVMatrixGuidePage   = lazy(() => import('@/pages/admin/VVMatrixGuidePage').then(m => ({ default: m.VVMatrixGuidePage })));
-const SuppliersPage       = lazy(() => import('@/pages/procurement/SuppliersPage'));
-const PurchaseOrdersPage  = lazy(() => import('@/pages/procurement/PurchaseOrdersPage'));
-const GoodsInTransitPage  = lazy(() => import('@/pages/procurement/GoodsInTransitPage'));
 const SuperAdminLayout    = lazy(() => import('@/pages/superadmin/SuperAdminLayout').then(m => ({ default: m.SuperAdminLayout })));
 const SuperAdminDashboardPage = lazy(() => import('@/pages/superadmin/DashboardPage'));
 const CompaniesPage       = lazy(() => import('@/pages/superadmin/CompaniesPage'));
@@ -187,10 +184,6 @@ function App() {
                       <Route path="/reports"   element={<RequirePermission permission="menu.reports"><ReportsPage /></RequirePermission>} />
                       <Route path="/smart-report" element={<RequirePermission permission="menu.smart_report"><SmartReportPage /></RequirePermission>} />
                       <Route path="/lots"      element={<RequirePermission permission="menu.lots"><LotInventoryPage /></RequirePermission>} />
-
-                      <Route path="/procurement/suppliers" element={<RequirePermission permission="menu.procurement.suppliers"><SuppliersPage /></RequirePermission>} />
-                      <Route path="/procurement/orders"    element={<RequirePermission permission="menu.procurement.orders"><PurchaseOrdersPage /></RequirePermission>} />
-                      <Route path="/procurement/transit"   element={<RequirePermission permission="menu.procurement.transit"><GoodsInTransitPage /></RequirePermission>} />
 
                       <Route path="/admin/import"       element={<RequirePermission permission="menu.admin.import"><ImportPage /></RequirePermission>} />
                       <Route path="/admin/settings"     element={<RequirePermission permission="menu.admin.settings"><SettingsPage /></RequirePermission>} />
