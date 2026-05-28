@@ -338,19 +338,20 @@ export function SmartReportPage() {
       {/* 0. AI Executive Summary — Gemini-generated narrative */}
       <section className="card" style={{ pageBreakInside: 'avoid', borderLeft: '4px solid #4285F4' }}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="flex items-center gap-2 text-base font-bold" style={{ color: 'var(--text)' }}>
-            <Bot size={18} style={{ color: '#4285F4' }} />
-            AI Executive Summary
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-normal"
-                  style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
-              Powered by Gemini
-            </span>
-            {ai.data?.model && (
-              <span className="text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
-                · {ai.data.model}
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-bold" style={{ color: 'var(--text)' }}>
+              <Bot size={18} style={{ color: '#4285F4' }} />
+              บทวิเคราะห์จาก <span style={{ color: '#4285F4' }}>หนุ่มเมืองจันทร์</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-normal"
+                    style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
+                AI Generated
               </span>
-            )}
-          </h2>
+            </h2>
+            <p className="text-[11px] mt-0.5 ml-7" style={{ color: 'var(--text-muted)' }}>
+              บทวิเคราะห์เชิงธุรกิจสไตล์เล่าเรื่อง · Powered by Gemini
+              {ai.data?.model && <span> · <span className="font-mono">{ai.data.model}</span></span>}
+            </p>
+          </div>
           <button
             onClick={() => setRefreshTick(t => t + 1)}
             disabled={ai.isFetching}
