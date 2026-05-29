@@ -1,0 +1,277 @@
+/**
+ * Ask Me — Conversational AI assistant for the Smart Inventory system.
+ *
+ * Sends a curated KPI snapshot + the user's chat history to the gemini-chat
+ * edge function, which grounds Gemini in the system's knowledge base so
+ * answers stay within scope.
+ */
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Send, Sparkles, RefreshCw, User } from 'lucide-react';
+import { PageHeader } from '@/components/PageHeader';
+import {
+  useStockOnHand, useMonthlyTotal, useSlowMoving, useLatestLotSnapshot,
+} from '@/hooks/useSupabaseQuery';
+import { supabase } from '@/lib/supabase';
+import { formatDate } from '@/utils/format';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  /** millis since epoch — animations / sorting */
+  ts: number;
+}
+
+// ── Tiny markdown renderer (mirrors SmartReportPage) ────────────────────────
+function renderMarkdown(src: string): React.ReactNode[] {
+  const inline = (line: string, k: string) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((p, i) => p.startsWith('**') && p.endsWith('**')
+      ? <strong key={`${k}-b${i}`}>{p.slice(2, -2)}</strong>
+      : <span key={`${k}-t${i}`}>{p}</span>);
+  };
+  return src.split('\n').map((raw, i) => {
+    const line = raw.trimEnd();
+    if (line.startsWith('### ')) return <h4 key={i} className="text-sm font-bold mt-2 mb-1">{inline(line.slice(4), `h4-${i}`)}</h4>;
+    if (line.startsWith('## '))  return <h3 key={i} className="text-base font-bold mt-2 mb-1" style={{ color: 'var(--color-primary)' }}>{inline(line.slice(3), `h3-${i}`)}</h3>;
+    if (line.startsWith('# '))   return <h2 key={i} className="text-lg font-bold mt-2 mb-1.5">{inline(line.slice(2), `h2-${i}`)}</h2>;
+    if (line === '') return <div key={i} className="h-2" />;
+    const numMatch = line.match(/^(\d+)\.\s+(.*)$/);
+    if (numMatch) {
+      return (
+        <div key={i} className="flex gap-2 text-sm leading-relaxed mb-1">
+          <span className="font-semibold shrink-0" style={{ color: 'var(--color-primary-light)' }}>{numMatch[1]}.</span>
+          <span className="flex-1">{inline(numMatch[2], `ol-${i}`)}</span>
+        </div>
+      );
+    }
+    if (line.startsWith('- ') || line.startsWith('• ')) {
+      return (
+        <div key={i} className="flex gap-2 text-sm leading-relaxed mb-1">
+          <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>•</span>
+          <span className="flex-1">{inline(line.slice(2), `ul-${i}`)}</span>
+        </div>
+      );
+    }
+    return <p key={i} className="text-sm leading-relaxed mb-1">{inline(line, `p-${i}`)}</p>;
+  });
+}
+
+const STARTER_QUESTIONS = [
+  'Working Capital ของเรา ตอนนี้อยู่ในระดับไหน?',
+  'Inventory Turnover ของเรา ต่ำหรือสูงเมื่อเทียบกับมาตรฐาน?',
+  'Dead Stock มูลค่าเท่าไหร่? ควรทำอย่างไรต่อ?',
+  'หน้า Cost & Valuation ใช้ทำอะไรได้บ้าง?',
+  'FEFO คืออะไร? ระบบมีรายงานให้ดูไหม?',
+  'ทำไม Moving Avg กับ Actual Cost ถึงเท่ากัน?',
+];
+
+export function AskMePage() {
+  const { data: stockData = [] }    = useStockOnHand();
+  const { data: monthlyTotal = [] } = useMonthlyTotal(24);
+  const { data: slowMoving = [] }   = useSlowMoving();
+  const { data: latestSnap }        = useLatestLotSnapshot();
+
+  // KPI summary that travels with every request — small, deterministic.
+  const kpiContext = useMemo(() => {
+    const num = (v: unknown) => Number(v ?? 0);
+    const nonZero = stockData.filter(x => num(x.current_stock) !== 0);
+    const actualValue = nonZero.reduce((s, x) => s + num((x as any).lot_value ?? x.stock_value), 0);
+    const wacValue    = nonZero.reduce((s, x) => s + num(x.stock_value), 0);
+    const stdValue    = nonZero.reduce((s, x) => s + num(x.current_stock) * num(x.std_cost), 0);
+    const last12 = monthlyTotal.slice(-12);
+    const cogs12mo = last12.reduce((s, m) => s + num(m.out_value), 0);
+    const turn = actualValue > 0 ? cogs12mo / actualValue : 0;
+    const dead = slowMoving.filter(s => s.movement_status === 'dead_stock');
+    const slow = slowMoving.filter(s => s.movement_status === 'slow_moving');
+    return {
+      snapshot_date: latestSnap ?? null,
+      working_capital_thb: Math.round(actualValue),
+      moving_avg_value_thb: Math.round(wacValue),
+      std_cost_value_thb: Math.round(stdValue),
+      variance_actual_vs_std_thb: Math.round(actualValue - stdValue),
+      cogs_12mo_thb: Math.round(cogs12mo),
+      inventory_turnover: Number(turn.toFixed(2)),
+      dio_days: turn > 0 ? Math.round(365 / turn) : null,
+      total_sku: new Set(stockData.map(r => r.item_code)).size,
+      total_warehouses: new Set(stockData.map(r => r.warehouse)).size,
+      dead_stock_count: dead.length,
+      dead_stock_value_thb: Math.round(dead.reduce((s, r) => s + num(r.stock_value), 0)),
+      dead_stock_pct: slowMoving.length ? Number(((dead.length / slowMoving.length) * 100).toFixed(1)) : 0,
+      slow_moving_count: slow.length,
+      slow_moving_value_thb: Math.round(slow.reduce((s, r) => s + num(r.stock_value), 0)),
+    };
+  }, [stockData, monthlyTotal, slowMoving, latestSnap]);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput]       = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom on new message.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const send = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+    const userMsg: ChatMessage = { role: 'user', text: trimmed, ts: Date.now() };
+    const next = [...messages, userMsg];
+    setMessages(next);
+    setInput('');
+    setError(null);
+    setLoading(true);
+    try {
+      const payload = {
+        kpi: kpiContext,
+        messages: next.map(m => ({ role: m.role, text: m.text })),
+      };
+      const { data, error: invErr } = await supabase.functions.invoke('gemini-chat', { body: payload });
+      if (invErr) throw new Error(invErr.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const aiText = (data as any)?.text ?? '';
+      setMessages(prev => [...prev, { role: 'assistant', text: aiText, ts: Date.now() }]);
+    } catch (e: any) {
+      setError(e?.message ?? 'เกิดข้อผิดพลาด');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); send(input); };
+  const reset = () => { setMessages([]); setError(null); };
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Ask Me"
+        subtitle="ถามอะไรเกี่ยวกับระบบ Smart Inventory ก็ได้ — AI ตอบให้"
+        helpTitle="Ask Me — AI Assistant"
+        helpBody={(<>
+          <p className="mb-2"><strong>Ask Me</strong> เป็น AI Chatbot ที่ตอบคำถามเกี่ยวกับระบบ Smart Inventory โดยใช้ Gemini</p>
+          <p className="mb-2"><strong>ตอบได้:</strong> คำอธิบายฟีเจอร์ • ตัวชี้วัด (Working Capital, Turnover ฯลฯ) • วิธีคิดต้นทุน • ตัวเลขปัจจุบันจาก snapshot</p>
+          <p className="mb-2"><strong>ตอบไม่ได้:</strong> คำถามนอกขอบเขตระบบ (ข่าว, ฟีเจอร์ที่ไม่มี)</p>
+          <p>ทุกการสนทนาเก็บเฉพาะใน session ปัจจุบัน — รีเฟรชหรือเปิดหน้าใหม่ = เริ่มต้นใหม่</p>
+        </>)}
+      />
+
+      <div className="card flex flex-col" style={{ height: 'calc(100vh - 220px)', minHeight: 500 }}>
+        {/* Header strip */}
+        <div className="flex items-center justify-between px-4 pb-3 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg" style={{ backgroundColor: 'rgba(66,133,244,0.10)' }}>
+              <Bot size={16} style={{ color: '#4285F4' }} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Smart Inventory AI</p>
+              <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Powered by Gemini · ใช้ข้อมูล KPI ณ snapshot {latestSnap ? formatDate(latestSnap) : '—'}
+              </p>
+            </div>
+          </div>
+          {messages.length > 0 && (
+            <button
+              onClick={reset}
+              className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              <RefreshCw size={12} /> เริ่มใหม่
+            </button>
+          )}
+        </div>
+
+        {/* Conversation */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-4">
+              <div className="p-3 rounded-full mb-3" style={{ backgroundColor: 'rgba(66,133,244,0.08)' }}>
+                <Sparkles size={28} style={{ color: '#4285F4' }} />
+              </div>
+              <h3 className="font-bold text-base mb-1" style={{ color: 'var(--text)' }}>สวัสดีครับ ถามอะไรได้เลย</h3>
+              <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
+                ผมรู้จักระบบ Smart Inventory ทุกซอกทุกมุม + เห็นตัวเลข KPI ปัจจุบันของคุณด้วย
+              </p>
+              <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>ตัวอย่างคำถาม:</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
+                {STARTER_QUESTIONS.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => send(q)}
+                    disabled={loading}
+                    className="text-left px-3 py-2 rounded-lg border text-xs transition-colors hover:bg-[var(--bg-alt)]"
+                    style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                  >
+                    💬 {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m, i) => (
+            <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
+                   style={{
+                     backgroundColor: m.role === 'user' ? 'var(--color-primary)' : 'rgba(66,133,244,0.10)',
+                     color: m.role === 'user' ? '#fff' : '#4285F4',
+                   }}>
+                {m.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+              </div>
+              <div className={`max-w-[80%] px-3 py-2 rounded-2xl ${m.role === 'user' ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}
+                   style={{
+                     backgroundColor: m.role === 'user' ? 'var(--color-primary)' : 'var(--bg-alt)',
+                     color: m.role === 'user' ? '#fff' : 'var(--text)',
+                   }}>
+                {m.role === 'user'
+                  ? <p className="text-sm whitespace-pre-wrap">{m.text}</p>
+                  : <div>{renderMarkdown(m.text)}</div>}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex gap-2">
+              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
+                <Bot size={14} />
+              </div>
+              <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm flex items-center gap-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#4285F4', animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#4285F4', animationDelay: '150ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#4285F4', animationDelay: '300ms' }} />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="px-3 py-2.5 rounded-lg text-xs leading-relaxed"
+                 style={{ backgroundColor: 'rgba(220,38,38,0.06)', color: '#991b1b', border: '1px solid rgba(220,38,38,0.20)' }}>
+              ⚠️ {error}
+            </div>
+          )}
+        </div>
+
+        {/* Input */}
+        <form onSubmit={handleSubmit} className="flex gap-2 px-4 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="พิมพ์คำถาม..."
+            disabled={loading}
+            className="flex-1 px-3 py-2 rounded-lg border text-sm"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)', color: 'var(--text)' }}
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-1.5 transition-opacity disabled:opacity-50"
+            style={{ backgroundColor: '#4285F4', color: '#fff' }}
+          >
+            <Send size={14} /> ส่ง
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
