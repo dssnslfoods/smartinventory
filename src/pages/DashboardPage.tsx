@@ -567,7 +567,10 @@ export function DashboardPage() {
           color={COLORS.teal}
           tooltipTitle="Active SKUs"
           tooltip={<>
-            <p className="mb-2">จำนวนรหัสสินค้าที่มีการเคลื่อนไหวใน 90 วันที่ผ่านมา</p>
+            <p className="mb-2">
+              จำนวน <strong>รหัสสินค้า (SKU)</strong> ที่มีการเคลื่อนไหว (รับเข้า/จ่ายออก/โอน)
+              อย่างน้อย 1 ครั้ง ใน 90 วันที่ผ่านมา
+            </p>
             <CalcBlock formula="COUNT(DISTINCT item_code) WHERE doc_date ≥ today − 90d">
               <CalcLine label="Active SKUs" value={formatNumber(kpi?.activeItems ?? 0)} bold />
               <CalcLine label="Total SKUs (master)" value={formatNumber(kpi?.totalItems ?? 0)} muted />
@@ -576,16 +579,33 @@ export function DashboardPage() {
                   ? `${(((kpi?.activeItems ?? 0) / kpi.totalItems) * 100).toFixed(1)}%`
                   : '—'} />
             </CalcBlock>
-            <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              SKU ที่ไม่ Active = ไม่มีธุรกรรมเกิน 90 วัน → จัดอยู่ใน Slow / Dead Stock
-            </p>
-            <p className="mt-2 text-[10px] p-2 rounded leading-relaxed"
-               style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
-              <strong>หมายเหตุ:</strong> "Active SKUs" นับ <strong>จำนวนรหัสสินค้า (SKU)</strong> ที่มี
-              ธุรกรรม In/Out/Transfer ใน 90 วัน · ส่วนกราฟ <strong>"สุขภาพการเคลื่อนไหว"</strong>
-              นับเป็น <strong>บรรทัด (สินค้า × คลัง)</strong> และพิจารณาเฉพาะ
-              <strong> last out date</strong> — จึงเป็นการวัดคนละมุม
-            </p>
+
+            {/* ── ⚠️ ป้องกันความเข้าใจผิดระหว่าง Active SKUs และ Movement Health ── */}
+            <div className="mt-3 p-2.5 rounded text-[11px] leading-relaxed"
+                 style={{ backgroundColor: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.25)' }}>
+              <p className="font-semibold mb-1.5" style={{ color: '#92400e' }}>
+                ⚠️ อย่าสับสนกับกราฟ "สุขภาพการเคลื่อนไหว"
+              </p>
+              <table className="w-full text-[10.5px]" style={{ color: '#7c2d12' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(217,119,6,0.3)' }}>
+                    <th className="text-left py-1 font-semibold">คำถาม</th>
+                    <th className="text-center px-1 font-semibold">Active SKUs</th>
+                    <th className="text-center px-1 font-semibold">Normal (Movement)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td className="py-1">นับเป็น</td><td className="text-center">SKU (รหัส)</td><td className="text-center">บรรทัด (สินค้า × คลัง)</td></tr>
+                  <tr><td className="py-1">มี IN ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">❌ ไม่นับ</td></tr>
+                  <tr><td className="py-1">มี OUT ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">✅ นับ</td></tr>
+                  <tr><td className="py-1">มี Transfer ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">❌ ไม่นับ</td></tr>
+                </tbody>
+              </table>
+              <p className="mt-2 mb-0.5">
+                <strong>Active</strong> = ขยับอะไรก็นับ · <strong>Normal</strong> = ต้องมี OUT จริง
+              </p>
+              <p>→ <strong>ส่วนต่าง = SKU ที่รับเข้า/โอนแต่ยังไม่ได้ขายออก</strong> (warning signal — อาจกลายเป็น Slow/Dead ถ้ายังไม่ขายอีก 90 วัน)</p>
+            </div>
             {(() => {
               const active = kpi?.activeItems ?? 0;
               const total  = kpi?.totalItems  ?? 0;
@@ -762,12 +782,41 @@ export function DashboardPage() {
             <Activity size={16} style={{ color: COLORS.primary }} />
             <h3 className="font-semibold" style={{ color: 'var(--text)' }}>สุขภาพการเคลื่อนไหว</h3>
             <InfoTooltip title="Movement Health">
-              <p className="mb-2">แยกสินค้าตามการเคลื่อนไหวล่าสุด:</p>
+              <p className="mb-2">
+                แยก<strong>บรรทัดสต็อก</strong> (1 บรรทัด = สินค้า 1 รหัส × คลัง 1 แห่ง)
+                ตาม <strong>วันที่จ่ายออกล่าสุด (last out date)</strong>:
+              </p>
               <ul className="list-disc ml-4 space-y-0.5">
-                <li>🟢 <strong>Normal</strong> — มี tx ใน 90 วัน</li>
-                <li>🟠 <strong>Slow Moving</strong> — เคลื่อนไหวบ้าง 90-180 วัน</li>
-                <li>🔴 <strong>Dead Stock</strong> — ไม่ขยับ ≥ 180 วัน (ของค้าง!)</li>
+                <li>🟢 <strong>Normal</strong> — มี <strong>OUT</strong> ใน 90 วัน</li>
+                <li>🟠 <strong>Slow Moving</strong> — OUT ครั้งล่าสุด 90–180 วันก่อน</li>
+                <li>🔴 <strong>Dead Stock</strong> — ไม่มี OUT ≥ 180 วัน (ของค้าง!)</li>
               </ul>
+
+              {/* ── ⚠️ ป้องกันสับสนกับ Active SKUs ── */}
+              <div className="mt-3 p-2 rounded text-[11px] leading-relaxed"
+                   style={{ backgroundColor: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.25)' }}>
+                <p className="font-semibold mb-1" style={{ color: '#92400e' }}>
+                  ⚠️ ต่างจาก "Active SKUs" บนการ์ดด้านบนอย่างไร
+                </p>
+                <table className="w-full text-[10.5px]" style={{ color: '#7c2d12' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(217,119,6,0.3)' }}>
+                      <th className="text-left py-1 font-semibold">มิติ</th>
+                      <th className="text-center px-1 font-semibold">Active SKUs</th>
+                      <th className="text-center px-1 font-semibold">Movement Health</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="py-1">นับเป็น</td><td className="text-center">SKU (รหัส)</td><td className="text-center">บรรทัด (สินค้า × คลัง)</td></tr>
+                    <tr><td className="py-1">นับ IN</td><td className="text-center">✅</td><td className="text-center">❌</td></tr>
+                    <tr><td className="py-1">นับ OUT</td><td className="text-center">✅</td><td className="text-center">✅</td></tr>
+                    <tr><td className="py-1">นับ Transfer</td><td className="text-center">✅</td><td className="text-center">❌</td></tr>
+                  </tbody>
+                </table>
+                <p className="mt-2 mb-0.5">
+                  → <strong>Active</strong> ใจกว้าง: ขยับอะไรก็นับ · <strong>Normal</strong> เคร่งกว่า: ต้องมีการขายออกจริง
+                </p>
+              </div>
             </InfoTooltip>
           </div>
           <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
