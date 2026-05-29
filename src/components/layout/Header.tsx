@@ -16,6 +16,7 @@ const pageTitles: Record<string, string> = {
   '/reports':                'Management Reports',
   '/lots':                   'Lot Inventory',
   '/smart-report':           'Smart Report (AI)',
+  '/ask-me':                 'Ask Me (AI)',
   '/admin/import':           'Data Import',
   '/admin/settings':         'Settings',
   '/admin/users':            'User Management',

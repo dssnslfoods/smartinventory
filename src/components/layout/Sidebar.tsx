@@ -21,6 +21,7 @@ import {
   Download,
   Layers,
   Sparkles,
+  MessageSquare,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -54,6 +55,7 @@ const mainMenu: MenuEntry[] = [
   { path: '/reports',   label: 'Management Reports', icon: BarChart2,       permission: PERMISSIONS.MENU_REPORTS },
   { path: '/lots',      label: 'Lot Inventory',      icon: Layers,          permission: PERMISSIONS.MENU_LOTS },
   { path: '/smart-report', label: 'Smart Report (AI)', icon: Sparkles,     permission: PERMISSIONS.MENU_SMART_REPORT },
+  { path: '/ask-me',       label: 'Ask Me (AI)',      icon: MessageSquare, permission: PERMISSIONS.MENU_ASK_ME },
   { type: 'divider' },
   { path: '/admin/import',   label: 'Data Import', icon: Upload,    permission: PERMISSIONS.MENU_IMPORT },
   { path: '/admin/settings', label: 'Settings',    icon: Settings,  permission: PERMISSIONS.MENU_SETTINGS },

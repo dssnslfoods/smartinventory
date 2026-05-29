@@ -80,6 +80,7 @@ export const PERMISSIONS = {
   MENU_REPORTS:     'menu.reports',
   MENU_LOTS:        'menu.lots',
   MENU_SMART_REPORT:'menu.smart_report',
+  MENU_ASK_ME:      'menu.ask_me',
   MENU_IMPORT:      'menu.admin.import',
   MENU_SETTINGS:    'menu.admin.settings',
   MENU_USERS:       'menu.admin.users',
@@ -108,6 +109,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       'menu.reports',
       'menu.lots',
       'menu.smart_report',
+      'menu.ask_me',
     ],
   },
   {
@@ -134,6 +136,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   'menu.reports':               'ดู Management Reports',
   'menu.lots':                  'ดู Lot Inventory',
   'menu.smart_report':          'ดู Smart Report (AI)',
+  'menu.ask_me':                'ใช้ Ask Me (AI Chat)',
   'menu.admin.import':          'เข้าหน้า Data Import',
   'menu.admin.settings':        'เข้าหน้า Settings',
   'menu.admin.users':           'เข้าหน้า User Management',
@@ -160,6 +163,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.reports',
     'menu.lots',
     'menu.smart_report',
+    'menu.ask_me',
   ],
   supervisor: [
     'menu.dashboard',
@@ -170,6 +174,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'menu.reports',
     'menu.lots',
     'menu.smart_report',
+    'menu.ask_me',
     'menu.admin.import',
     'menu.admin.settings',
     'action.import.execute',
@@ -189,7 +194,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
 export const FEATURE_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
     label: 'โมดูลหลัก',
-    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots', 'menu.smart_report'],
+    keys: ['menu.dashboard', 'menu.stock', 'menu.movement', 'menu.alerts', 'menu.valuation', 'menu.reports', 'menu.lots', 'menu.smart_report', 'menu.ask_me'],
   },
   {
     label: 'Admin Tools',
