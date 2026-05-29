@@ -10,6 +10,7 @@ import { Bot, Send, Sparkles, RefreshCw, User } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import {
   useStockOnHand, useMonthlyTotal, useSlowMoving, useLatestLotSnapshot,
+  useInventoryTurnover, useLotAging,
 } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/utils/format';
@@ -57,21 +58,26 @@ function renderMarkdown(src: string): React.ReactNode[] {
 }
 
 const STARTER_QUESTIONS = [
-  'Working Capital ของเรา ตอนนี้อยู่ในระดับไหน?',
-  'Inventory Turnover ของเรา ต่ำหรือสูงเมื่อเทียบกับมาตรฐาน?',
-  'Dead Stock มูลค่าเท่าไหร่? ควรทำอย่างไรต่อ?',
-  'หน้า Cost & Valuation ใช้ทำอะไรได้บ้าง?',
-  'FEFO คืออะไร? ระบบมีรายงานให้ดูไหม?',
-  'ทำไม Moving Avg กับ Actual Cost ถึงเท่ากัน?',
+  // วิเคราะห์เชิงลึก
+  'ทำไม Dead Stock ของเราถึงสูงผิดปกติ?',
+  'ถ้าลด Dead Stock 50% จะประหยัดเท่าไหร่/ปี?',
+  'กลุ่มสินค้าไหนมีปัญหามากที่สุด? เปรียบเทียบ FRM vs FFG ให้หน่อย',
+  'SKU ตัวไหนควรเลิกขายก่อน?',
+  // คำถามทั่วไป + วิเคราะห์
+  'Inventory Turnover เราเทียบกับมาตรฐานยังไง? ดี/แย่?',
+  'Top 3 ความเสี่ยงสำคัญในสต็อกตอนนี้',
 ];
 
 export function AskMePage() {
   const { data: stockData = [] }    = useStockOnHand();
   const { data: monthlyTotal = [] } = useMonthlyTotal(24);
   const { data: slowMoving = [] }   = useSlowMoving();
+  const { data: turnover = [] }     = useInventoryTurnover();
+  const { data: lotAging = [] }     = useLotAging();
   const { data: latestSnap }        = useLatestLotSnapshot();
 
-  // KPI summary that travels with every request — small, deterministic.
+  // Richer KPI context — enough for Gemini to reason about root causes,
+  // comparisons, and what-if scenarios (not just look up single numbers).
   const kpiContext = useMemo(() => {
     const num = (v: unknown) => Number(v ?? 0);
     const nonZero = stockData.filter(x => num(x.current_stock) !== 0);
@@ -81,26 +87,102 @@ export function AskMePage() {
     const last12 = monthlyTotal.slice(-12);
     const cogs12mo = last12.reduce((s, m) => s + num(m.out_value), 0);
     const turn = actualValue > 0 ? cogs12mo / actualValue : 0;
+
     const dead = slowMoving.filter(s => s.movement_status === 'dead_stock');
     const slow = slowMoving.filter(s => s.movement_status === 'slow_moving');
+    const deadValue = dead.reduce((s, r) => s + num(r.stock_value), 0);
+    const slowValue = slow.reduce((s, r) => s + num(r.stock_value), 0);
+
+    // Group breakdown (count + value + %)
+    const byGroup = new Map<string, { count: number; value: number }>();
+    for (const r of nonZero) {
+      const g = r.group_name?.split('-')[0] ?? 'อื่นๆ';
+      const v = byGroup.get(g) ?? { count: 0, value: 0 };
+      v.count += 1;
+      v.value += num(r.stock_value);
+      byGroup.set(g, v);
+    }
+    const groups = [...byGroup.entries()]
+      .map(([name, v]) => ({ name, sku_count: v.count, value_thb: Math.round(v.value), share_pct: wacValue ? Number(((v.value / wacValue) * 100).toFixed(1)) : 0 }))
+      .sort((a, b) => b.value_thb - a.value_thb);
+
+    // Turnover band distribution
+    const bands = {
+      very_low_lt_1_5x:  turnover.filter(t => num(t.turnover_ratio) < 1.5).length,
+      low_1_5_to_3x:     turnover.filter(t => num(t.turnover_ratio) >= 1.5 && num(t.turnover_ratio) < 3).length,
+      mid_3_to_10x:      turnover.filter(t => num(t.turnover_ratio) >= 3 && num(t.turnover_ratio) < 10).length,
+      high_gte_10x:      turnover.filter(t => num(t.turnover_ratio) >= 10).length,
+    };
+
+    // Top dead/slow with names (so Gemini can recommend specific SKUs)
+    const top = (arr: typeof dead) => [...arr]
+      .sort((a, b) => num(b.stock_value) - num(a.stock_value))
+      .slice(0, 8)
+      .map(r => ({
+        item_code: r.item_code, itemname: r.itemname,
+        group: r.group_name?.split('-')[0],
+        value_thb: Math.round(num(r.stock_value)),
+        days_since_last_out: num(r.days_since_last_out),
+      }));
+
+    // Lot aging bucket sums
+    const sumBucket = (b: string) => lotAging
+      .filter(x => x.aging_bucket === b)
+      .reduce((acc, x) => ({ lots: acc.lots + num(x.lot_count), value: acc.value + num(x.total_value) }), { lots: 0, value: 0 });
+    const aging = {
+      expired:    sumBucket('expired'),
+      '0-30':     sumBucket('0-30'),
+      '31-60':    sumBucket('31-60'),
+      '61-90':    sumBucket('61-90'),
+      '91-180':   sumBucket('91-180'),
+      '180+':     sumBucket('180+'),
+    };
+
+    // Recent monthly trend (last 6 months)
+    const trend = monthlyTotal.slice(-6).map(m => ({
+      month: m.month,
+      in_value_thb:  Math.round(num(m.in_value)),
+      out_value_thb: Math.round(num(m.out_value)),
+    }));
+
     return {
       snapshot_date: latestSnap ?? null,
+      // Headline
       working_capital_thb: Math.round(actualValue),
       moving_avg_value_thb: Math.round(wacValue),
       std_cost_value_thb: Math.round(stdValue),
       variance_actual_vs_std_thb: Math.round(actualValue - stdValue),
+      carrying_cost_15pct_per_year_thb: Math.round(actualValue * 0.15),
       cogs_12mo_thb: Math.round(cogs12mo),
       inventory_turnover: Number(turn.toFixed(2)),
       dio_days: turn > 0 ? Math.round(365 / turn) : null,
+      inventory_cover_years: cogs12mo > 0 ? Number((actualValue / cogs12mo).toFixed(2)) : null,
       total_sku: new Set(stockData.map(r => r.item_code)).size,
       total_warehouses: new Set(stockData.map(r => r.warehouse)).size,
+      // Movement health
       dead_stock_count: dead.length,
-      dead_stock_value_thb: Math.round(dead.reduce((s, r) => s + num(r.stock_value), 0)),
+      dead_stock_value_thb: Math.round(deadValue),
       dead_stock_pct: slowMoving.length ? Number(((dead.length / slowMoving.length) * 100).toFixed(1)) : 0,
       slow_moving_count: slow.length,
-      slow_moving_value_thb: Math.round(slow.reduce((s, r) => s + num(r.stock_value), 0)),
+      slow_moving_value_thb: Math.round(slowValue),
+      // Distribution & comparison data
+      group_breakdown: groups,
+      turnover_distribution: bands,
+      lot_aging_buckets: {
+        expired_lots: aging.expired.lots,    expired_value_thb: Math.round(aging.expired.value),
+        '0_30d_lots': aging['0-30'].lots,    '0_30d_value_thb': Math.round(aging['0-30'].value),
+        '31_60d_lots': aging['31-60'].lots,  '31_60d_value_thb': Math.round(aging['31-60'].value),
+        '61_90d_lots': aging['61-90'].lots,  '61_90d_value_thb': Math.round(aging['61-90'].value),
+        '91_180d_lots': aging['91-180'].lots,'91_180d_value_thb': Math.round(aging['91-180'].value),
+        '180plus_d_lots': aging['180+'].lots,'180plus_d_value_thb': Math.round(aging['180+'].value),
+      },
+      // Top concerns with names
+      top_dead_stock: top(dead),
+      top_slow_moving: top(slow),
+      // Trend
+      recent_monthly_trend: trend,
     };
-  }, [stockData, monthlyTotal, slowMoving, latestSnap]);
+  }, [stockData, monthlyTotal, slowMoving, turnover, lotAging, latestSnap]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput]       = useState('');
