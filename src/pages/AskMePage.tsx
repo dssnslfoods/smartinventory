@@ -6,8 +6,9 @@
  * answers stay within scope.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Send, Sparkles, RefreshCw, User } from 'lucide-react';
+import { Send, RefreshCw, User } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
+import { AskMeMascot, type MascotState } from '@/components/AskMeMascot';
 import {
   useStockOnHand, useMonthlyTotal, useSlowMoving, useLatestLotSnapshot,
   useInventoryTurnover, useLotAging,
@@ -188,7 +189,12 @@ export function AskMePage() {
   const [input, setInput]       = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
+  /** When an AI reply lands, mascot enters "talking" mode for 3s, then back to idle. */
+  const [justTalked, setJustTalked] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Mascot state derived from chat state
+  const mascotState: MascotState = loading ? 'thinking' : justTalked ? 'talking' : 'idle';
 
   // Auto-scroll to bottom on new message.
   useEffect(() => {
@@ -214,6 +220,9 @@ export function AskMePage() {
       if ((data as any)?.error) throw new Error((data as any).error);
       const aiText = (data as any)?.text ?? '';
       setMessages(prev => [...prev, { role: 'assistant', text: aiText, ts: Date.now() }]);
+      // Trigger "talking" animation for 3 seconds after each AI reply.
+      setJustTalked(true);
+      setTimeout(() => setJustTalked(false), 3000);
     } catch (e: any) {
       setError(e?.message ?? 'เกิดข้อผิดพลาด');
     } finally {
@@ -242,11 +251,9 @@ export function AskMePage() {
         {/* Header strip */}
         <div className="flex items-center justify-between px-4 pb-3 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg" style={{ backgroundColor: 'rgba(66,133,244,0.10)' }}>
-              <Bot size={16} style={{ color: '#4285F4' }} />
-            </div>
+            <AskMeMascot state={mascotState} size={44} showThinkBubble={false} />
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Smart Inventory AI</p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>น้องสน <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>(Sno) · Smart Inventory AI</span></p>
               <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Powered by Gemini · ใช้ข้อมูล KPI ณ snapshot {latestSnap ? formatDate(latestSnap) : '—'}
               </p>
@@ -267,12 +274,11 @@ export function AskMePage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
-              <div className="p-3 rounded-full mb-3" style={{ backgroundColor: 'rgba(66,133,244,0.08)' }}>
-                <Sparkles size={28} style={{ color: '#4285F4' }} />
-              </div>
-              <h3 className="font-bold text-base mb-1" style={{ color: 'var(--text)' }}>สวัสดีครับ ถามอะไรได้เลย</h3>
-              <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
-                ผมรู้จักระบบ Smart Inventory ทุกซอกทุกมุม + เห็นตัวเลข KPI ปัจจุบันของคุณด้วย
+              <AskMeMascot state={mascotState} size={120} showThinkBubble={false} />
+              <h3 className="font-bold text-base mt-2 mb-1" style={{ color: 'var(--text)' }}>สวัสดีครับ ผม <span style={{ color: '#4285F4' }}>น้องสน</span></h3>
+              <p className="text-xs mb-5 max-w-md" style={{ color: 'var(--text-muted)' }}>
+                ผมรู้จักระบบ Smart Inventory ทุกซอกทุกมุม + เห็นตัวเลข KPI ปัจจุบันของคุณด้วย<br/>
+                ถามได้ทั้งคำถามทั่วไป และคำถามเชิงวิเคราะห์ลึก
               </p>
               <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>ตัวอย่างคำถาม:</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
@@ -291,14 +297,18 @@ export function AskMePage() {
             </div>
           )}
 
-          {messages.map((m, i) => (
+          {messages.map((m, i) => {
+            const isLastAssistant = m.role === 'assistant' && i === messages.length - 1;
+            return (
             <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
-                   style={{
-                     backgroundColor: m.role === 'user' ? 'var(--color-primary)' : 'rgba(66,133,244,0.10)',
-                     color: m.role === 'user' ? '#fff' : '#4285F4',
-                   }}>
-                {m.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+              <div className="shrink-0 flex items-center justify-center" style={{ width: 36, height: 36 }}>
+                {m.role === 'user' ? (
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}>
+                    <User size={14} />
+                  </div>
+                ) : (
+                  <AskMeMascot state={isLastAssistant && justTalked ? 'talking' : 'idle'} size={36} />
+                )}
               </div>
               <div className={`max-w-[80%] px-3 py-2 rounded-2xl ${m.role === 'user' ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}
                    style={{
@@ -310,12 +320,13 @@ export function AskMePage() {
                   : <div>{renderMarkdown(m.text)}</div>}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {loading && (
-            <div className="flex gap-2">
-              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
-                <Bot size={14} />
+            <div className="flex gap-2 items-center">
+              <div className="shrink-0 flex items-center justify-center" style={{ width: 36, height: 36 }}>
+                <AskMeMascot state="thinking" size={36} showThinkBubble />
               </div>
               <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm flex items-center gap-2" style={{ backgroundColor: 'var(--bg-alt)' }}>
                 <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#4285F4', animationDelay: '0ms' }} />
