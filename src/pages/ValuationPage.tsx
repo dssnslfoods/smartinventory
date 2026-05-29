@@ -108,18 +108,24 @@ function OverviewTab() {
     const rows = positiveStock.filter(s => (s as any).is_active === false && Number(s.current_stock) > 0);
     return {
       count: rows.length,
-      value: rows.reduce((sum, s) => sum + Number(s.current_stock) * Number(s.moving_avg), 0),
+      value: rows.reduce((sum, s) => sum + Number(s.stock_value), 0),
     };
   }, [positiveStock]);
 
+  // Use the DB-precomputed stock_value (full precision: qty × moving_avg) and
+  // lot_value (Σ inventory_lots.amount) instead of recomputing in JS with the
+  // 2-decimal-rounded moving_avg column — that rounding accumulated to a ฿700+
+  // drift vs the actual lot cost. All three figures now match the values shown
+  // on Dashboard and Smart Report exactly.
   const totals = useMemo(() => {
-    let maValue = 0, stdValue = 0;
+    let maValue = 0, stdValue = 0, actualValue = 0;
     for (const s of positiveStock) {
       const stock = Number(s.current_stock);
-      maValue += stock * Number(s.moving_avg);
-      stdValue += stock * Number(s.std_cost);
+      maValue     += Number(s.stock_value);
+      actualValue += Number((s as any).lot_value ?? s.stock_value);
+      stdValue    += stock * Number(s.std_cost);
     }
-    return { maValue, stdValue, items: positiveStock.length };
+    return { maValue, stdValue, actualValue, items: positiveStock.length };
   }, [positiveStock]);
 
   const groupBreakdown = useMemo(() => {
@@ -128,7 +134,7 @@ function OverviewTab() {
       const key = s.group_name;
       const prev = map.get(key) ?? { group: key, maValue: 0, stdValue: 0, count: 0 };
       const stock = Number(s.current_stock);
-      prev.maValue += stock * Number(s.moving_avg);
+      prev.maValue  += Number(s.stock_value);
       prev.stdValue += stock * Number(s.std_cost);
       prev.count++;
       map.set(key, prev);
@@ -142,7 +148,7 @@ function OverviewTab() {
       const key = s.warehouse;
       const prev = map.get(key) ?? { warehouse: key, whsName: s.whs_name, maValue: 0, stdValue: 0 };
       const stock = Number(s.current_stock);
-      prev.maValue += stock * Number(s.moving_avg);
+      prev.maValue  += Number(s.stock_value);
       prev.stdValue += stock * Number(s.std_cost);
       map.set(key, prev);
     }
@@ -201,23 +207,35 @@ function OverviewTab() {
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="card">
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Inventory Value (Actual)</p>
+          <p className="text-2xl font-bold mt-1" style={{ color: 'var(--color-primary)' }}>
+            {isLoading ? '...' : formatCurrency(totals.actualValue)}
+          </p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>ต้นทุนจริงรายล็อต (lot cost)</p>
+        </div>
         <div className="card">
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Inventory Value (Moving Avg)</p>
-          <p className="text-2xl font-bold mt-1" style={{ color: 'var(--color-primary)' }}>
+          <p className="text-2xl font-bold mt-1" style={{ color: 'var(--color-primary-light)' }}>
             {isLoading ? '...' : formatCurrency(totals.maValue)}
           </p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Σ qty × WAC</p>
         </div>
         <div className="card">
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Inventory Value (Std Cost)</p>
           <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text)' }}>
             {isLoading ? '...' : formatCurrency(totals.stdValue)}
           </p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Σ qty × std cost</p>
         </div>
         <div className="card">
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Variance (MA vs STD)</p>
-          <p className={`text-2xl font-bold mt-1 ${totals.maValue >= totals.stdValue ? 'text-green-600' : 'text-red-600'}`}>
-            {isLoading ? '...' : formatCurrency(totals.maValue - totals.stdValue)}
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Variance (Actual vs STD)</p>
+          <p className={`text-2xl font-bold mt-1 ${totals.actualValue >= totals.stdValue ? 'text-green-600' : 'text-red-600'}`}>
+            {isLoading ? '...' : formatCurrency(totals.actualValue - totals.stdValue)}
+          </p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            {isLoading ? '' : `${((totals.actualValue - totals.stdValue) / totals.stdValue * 100).toFixed(1)}% จาก std`}
           </p>
         </div>
       </div>
@@ -410,9 +428,11 @@ function CostAnalyticsTab() {
     for (const s of stockData) {
       const stock = Number(s.current_stock);
       if (stock === 0) continue;   // lot-based physical stock (≥ 0); skip empty
-      const ma = Number(s.moving_avg);
+      const ma  = Number(s.moving_avg);
       const std = Number(s.std_cost);
-      invValueMA  += stock * ma;
+      // Use precomputed stock_value (full precision) for the MA total to avoid
+      // ~฿700 of 2-decimal rounding drift vs the DB / Dashboard / Smart Report.
+      invValueMA  += Number(s.stock_value);
       invValueStd += stock * std;
       if (std > 0) {
         totalAbsVariance += Math.abs(stock * (ma - std));
@@ -465,8 +485,7 @@ function CostAnalyticsTab() {
     for (const s of stockData) {
       const stock = Number(s.current_stock);
       if (stock === 0) continue;   // lot-based physical stock (≥ 0); skip empty
-      const v = stock * Number(s.moving_avg);
-      valueByGroup.set(s.group_name, (valueByGroup.get(s.group_name) ?? 0) + v);
+      valueByGroup.set(s.group_name, (valueByGroup.get(s.group_name) ?? 0) + Number(s.stock_value));
     }
 
     // Aggregate COGS per group from monthlyMovement
