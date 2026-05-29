@@ -1,5 +1,5 @@
 /**
- * AskMeMascot — น้องสน (Sno), the Ask Me chat mascot.
+ * AskMeMascot — น้องสต๊อก (Stock), the Ask Me chat mascot.
  * A friendly penguin themed for NSL Food Service (cold storage / frozen).
  * Pure SVG + CSS keyframes; no external dependencies.
  *

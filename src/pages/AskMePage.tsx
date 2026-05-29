@@ -253,7 +253,7 @@ export function AskMePage() {
           <div className="flex items-center gap-2">
             <AskMeMascot state={mascotState} size={44} showThinkBubble={false} />
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>น้องสน <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>(Sno) · Smart Inventory AI</span></p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>น้องสต๊อก <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>(Stock) · Smart Inventory AI</span></p>
               <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Powered by Gemini · ใช้ข้อมูล KPI ณ snapshot {latestSnap ? formatDate(latestSnap) : '—'}
               </p>
@@ -275,7 +275,7 @@ export function AskMePage() {
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
               <AskMeMascot state={mascotState} size={120} showThinkBubble={false} />
-              <h3 className="font-bold text-base mt-2 mb-1" style={{ color: 'var(--text)' }}>สวัสดีครับ ผม <span style={{ color: '#4285F4' }}>น้องสน</span></h3>
+              <h3 className="font-bold text-base mt-2 mb-1" style={{ color: 'var(--text)' }}>สวัสดีครับ ผม <span style={{ color: '#4285F4' }}>น้องสต๊อก</span></h3>
               <p className="text-xs mb-5 max-w-md" style={{ color: 'var(--text-muted)' }}>
                 ผมรู้จักระบบ Smart Inventory ทุกซอกทุกมุม + เห็นตัวเลข KPI ปัจจุบันของคุณด้วย<br/>
                 ถามได้ทั้งคำถามทั่วไป และคำถามเชิงวิเคราะห์ลึก
