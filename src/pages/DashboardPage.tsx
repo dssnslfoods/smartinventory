@@ -579,32 +579,39 @@ export function DashboardPage() {
             <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
               SKU ที่ไม่ Active = ไม่มีธุรกรรมเกิน 90 วัน → จัดอยู่ใน Slow / Dead Stock
             </p>
+            <p className="mt-2 text-[10px] p-2 rounded leading-relaxed"
+               style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+              <strong>หมายเหตุ:</strong> "Active SKUs" นับ <strong>จำนวนรหัสสินค้า (SKU)</strong> ที่มี
+              ธุรกรรม In/Out/Transfer ใน 90 วัน · ส่วนกราฟ <strong>"สุขภาพการเคลื่อนไหว"</strong>
+              นับเป็น <strong>บรรทัด (สินค้า × คลัง)</strong> และพิจารณาเฉพาะ
+              <strong> last out date</strong> — จึงเป็นการวัดคนละมุม
+            </p>
             {(() => {
               const active = kpi?.activeItems ?? 0;
-              const inactive = Math.max(0, movementHealth.total - active);
-              if (movementHealth.total === 0) {
+              const total  = kpi?.totalItems  ?? 0;
+              if (total === 0) {
                 return <Insight tone="info">
-                  Active SKU = SKU ที่มีธุรกรรม In/Out ภายใน 90 วันที่ผ่านมา
+                  Active SKU = SKU ที่มีธุรกรรม In/Out/Transfer ภายใน 90 วันที่ผ่านมา
                 </Insight>;
               }
-              const activePct = (active / movementHealth.total) * 100;
+              const inactive = Math.max(0, total - active);
+              const activePct = (active / total) * 100;
               if (activePct < 30) {
                 return <Insight tone="critical">
-                  <strong>Active SKU เพียง {activePct.toFixed(0)}% ของทั้งคลัง:</strong>{' '}
-                  มี {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
+                  <strong>Active SKU เพียง {activePct.toFixed(0)}% ของ master:</strong>{' '}
+                  มี {formatNumber(active)} จาก {formatNumber(total)} SKU
                   มีการเคลื่อนไหวใน 90 วัน — อีก {formatNumber(inactive)} SKU
-                  ไม่ขยับ จัดอยู่ใน Slow / Dead Stock
+                  ไม่ขยับ (รวม inactive ที่เลิกขายแล้ว)
                 </Insight>;
               }
               if (activePct < 60) {
                 return <Insight tone="warn">
-                  Active {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
-                  ({activePct.toFixed(0)}%) — มี {formatNumber(inactive)} SKU
-                  ไม่มีการเคลื่อนไหวเกิน 90 วัน → เสี่ยงเป็น Slow / Dead Stock
+                  Active {formatNumber(active)} จาก {formatNumber(total)} SKU
+                  ({activePct.toFixed(0)}%) — สัดส่วน SKU ที่หมุนเวียนยังต่ำกว่าครึ่งของ master
                 </Insight>;
               }
               return <Insight tone="ok">
-                Active {formatNumber(active)} จาก {formatNumber(movementHealth.total)} SKU
+                Active {formatNumber(active)} จาก {formatNumber(total)} SKU
                 ({activePct.toFixed(0)}%) — สัดส่วน SKU ที่หมุนเวียนอยู่ในเกณฑ์ดี
               </Insight>;
             })()}
@@ -650,14 +657,14 @@ export function DashboardPage() {
           icon={<TrendingDown size={18} />}
           label="Dead Stock %"
           value={`${movementHealth.deadPct.toFixed(1)}%`}
-          sublabel={`${formatNumber(movementHealth.counts.dead_stock, 0)} items · ฿${formatCompact(movementHealth.values.dead_stock)}`}
+          sublabel={`${formatNumber(movementHealth.counts.dead_stock, 0)} บรรทัด · ฿${formatCompact(movementHealth.values.dead_stock)}`}
           color={movementHealth.deadPct <= 5 ? COLORS.green : movementHealth.deadPct <= 15 ? COLORS.amber : COLORS.red}
           tooltipTitle="Dead Stock %"
           tooltip={<>
             <p className="mb-2">สินค้าที่ไม่มีการเคลื่อนไหวเลย ≥ 180 วัน</p>
             <CalcBlock formula="Dead % = Dead items / Total items × 100">
-              <CalcLine label="Dead items"  value={`${formatNumber(movementHealth.counts.dead_stock)} items`} />
-              <CalcLine label="÷ Total"      value={`${formatNumber(movementHealth.total)} items`} />
+              <CalcLine label="Dead lines"  value={`${formatNumber(movementHealth.counts.dead_stock)} บรรทัด`} />
+              <CalcLine label="÷ Total"      value={`${formatNumber(movementHealth.total)} บรรทัด`} />
               <CalcLine label="= Dead %"     value={`${movementHealth.deadPct.toFixed(2)}%`} bold />
             </CalcBlock>
             <p className="mt-2 mb-1"><strong>มูลค่าเสี่ยง</strong></p>
@@ -763,7 +770,10 @@ export function DashboardPage() {
               </ul>
             </InfoTooltip>
           </div>
-          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Movement Health · {movementHealth.total} items</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+            Movement Health · {formatNumber(movementHealth.total)} บรรทัด
+            <span className="text-[10px] opacity-70"> (สินค้า × คลัง — จัดสถานะตาม last out date)</span>
+          </p>
           {movementHealth.total === 0 ? (
             <EmptyChart icon={<Activity size={28} />} text="ยังไม่มีข้อมูล" />
           ) : (
