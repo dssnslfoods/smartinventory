@@ -561,13 +561,20 @@ export function DashboardPage() {
           icon={<Package size={18} />}
           label="Active SKUs"
           value={kpiLoading ? '...' : formatNumber(kpi?.activeItems ?? 0)}
-          sublabel="มี tx ใน 90 วัน"
+          sublabel={kpiLoading
+            ? '...'
+            : `จาก ${formatNumber(kpi?.totalItems ?? 0)} SKU ทั้งหมด · มี tx ใน 90 วัน`}
           color={COLORS.teal}
           tooltipTitle="Active SKUs"
           tooltip={<>
             <p className="mb-2">จำนวนรหัสสินค้าที่มีการเคลื่อนไหวใน 90 วันที่ผ่านมา</p>
             <CalcBlock formula="COUNT(DISTINCT item_code) WHERE doc_date ≥ today − 90d">
               <CalcLine label="Active SKUs" value={formatNumber(kpi?.activeItems ?? 0)} bold />
+              <CalcLine label="Total SKUs (master)" value={formatNumber(kpi?.totalItems ?? 0)} muted />
+              <CalcLine label="% Active"
+                value={kpi?.totalItems
+                  ? `${(((kpi?.activeItems ?? 0) / kpi.totalItems) * 100).toFixed(1)}%`
+                  : '—'} />
             </CalcBlock>
             <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
               SKU ที่ไม่ Active = ไม่มีธุรกรรมเกิน 90 วัน → จัดอยู่ใน Slow / Dead Stock

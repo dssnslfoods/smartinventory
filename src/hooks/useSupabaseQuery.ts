@@ -339,11 +339,13 @@ export function useKPI() {
       const stockData      = (stockRes.data ?? []) as Array<{ stock_value: number }>;
       const totalStockValue = stockData.reduce((sum, r) => sum + Number(r.stock_value), 0);
       const activeItems    = activeItemsRes.data?.active_count ?? 0;
+      const totalItems     = activeItemsRes.data?.total_count  ?? 0;
       const criticalAlerts = alertsRes.count ?? 0;
 
       return {
         totalStockValue,
         activeItems,
+        totalItems,
         criticalAlerts,
         lastSync: configRes.data?.value || null,
       };
