@@ -2,8 +2,8 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
-      "runtimeExecutable": "/usr/local/bin/node",
+      "name": "smartinventory",
+      "runtimeExecutable": "/Users/golf/.nvm/versions/node/v22.22.2/bin/node",
       "runtimeArgs": ["node_modules/.bin/vite"],
       "port": 5173
     }

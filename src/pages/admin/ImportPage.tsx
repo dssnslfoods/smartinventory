@@ -58,7 +58,7 @@ export function ImportPage() {
     SHEET_CONFIG.reduce((acc, c) => ({ ...acc, [c.key]: true }), {} as any)
   );
   
-  const [txnMode, setTxnMode] = useState<'replace' | 'append'>('replace');
+  const [txnMode, setTxnMode] = useState<'replace' | 'append'>('append');
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
 
   /** Row indices (within parsedData[key]) the user has chosen to exclude from

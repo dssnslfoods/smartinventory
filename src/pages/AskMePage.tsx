@@ -11,7 +11,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { AskMeMascot, type MascotState } from '@/components/AskMeMascot';
 import {
   useStockOnHand, useMonthlyTotal, useSlowMoving, useLatestLotSnapshot,
-  useInventoryTurnover, useLotAging,
+  useInventoryTurnover, useLotAging, useAIProvider,
 } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/utils/format';
@@ -185,6 +185,7 @@ export function AskMePage() {
     };
   }, [stockData, monthlyTotal, slowMoving, turnover, lotAging, latestSnap]);
 
+  const aiProvider = useAIProvider();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput]       = useState('');
   const [loading, setLoading]   = useState(false);
@@ -215,7 +216,9 @@ export function AskMePage() {
         kpi: kpiContext,
         messages: next.map(m => ({ role: m.role, text: m.text })),
       };
-      const { data, error: invErr } = await supabase.functions.invoke('gemini-chat', { body: payload });
+      const { data, error: invErr } = await supabase.functions.invoke('ai-chat', {
+        body: { ...payload, provider: aiProvider },
+      });
       if (invErr) throw new Error(invErr.message);
       if ((data as any)?.error) throw new Error((data as any).error);
       const aiText = (data as any)?.text ?? '';
@@ -237,7 +240,7 @@ export function AskMePage() {
     <div className="space-y-4">
       <PageHeader
         title="Ask Me"
-        subtitle="ถามอะไรเกี่ยวกับระบบ Smart Inventory ก็ได้ — AI ตอบให้"
+        subtitle="ถามอะไรเกี่ยวกับระบบ Smart Inventory ก็ได้ — น้องสต๊อก ตอบให้"
         helpTitle="Ask Me — AI Assistant"
         helpBody={(<>
           <p className="mb-2"><strong>Ask Me</strong> เป็น AI Chatbot ที่ตอบคำถามเกี่ยวกับระบบ Smart Inventory โดยใช้ Gemini</p>
@@ -255,19 +258,21 @@ export function AskMePage() {
             <div>
               <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>น้องสต๊อก <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>(Stock) · Smart Inventory AI</span></p>
               <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                Powered by Gemini · ใช้ข้อมูล KPI ณ snapshot {latestSnap ? formatDate(latestSnap) : '—'}
+                Powered by {aiProvider === 'claude' ? 'Claude Fable 5' : aiProvider === 'openai' ? 'GPT-4o' : 'Gemini'} · ใช้ข้อมูล KPI ณ snapshot {latestSnap ? formatDate(latestSnap) : '—'}
               </p>
             </div>
           </div>
-          {messages.length > 0 && (
-            <button
-              onClick={reset}
-              className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)]"
-              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-            >
-              <RefreshCw size={12} /> เริ่มใหม่
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {messages.length > 0 && (
+              <button
+                onClick={reset}
+                className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                <RefreshCw size={12} /> เริ่มใหม่
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Conversation */}

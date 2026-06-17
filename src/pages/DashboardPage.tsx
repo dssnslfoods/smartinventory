@@ -733,7 +733,7 @@ export function DashboardPage() {
         <div className="card relative">
           <div className="flex items-center gap-2 mb-1">
             <Layers size={16} style={{ color: COLORS.primary }} />
-            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>การกระจายอายุ Lot</h3>
+            <h3 className="font-semibold" style={{ color: 'var(--text)' }}>การกระจายอายุ Lot คงเหลือ</h3>
             <InfoTooltip title="Lot Aging Distribution">
               <p className="mb-2">สัดส่วน <strong>มูลค่า</strong> ของ lot ตามช่วงวันก่อนหมดอายุ</p>
               <p>🔴 แดงเข้ม = หมดแล้ว · 🔴 แดง = ≤30 วัน · 🟠 ส้ม = 31-60 · 🟡 เหลือง = 61-90 · 🟢 เขียว = 91-180+</p>

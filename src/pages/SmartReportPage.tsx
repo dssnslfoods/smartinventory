@@ -14,7 +14,7 @@ import { Sparkles, Printer, AlertTriangle, CheckCircle2, TrendingDown, Layers, B
 import { PageHeader } from '@/components/PageHeader';
 import {
   useStockOnHand, useMonthlyTotal, useLotAging, useLotDetail, useSlowMoving,
-  useInventoryTurnover, useLatestLotSnapshot,
+  useInventoryTurnover, useLatestLotSnapshot, useAIProvider,
 } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatCurrency, formatCompact, formatDate } from '@/utils/format';
@@ -216,11 +216,14 @@ export function SmartReportPage() {
     { key: 'noom',      name: 'หนุ่มเมืองจันทร์', tagline: 'เล่าเรื่องเชิงวิเคราะห์ ภาษาน่าอ่าน' },
     { key: 'suthichai', name: 'สุทธิชัย หยุ่น',    tagline: 'วิเคราะห์ข่าวเชิงลึก เฉียบคม ตั้งคำถาม' },
   ];
+  const aiProvider  = useAIProvider();
+  const providerColor = aiProvider === 'claude' ? '#7c3aed' : aiProvider === 'openai' ? '#10a37f' : '#4285F4';
+  const providerLabel = aiProvider === 'claude' ? 'Claude Fable 5' : aiProvider === 'openai' ? 'GPT-4o' : 'Gemini';
   const [persona, setPersona] = useState<Persona>('noom');
   const personaInfo = PERSONAS.find(p => p.key === persona)!;
   const [refreshTick, setRefreshTick] = useState(0);
   const ai = useQuery({
-    queryKey: ['gemini-report', snapDate, persona, refreshTick],
+    queryKey: ['ai-report', aiProvider, snapDate, persona, refreshTick],
     enabled:  !!snapDate && r.totalItems > 0,
     staleTime: 60 * 60 * 1000, // 1 hour
     queryFn: async () => {
@@ -273,7 +276,9 @@ export function SmartReportPage() {
         verdict: r.verdict, // 'good' | 'warn' | 'bad'
         potential_savings_thb: Math.round(r.expiredValue + r.expiring30Val + r.carryingCost * 0.10),
       };
-      const { data, error } = await supabase.functions.invoke('gemini-report', { body: payload });
+      const { data, error } = await supabase.functions.invoke('ai-report', {
+        body: { ...payload, provider: aiProvider },
+      });
       if (error) throw new Error(error.message);
       if ((data as any)?.error) throw new Error((data as any).error + ((data as any).hint ? ` — ${(data as any).hint}` : ''));
       return data as { ok: true; text: string; model: string; cached?: boolean; generated_at?: string };
@@ -344,20 +349,20 @@ export function SmartReportPage() {
         </button>
       </div>
 
-      {/* 0. AI Executive Summary — Gemini-generated narrative */}
-      <section className="card" style={{ pageBreakInside: 'avoid', borderLeft: '4px solid #4285F4' }}>
+      {/* 0. AI Executive Summary — AI-generated narrative */}
+      <section className="card" style={{ pageBreakInside: 'avoid', borderLeft: `4px solid ${providerColor}` }}>
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="flex items-center gap-2 text-base font-bold" style={{ color: 'var(--text)' }}>
-              <Bot size={18} style={{ color: '#4285F4' }} />
-              บทวิเคราะห์จาก <span style={{ color: '#4285F4' }}>{personaInfo.name}</span>
+              <Bot size={18} style={{ color: providerColor }} />
+              บทวิเคราะห์จาก <span style={{ color: providerColor }}>{personaInfo.name}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded-full font-normal"
-                    style={{ backgroundColor: 'rgba(66,133,244,0.10)', color: '#4285F4' }}>
+                    style={{ backgroundColor: `${providerColor}1a`, color: providerColor }}>
                 AI Generated
               </span>
             </h2>
             <p className="text-[11px] mt-0.5 ml-7" style={{ color: 'var(--text-muted)' }}>
-              {personaInfo.tagline} · Powered by Gemini
+              {personaInfo.tagline} · Powered by {providerLabel}
               {ai.data?.model && <span> · <span className="font-mono">{ai.data.model}</span></span>}
             </p>
           </div>
@@ -366,16 +371,16 @@ export function SmartReportPage() {
             disabled={ai.isFetching}
             className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full border hover:bg-[var(--bg-alt)] print:hidden"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)', opacity: ai.isFetching ? 0.5 : 1 }}
-            title="สร้างใหม่ด้วย Gemini"
+            title="สร้างรายงานใหม่"
           >
             <RefreshCw size={12} className={ai.isFetching ? 'animate-spin' : ''} />
             {ai.isFetching ? 'กำลังคิด...' : 'Regenerate'}
           </button>
         </div>
 
-        {/* Persona picker — pick whose voice writes the analysis */}
+        {/* Persona picker */}
         <div className="flex items-center gap-2 mb-3 print:hidden">
-          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>เลือกผู้วิเคราะห์:</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>ผู้วิเคราะห์:</span>
           <div className="inline-flex rounded-full border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
             {PERSONAS.map(p => (
               <button
@@ -383,7 +388,7 @@ export function SmartReportPage() {
                 onClick={() => setPersona(p.key)}
                 className="px-3 py-1 text-xs font-medium transition-colors"
                 style={{
-                  backgroundColor: persona === p.key ? '#4285F4' : 'transparent',
+                  backgroundColor: persona === p.key ? providerColor : 'transparent',
                   color: persona === p.key ? '#fff' : 'var(--text)',
                 }}
                 title={p.tagline}
@@ -396,8 +401,10 @@ export function SmartReportPage() {
 
         {ai.isLoading && (
           <div className="flex items-center gap-3 py-6">
-            <div className="w-5 h-5 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Gemini กำลังวิเคราะห์ข้อมูล snapshot…</span>
+            <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: `${providerColor} transparent transparent transparent` }} />
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              {providerLabel} กำลังวิเคราะห์ข้อมูล snapshot…
+            </span>
           </div>
         )}
 
@@ -407,7 +414,10 @@ export function SmartReportPage() {
             <div className="font-semibold mb-1">⚠️ ไม่สามารถสร้าง AI summary ได้</div>
             <div className="font-mono text-[11px]">{(ai.error as Error)?.message}</div>
             <div className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              ส่วนสรุปด้านล่าง (rule-based) ยังใช้งานได้ปกติ · หากยังไม่ได้ตั้ง <code>GEMINI_API_KEY</code> ใน Supabase secrets ให้ตั้งก่อน
+              ส่วนสรุปด้านล่าง (rule-based) ยังใช้งานได้ปกติ ·{' '}
+              {aiProvider === 'claude' ? 'ตั้ง ANTHROPIC_API_KEY ใน Supabase secrets'
+            : aiProvider === 'openai' ? 'ตั้ง OPENAI_API_KEY ใน Supabase secrets'
+            : 'ตั้ง GEMINI_API_KEY ใน Supabase secrets'}
             </div>
           </div>
         )}

@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Trash2, Clock, Check, Info, Target, RotateCcw } from 'lucide-react';
+import { Trash2, Clock, Check, Info, Target, RotateCcw, Bot, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpFormula, HelpLegend } from '@/components/HelpButton';
 import { PasswordConfirmModal } from '@/components/PasswordConfirmModal';
-import { useSystemConfig, useItemGroups } from '@/hooks/useSupabaseQuery';
+import { useSystemConfig, useUpdateSystemConfig, useItemGroups, type AIProvider } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { recordAudit } from '@/lib/auditLog';
 import { useQueryClient } from '@tanstack/react-query';
+
+const AI_PROVIDERS: { key: AIProvider; label: string; model: string; color: string; secretKey: string; desc: string }[] = [
+  { key: 'gemini',  label: 'Google Gemini', model: 'gemini-2.5-flash', color: '#4285F4', secretKey: 'GEMINI_API_KEY',    desc: 'เร็ว ประหยัด เหมาะกับการใช้งานทั่วไป' },
+  { key: 'claude',  label: 'Claude Fable 5', model: 'claude-fable-5',  color: '#7c3aed', secretKey: 'ANTHROPIC_API_KEY', desc: 'วิเคราะห์เชิงลึก เหมาะกับ complex reasoning' },
+  { key: 'openai',  label: 'GPT-4o',         model: 'gpt-4o',          color: '#10a37f', secretKey: 'OPENAI_API_KEY',    desc: 'สมดุลทุกด้าน รู้จักกันดีในวงการ' },
+];
 
 export function SettingsPage() {
   const { data: config } = useSystemConfig();
@@ -35,6 +41,23 @@ export function SettingsPage() {
   const [vvSaving, setVvSaving] = useState(false);
   const [vvSaved,  setVvSaved]  = useState(false);
   const [vvError,  setVvError]  = useState('');
+
+  // ── AI Provider ──
+  const updateConfig    = useUpdateSystemConfig();
+  const currentProvider = (config?.find(c => c.key === 'ai_provider')?.value ?? 'gemini') as AIProvider;
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiSaved,  setAiSaved]  = useState(false);
+
+  const saveAIProvider = async (provider: AIProvider) => {
+    setAiSaving(true); setAiSaved(false);
+    try {
+      await updateConfig.mutateAsync({ key: 'ai_provider', value: provider });
+      setAiSaved(true);
+      setTimeout(() => setAiSaved(false), 2500);
+    } finally {
+      setAiSaving(false);
+    }
+  };
 
   // Shelf Life per Group
   const [shelfEdits, setShelfEdits] = useState<Record<number, string>>({});
@@ -231,7 +254,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        subtitle="ตั้งค่าระบบ — VV Matrix, Shelf Life"
+        subtitle="ตั้งค่าระบบ — AI Provider, VV Matrix, Shelf Life"
         helpTitle="Settings (ตั้งค่าระบบ)"
         helpBody={(<>
           <HelpSection title="VV Matrix Configuration">
@@ -256,6 +279,64 @@ export function SettingsPage() {
           </HelpSection>
         </>)}
       />
+
+      {/* ── AI Provider Settings ──────────────────────────────────────────── */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(124,58,237,0.10)' }}>
+            <Bot size={18} style={{ color: '#7c3aed' }} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>AI Provider</h2>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>เลือก AI ที่ใช้ใน Ask Me และ Smart Report — มีผลทันทีสำหรับทุก user</p>
+          </div>
+          {aiSaved && (
+            <div className="ml-auto flex items-center gap-1 text-xs text-emerald-600">
+              <CheckCircle2 size={14} /> บันทึกแล้ว
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {AI_PROVIDERS.map(p => {
+            const isActive = currentProvider === p.key;
+            return (
+              <button
+                key={p.key}
+                onClick={() => saveAIProvider(p.key)}
+                disabled={aiSaving || isActive}
+                className="relative text-left p-4 rounded-xl border-2 transition-all"
+                style={{
+                  borderColor:       isActive ? p.color : 'var(--border)',
+                  backgroundColor:   isActive ? `${p.color}10` : 'var(--bg-alt)',
+                  opacity:           aiSaving && !isActive ? 0.5 : 1,
+                }}
+              >
+                {isActive && (
+                  <span className="absolute top-2 right-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                    style={{ backgroundColor: p.color, color: '#fff' }}>
+                    ใช้งานอยู่
+                  </span>
+                )}
+                <p className="font-semibold text-sm mb-0.5" style={{ color: isActive ? p.color : 'var(--text)' }}>
+                  {p.label}
+                </p>
+                <p className="font-mono text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>{p.model}</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{p.desc}</p>
+                <p className="text-[10px] mt-2 font-mono" style={{ color: 'var(--text-muted)' }}>
+                  Secret: <span style={{ color: isActive ? p.color : 'var(--text-muted)' }}>{p.secretKey}</span>
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 p-3 rounded-lg text-xs" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
+          <strong style={{ color: 'var(--text)' }}>วิธีตั้ง API Key:</strong>{' '}
+          รัน <code className="font-mono px-1 rounded" style={{ backgroundColor: 'var(--border)' }}>supabase secrets set &lt;SECRET_KEY&gt;=&lt;your-api-key&gt;</code>{' '}
+          แล้ว deploy function ใหม่ — ไม่มีการเก็บ key ในฐานข้อมูล
+        </div>
+      </div>
 
 
       {/* VV Matrix Configuration */}

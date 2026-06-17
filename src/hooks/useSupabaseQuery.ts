@@ -892,6 +892,16 @@ export function useMonthlyTotal(monthsBack: number = 36) {
   });
 }
 
+// ============ AI Provider ============
+export type AIProvider = 'gemini' | 'claude' | 'openai';
+
+export function useAIProvider(): AIProvider {
+  const { data: config } = useSystemConfig();
+  const val = config?.find(c => c.key === 'ai_provider')?.value;
+  if (val === 'claude' || val === 'openai') return val;
+  return 'gemini';
+}
+
 // ============ System Config ============
 export function useSystemConfig() {
   return useQuery({
