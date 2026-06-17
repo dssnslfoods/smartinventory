@@ -104,10 +104,10 @@ const Bullet = ({ tone, children }: { tone: 'good' | 'warn' | 'bad' | 'info'; ch
 export function SmartReportPage() {
   const { data: stockData = [] }   = useStockOnHand();
   const { data: monthlyTotal = [] } = useMonthlyTotal(24);
-  const { data: lotAging = [] }    = useLotAging();
+  const { data: latestSnap }       = useLatestLotSnapshot();
+  const { data: lotAging = [] }    = useLotAging(latestSnap ?? undefined);
   const { data: slowMoving = [] }  = useSlowMoving();
   const { data: turnover = [] }    = useInventoryTurnover();
-  const { data: latestSnap }       = useLatestLotSnapshot();
   // Individual at-risk lots for the Top 5 list (days_remaining ≤ 30, top by value)
   const { data: atRiskLotsResp }   = useLotDetail({ daysRemainingMax: 30, pageSize: 50 });
   const atRiskLots = atRiskLotsResp?.data ?? [];
