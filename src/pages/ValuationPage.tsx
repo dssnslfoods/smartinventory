@@ -256,9 +256,14 @@ function OverviewTab() {
           <div className="flex items-start gap-2 px-4 py-2.5">
             <span className="text-base leading-none mt-0.5">📦</span>
             <div className="text-xs leading-relaxed" style={{ color: '#9a3412' }}>
-              <strong>{formatNumber(inactiveWithStock.count)} รายการที่เลิกขายแล้ว (inactive) แต่ยังมีสต็อกค้าง</strong>
-              {' '}มูลค่า <strong>{formatCurrency(inactiveWithStock.value)}</strong> — รวมอยู่ใน Inventory Value ด้านบน
-              (เพราะเป็นเงินจมจริง) · แนะนำให้เร่งระบายหรือ write-off เพื่อปลดล็อก Working Capital
+              <strong>{formatNumber(inactiveWithStock.count)} รายการที่ฝ่ายบริหารตัดสินใจเลิกขายแล้ว</strong> (สถานะ Active = No ใน SAP)
+              {' '}แต่ยังมีสต็อกค้างอยู่ในคลัง มูลค่ารวม <strong>{formatCurrency(inactiveWithStock.value)}</strong>
+              <br />
+              <span style={{ opacity: 0.8 }}>
+                หมายเหตุ: ไม่เกี่ยวกับ Dead Stock (ของที่ไม่เบิกออก ≥180 วัน ในหน้า Slow Moving) —
+                รายการเหล่านี้ "ถูกยกเลิก" อย่างเป็นทางการแล้ว แต่ยังไม่ได้เคลียร์ออก ·
+                แนะนำให้เร่งระบายหรือ write-off เพื่อปลดล็อก Working Capital
+              </span>
             </div>
           </div>
           <table className="w-full text-xs" style={{ borderTop: '1px solid rgba(234,88,12,0.18)' }}>
