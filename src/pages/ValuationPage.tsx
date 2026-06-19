@@ -109,6 +109,15 @@ function OverviewTab() {
     return {
       count: rows.length,
       value: rows.reduce((sum, s) => sum + Number(s.stock_value), 0),
+      items: rows.map(s => ({
+        item_code: s.item_code,
+        itemname: s.itemname,
+        warehouse: s.warehouse,
+        whs_name: (s as any).whs_name ?? s.warehouse,
+        current_stock: Number(s.current_stock),
+        uom: (s as any).uom ?? '',
+        stock_value: Number(s.stock_value),
+      })),
     };
   }, [positiveStock]);
 
@@ -242,14 +251,38 @@ function OverviewTab() {
 
       {/* Inactive-items-with-stock insight */}
       {inactiveWithStock.count > 0 && (
-        <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg"
+        <div className="rounded-lg overflow-hidden"
              style={{ backgroundColor: 'rgba(234,88,12,0.07)', border: '1px solid rgba(234,88,12,0.25)' }}>
-          <span className="text-base leading-none mt-0.5">📦</span>
-          <div className="text-xs leading-relaxed" style={{ color: '#9a3412' }}>
-            <strong>{formatNumber(inactiveWithStock.count)} รายการที่เลิกขายแล้ว (inactive) แต่ยังมีสต็อกค้าง</strong>
-            {' '}มูลค่า <strong>{formatCurrency(inactiveWithStock.value)}</strong> — รวมอยู่ใน Inventory Value ด้านบน
-            (เพราะเป็นเงินจมจริง) · แนะนำให้เร่งระบายหรือ write-off เพื่อปลดล็อก Working Capital
+          <div className="flex items-start gap-2 px-4 py-2.5">
+            <span className="text-base leading-none mt-0.5">📦</span>
+            <div className="text-xs leading-relaxed" style={{ color: '#9a3412' }}>
+              <strong>{formatNumber(inactiveWithStock.count)} รายการที่เลิกขายแล้ว (inactive) แต่ยังมีสต็อกค้าง</strong>
+              {' '}มูลค่า <strong>{formatCurrency(inactiveWithStock.value)}</strong> — รวมอยู่ใน Inventory Value ด้านบน
+              (เพราะเป็นเงินจมจริง) · แนะนำให้เร่งระบายหรือ write-off เพื่อปลดล็อก Working Capital
+            </div>
           </div>
+          <table className="w-full text-xs" style={{ borderTop: '1px solid rgba(234,88,12,0.18)' }}>
+            <thead>
+              <tr style={{ color: '#9a3412', backgroundColor: 'rgba(234,88,12,0.05)' }}>
+                <th className="px-4 py-1.5 text-left font-semibold">Item Code</th>
+                <th className="px-4 py-1.5 text-left font-semibold">ชื่อสินค้า</th>
+                <th className="px-4 py-1.5 text-left font-semibold">คลัง</th>
+                <th className="px-4 py-1.5 text-right font-semibold">จำนวน</th>
+                <th className="px-4 py-1.5 text-right font-semibold">มูลค่า</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inactiveWithStock.items.map((item) => (
+                <tr key={`${item.item_code}-${item.warehouse}`} style={{ color: '#9a3412', borderTop: '1px solid rgba(234,88,12,0.12)' }}>
+                  <td className="px-4 py-1.5 font-mono">{item.item_code}</td>
+                  <td className="px-4 py-1.5">{item.itemname}</td>
+                  <td className="px-4 py-1.5">{item.warehouse}</td>
+                  <td className="px-4 py-1.5 text-right">{formatNumber(item.current_stock)} {item.uom}</td>
+                  <td className="px-4 py-1.5 text-right font-semibold">{formatCurrency(item.stock_value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
