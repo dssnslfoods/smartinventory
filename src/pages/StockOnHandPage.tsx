@@ -85,23 +85,8 @@ export function StockOnHandPage() {
     };
   }, [stockData]);
 
-  const sortedData = useMemo(() => {
-    if (!stockData) return [];
-    const filtered = stockData.filter((r) => {
-      // Lot-based stock: every row already has physical qty (> 0). Guard against
-      // a stray zero just in case.
-      if (Number(r.current_stock) === 0) return false;
-      // FS Category
-      if (fsCategory && (r as any).fs_category !== fsCategory) return false;
-      // Min stock value
-      const sv = Number(r.stock_value);
-      if (minValueNum != null && sv < minValueNum) return false;
-      if (bucketThreshold != null && sv < bucketThreshold) return false;
-      // Min current stock
-      if (minQtyNum != null && Number(r.current_stock) < minQtyNum) return false;
-      return true;
-    });
-    return filtered.sort((a, b) => {
+  const applySort = <T,>(arr: T[]) => {
+    return arr.sort((a, b) => {
       const aVal = (a as unknown as Record<string, unknown>)[sortField];
       const bVal = (b as unknown as Record<string, unknown>)[sortField];
       const aNum = typeof aVal === 'number' ? aVal : Number(aVal) || 0;
@@ -111,7 +96,29 @@ export function StockOnHandPage() {
       }
       return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
     });
-  }, [stockData, sortField, sortDir, fsCategory, minValueNum, minQtyNum, bucketThreshold]);
+  };
+
+  const applyValueQtyFilters = <T extends { stock_value: unknown; current_stock: unknown }>(row: T) => {
+    const sv = Number(row.stock_value);
+    if (minValueNum != null && sv < minValueNum) return false;
+    if (bucketThreshold != null && sv < bucketThreshold) return false;
+    if (minQtyNum != null && Number(row.current_stock) < minQtyNum) return false;
+    return true;
+  };
+
+  /** Base data: zero-stock removed + category filter only (no value/qty filters). */
+  const baseData = useMemo(() => {
+    if (!stockData) return [];
+    return stockData.filter((r) => {
+      if (Number(r.current_stock) === 0) return false;
+      if (fsCategory && (r as any).fs_category !== fsCategory) return false;
+      return true;
+    });
+  }, [stockData, fsCategory]);
+
+  const sortedData = useMemo(() => {
+    return applySort(baseData.filter(applyValueQtyFilters));
+  }, [baseData, sortField, sortDir, minValueNum, minQtyNum, bucketThreshold]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -123,14 +130,16 @@ export function StockOnHandPage() {
     setPage(0);
   };
 
-  /** Aggregate per-warehouse rows into one row per item. */
+  /** Aggregate per-warehouse rows into one row per item.
+   *  Aggregation uses baseData (before value/qty filters) so that small-value
+   *  warehouses are included in the item total. Filters apply to the aggregate. */
   const aggregatedData = useMemo(() => {
-    type Row = (typeof sortedData)[number];
+    type Row = (typeof baseData)[number];
     const byItem = new Map<string, Row & {
       warehouse: string; whs_name: string; wh_count: number;
       warehouses: string[]; lot_value: number;
     }>();
-    for (const r of sortedData) {
+    for (const r of baseData) {
       const key = r.item_code;
       const existing = byItem.get(key);
       const qty   = Number(r.current_stock);
@@ -155,20 +164,8 @@ export function StockOnHandPage() {
         existing.warehouses.push(r.warehouse);
       }
     }
-    const list = [...byItem.values()];
-    // Re-sort aggregates by the active sort field/direction
-    list.sort((a, b) => {
-      const aVal = (a as unknown as Record<string, unknown>)[sortField];
-      const bVal = (b as unknown as Record<string, unknown>)[sortField];
-      const aNum = typeof aVal === 'number' ? aVal : Number(aVal) || 0;
-      const bNum = typeof bVal === 'number' ? bVal : Number(bVal) || 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      }
-      return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
-    });
-    return list;
-  }, [sortedData, sortField, sortDir]);
+    return applySort([...byItem.values()].filter(applyValueQtyFilters));
+  }, [baseData, sortField, sortDir, minValueNum, minQtyNum, bucketThreshold]);
 
   /** What the table actually renders — switches with viewMode. */
   const displayData = viewMode === 'by-item' ? aggregatedData : sortedData;
