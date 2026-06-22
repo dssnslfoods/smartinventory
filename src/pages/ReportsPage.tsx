@@ -1981,19 +1981,47 @@ function TurnoverTab() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Turnover Ratio</p>
+          <div className="flex items-center gap-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Avg Turnover Ratio</p>
+            <InfoTooltip title="Avg Turnover Ratio">
+              <p className="mb-2">ค่าเฉลี่ยของ Turnover Ratio ทุกรายการสินค้าที่มีสต็อก</p>
+              <div className="rounded p-2 text-[11px]" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p className="font-mono mb-1" style={{ color: 'var(--text)' }}>Turnover = COGS 12 เดือน ÷ มูลค่าสต็อก</p>
+              </div>
+              <p className="mt-2 mb-1"><strong>ตีความ:</strong></p>
+              <p>• ยิ่ง<strong>สูง</strong> = สินค้าหมุนเร็ว เงินไม่จม</p>
+              <p>• ยิ่ง<strong>ต่ำ</strong> = สินค้าค้างคลังนาน เงินจมมาก</p>
+              <div className="mt-2 rounded p-2 text-[11px]" style={{ backgroundColor: 'var(--bg-alt)' }}>
+                <p style={{ color: 'var(--text)' }}>🟢 ≥ 4× ดี · 🟡 2–4× พอใช้ · 🔴 {'<'} 2× วิกฤต</p>
+              </div>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-primary)' }}>
             {summary.avg.toFixed(1)}×
           </p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Annual COGS / Stock Value</p>
         </div>
         <div className="card">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Highest Turnover</p>
+          <div className="flex items-center gap-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Highest Turnover</p>
+            <InfoTooltip title="Highest Turnover">
+              <p className="mb-2">สินค้าที่มี Turnover Ratio <strong>สูงที่สุด</strong> = ขายดี หมุนเร็วที่สุด</p>
+              <p className="mb-2">สินค้าตัวนี้เปลี่ยนสต็อกเป็นยอดขายได้เร็วที่สุดในระบบ</p>
+              <p>ค่าสูงมาก (เช่น {'>'} 1,000×) อาจเกิดจากสต็อกคงเหลือน้อยมากเทียบกับยอดขาย — ควรระวังของขาด</p>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold tabular-nums text-green-600">{summary.high.toFixed(1)}×</p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Best performing item</p>
         </div>
         <div className="card">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Lowest Turnover</p>
+          <div className="flex items-center gap-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Lowest Turnover</p>
+            <InfoTooltip title="Lowest Turnover">
+              <p className="mb-2">สินค้าที่มี Turnover Ratio <strong>ต่ำที่สุด</strong> = ค้างคลังนานที่สุด</p>
+              <p className="mb-2"><strong>0.0×</strong> = ไม่มีการเบิกออก (COGS = 0) เลยใน 12 เดือน ทั้งที่ยังมีสต็อกอยู่</p>
+              <p>ควรพิจารณาเร่งระบาย ทำโปรโมชัน หรือ write-off หากเป็นสินค้าที่ไม่มีโอกาสขาย</p>
+            </InfoTooltip>
+          </div>
           <p className="text-2xl font-bold tabular-nums text-red-600">{summary.low.toFixed(1)}×</p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Needs attention</p>
         </div>
