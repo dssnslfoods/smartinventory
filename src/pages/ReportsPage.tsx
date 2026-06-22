@@ -2491,6 +2491,8 @@ function FEFOPickListTab() {
   const [minValue, setMinValue]   = useState<string>('');
   const [hasExpired, setHasExpired] = useState<boolean>(false);
   const [sortBy, setSortBy]       = useState<'fefo' | 'lots' | 'value'>('fefo');
+  const [fefoPage, setFefoPage]   = useState(0);
+  const FEFO_PAGE_SIZE = 20;
 
   const { data: lotResult, isLoading } = useLotDetail({
     snapshotDate: snap,
@@ -2622,6 +2624,12 @@ function FEFOPickListTab() {
     }
     return filtered;
   }, [groupedAll, lotCountFilter, fsCategory, hasExpired, bucketFilter, daysMax, minValueNum, search, sortBy]);
+
+  // Reset page when filters change
+  useEffect(() => { setFefoPage(0); }, [grouped.length]);
+
+  const fefoTotalPages = Math.max(1, Math.ceil(grouped.length / FEFO_PAGE_SIZE));
+  const fefoPagedData = grouped.slice(fefoPage * FEFO_PAGE_SIZE, (fefoPage + 1) * FEFO_PAGE_SIZE);
 
   // ── Aging Matrix: bucket × stats (Items / Lots / Value) ──
   // IMPORTANT: derive from groupedAll so the matrix stays stable as the user
@@ -2988,7 +2996,44 @@ function FEFOPickListTab() {
         <div className="card text-center py-12" style={{ color: 'var(--text-muted)' }}>ไม่พบข้อมูล lot</div>
       ) : (
         <div className="space-y-3">
-          {grouped.map(g => (
+          {/* Pagination top */}
+          {fefoTotalPages > 1 && (
+            <div className="flex items-center justify-between px-1">
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {fefoPage * FEFO_PAGE_SIZE + 1}–{Math.min((fefoPage + 1) * FEFO_PAGE_SIZE, grouped.length)} จาก {formatNumber(grouped.length)} รายการ
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setFefoPage(0)}
+                  disabled={fefoPage === 0}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >«</button>
+                <button
+                  onClick={() => setFefoPage(p => Math.max(0, p - 1))}
+                  disabled={fefoPage === 0}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >‹ ก่อนหน้า</button>
+                <span className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--text)' }}>
+                  หน้า {fefoPage + 1} / {fefoTotalPages}
+                </span>
+                <button
+                  onClick={() => setFefoPage(p => Math.min(fefoTotalPages - 1, p + 1))}
+                  disabled={fefoPage >= fefoTotalPages - 1}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >ถัดไป ›</button>
+                <button
+                  onClick={() => setFefoPage(fefoTotalPages - 1)}
+                  disabled={fefoPage >= fefoTotalPages - 1}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >»</button>
+              </div>
+            </div>
+          )}
+          {fefoPagedData.map(g => (
             <div key={`${g.item_code}|${g.warehouse}`} className="card p-0 overflow-hidden">
               <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b" style={{ backgroundColor: 'var(--bg-alt)', borderColor: 'var(--border)' }}>
                 <span className="font-mono text-sm font-medium" style={{ color: 'var(--color-primary-light)' }}>{g.item_code}</span>
@@ -3045,6 +3090,43 @@ function FEFOPickListTab() {
               </table>
             </div>
           ))}
+          {/* Pagination bottom */}
+          {fefoTotalPages > 1 && (
+            <div className="flex items-center justify-between px-1 pt-2">
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {fefoPage * FEFO_PAGE_SIZE + 1}–{Math.min((fefoPage + 1) * FEFO_PAGE_SIZE, grouped.length)} จาก {formatNumber(grouped.length)} รายการ
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { setFefoPage(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={fefoPage === 0}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >«</button>
+                <button
+                  onClick={() => { setFefoPage(p => Math.max(0, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={fefoPage === 0}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >‹ ก่อนหน้า</button>
+                <span className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--text)' }}>
+                  หน้า {fefoPage + 1} / {fefoTotalPages}
+                </span>
+                <button
+                  onClick={() => { setFefoPage(p => Math.min(fefoTotalPages - 1, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={fefoPage >= fefoTotalPages - 1}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >ถัดไป ›</button>
+                <button
+                  onClick={() => { setFefoPage(fefoTotalPages - 1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={fefoPage >= fefoTotalPages - 1}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >»</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
