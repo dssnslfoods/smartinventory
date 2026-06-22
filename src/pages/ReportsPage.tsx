@@ -2677,7 +2677,8 @@ function FEFOPickListTab() {
 
   // ── KPI Summary ──
   const kpi = useMemo(() => {
-    const totalItems = grouped.length;
+    const distinctItems = new Set(grouped.map(g => g.item_code)).size;
+    const totalLines = grouped.length;
     const totalLots = grouped.reduce((s, g) => s + g.lots.length, 0);
     const totalValue = grouped.reduce((s, g) => s + g.total_value, 0);
     let urgentLots = 0, urgentValue = 0, expiredLots = 0, expiredValue = 0;
@@ -2691,7 +2692,7 @@ function FEFOPickListTab() {
         else if (d <= 30) { urgentLots++; urgentValue += Number(l.amount); }
       }
     }
-    return { totalItems, totalLots, totalValue, urgentLots, urgentValue, expiredLots, expiredValue, multiLotItems };
+    return { distinctItems, totalLines, totalLots, totalValue, urgentLots, urgentValue, expiredLots, expiredValue, multiLotItems };
   }, [grouped]);
 
   const handleExport = () => {
@@ -2748,8 +2749,12 @@ function FEFOPickListTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Items</p>
-          <p className="text-xl font-bold tabular-nums">{formatNumber(kpi.totalItems)}</p>
-          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{kpi.multiLotItems} ที่มีหลาย lot</p>
+          <p className="text-xl font-bold tabular-nums">{formatNumber(kpi.distinctItems)}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            {kpi.totalLines > kpi.distinctItems
+              ? `${formatNumber(kpi.totalLines)} บรรทัด · ${kpi.multiLotItems} มีหลาย lot`
+              : `${kpi.multiLotItems} ที่มีหลาย lot`}
+          </p>
         </div>
         <div className="card">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Lots</p>
