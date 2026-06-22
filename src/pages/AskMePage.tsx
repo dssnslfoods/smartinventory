@@ -58,15 +58,64 @@ function renderMarkdown(src: string): React.ReactNode[] {
   });
 }
 
-const STARTER_QUESTIONS = [
-  // วิเคราะห์เชิงลึก
-  'ทำไม Dead Stock ของเราถึงสูงผิดปกติ?',
-  'ถ้าลด Dead Stock 50% จะประหยัดเท่าไหร่/ปี?',
-  'กลุ่มสินค้าไหนมีปัญหามากที่สุด? เปรียบเทียบ FRM vs FFG ให้หน่อย',
-  'SKU ตัวไหนควรเลิกขายก่อน?',
-  // คำถามทั่วไป + วิเคราะห์
-  'Inventory Turnover เราเทียบกับมาตรฐานยังไง? ดี/แย่?',
-  'Top 3 ความเสี่ยงสำคัญในสต็อกตอนนี้',
+const FAQ_CATEGORIES: { label: string; icon: string; questions: string[] }[] = [
+  {
+    label: 'ภาพรวมสต็อก',
+    icon: '📊',
+    questions: [
+      'สรุปสุขภาพสต็อกของเราตอนนี้เป็นยังไง?',
+      'Working Capital ตอนนี้เท่าไหร่? มากไป/น้อยไปไหม?',
+      'ค่าใช้จ่ายในการถือครองสต็อก (Carrying Cost) ต่อปีเท่าไหร่?',
+      'แนวโน้มสต็อก 6 เดือนล่าสุดเป็นยังไง? ดีขึ้นหรือแย่ลง?',
+    ],
+  },
+  {
+    label: 'Dead Stock & Slow Moving',
+    icon: '🚨',
+    questions: [
+      'ทำไม Dead Stock ของเราถึงสูงผิดปกติ?',
+      'ถ้าลด Dead Stock 50% จะประหยัดเท่าไหร่/ปี?',
+      'SKU ตัวไหนควรเลิกขายก่อน? เรียงตามมูลค่า',
+      'Dead Stock กับ Slow Moving ต่างกันยังไง? เรามีอย่างละเท่าไหร่?',
+    ],
+  },
+  {
+    label: 'Inventory Turnover',
+    icon: '🔄',
+    questions: [
+      'Inventory Turnover เราเทียบกับมาตรฐานยังไง? ดี/แย่?',
+      'DIO (Days Inventory Outstanding) ของเราดีไหม? ควรเป็นเท่าไหร่?',
+      'กลุ่มสินค้าไหนมี Turnover ต่ำที่สุด? ควรจัดการยังไง?',
+    ],
+  },
+  {
+    label: 'สินค้าหมดอายุ',
+    icon: '⏰',
+    questions: [
+      'มีสินค้าหมดอายุ (expired) แล้วเท่าไหร่? มูลค่ารวมเท่าไหร่?',
+      'สินค้าตัวไหนใกล้หมดอายุภายใน 30 วัน?',
+      'สรุป Lot Aging ทั้งหมด แต่ละช่วงมีกี่ล็อต มูลค่าเท่าไหร่?',
+    ],
+  },
+  {
+    label: 'ต้นทุน & มูลค่า',
+    icon: '💰',
+    questions: [
+      'ผลต่างระหว่าง Moving Avg กับ Std Cost เป็นยังไง? น่าเป็นห่วงไหม?',
+      'กลุ่มสินค้าไหนมีมูลค่าสูงสุด? สัดส่วนเป็นอย่างไร?',
+      'COGS 12 เดือนที่ผ่านมาเท่าไหร่? เทียบกับมูลค่าสต็อก',
+    ],
+  },
+  {
+    label: 'คำแนะนำ',
+    icon: '💡',
+    questions: [
+      'Top 3 ความเสี่ยงสำคัญในสต็อกตอนนี้',
+      'แนะนำ Action Plan สำหรับเดือนนี้',
+      'กลุ่มสินค้าไหนมีปัญหามากที่สุด? เปรียบเทียบ FRM vs FFG',
+      'ควรปรับปรุงอะไรก่อนเพื่อลดต้นทุนสต็อก?',
+    ],
+  },
 ];
 
 export function AskMePage() {
@@ -280,18 +329,27 @@ export function AskMePage() {
                 ผมรู้จักระบบ Smart Inventory ทุกซอกทุกมุม + เห็นตัวเลข KPI ปัจจุบันของคุณด้วย<br/>
                 ถามได้ทั้งคำถามทั่วไป และคำถามเชิงวิเคราะห์ลึก
               </p>
-              <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>ตัวอย่างคำถาม:</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
-                {STARTER_QUESTIONS.map(q => (
-                  <button
-                    key={q}
-                    onClick={() => send(q)}
-                    disabled={loading}
-                    className="text-left px-3 py-2 rounded-lg border text-xs transition-colors hover:bg-[var(--bg-alt)]"
-                    style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-                  >
-                    💬 {q}
-                  </button>
+              <p className="text-[11px] font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>คลิกเลือกคำถามที่สนใจ:</p>
+              <div className="w-full max-w-3xl space-y-3 text-left">
+                {FAQ_CATEGORIES.map(cat => (
+                  <div key={cat.label}>
+                    <p className="text-[11px] font-bold mb-1.5 flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                      <span>{cat.icon}</span> {cat.label}
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                      {cat.questions.map(q => (
+                        <button
+                          key={q}
+                          onClick={() => send(q)}
+                          disabled={loading}
+                          className="text-left px-3 py-2 rounded-lg border text-xs transition-colors hover:bg-[var(--bg-alt)]"
+                          style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
