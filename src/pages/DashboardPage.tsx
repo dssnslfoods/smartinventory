@@ -472,7 +472,7 @@ export function DashboardPage() {
             </CalcBlock>
             <p className="text-[10px] mt-2 italic" style={{ color: 'var(--text-muted)' }}>
               <strong>COGS</strong> = Σ ABS(amount) WHERE direction='Out' (Delivery+Issue+Return) ·
-              ตรงตามที่บัญชีใช้ (ไม่นับ Transfers ระหว่างคลัง · ไม่นับ Cost adjustments)
+              ตรงตามที่บัญชีใช้ (ไม่นับ Cost adjustments)
             </p>
             <p className="mt-2 mb-1">
               <strong>Window:</strong> {financialKpi.monthsCounted} เดือนล่าสุดที่มีข้อมูล
@@ -598,20 +598,19 @@ export function DashboardPage() {
                   <tr><td className="py-1">นับเป็น</td><td className="text-center">SKU (รหัส)</td><td className="text-center">บรรทัด (สินค้า × คลัง)</td></tr>
                   <tr><td className="py-1">มี IN ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">❌ ไม่นับ</td></tr>
                   <tr><td className="py-1">มี OUT ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">✅ นับ</td></tr>
-                  <tr><td className="py-1">มี Transfer ใน 90 วัน</td><td className="text-center">✅ นับ</td><td className="text-center">❌ ไม่นับ</td></tr>
                 </tbody>
               </table>
               <p className="mt-2 mb-0.5">
-                <strong>Active</strong> = ขยับอะไรก็นับ · <strong>Normal</strong> = ต้องมี OUT จริง
+                <strong>Active</strong> = มี IN หรือ OUT ก็นับ · <strong>Normal</strong> = ต้องมี OUT จริง
               </p>
-              <p>→ <strong>ส่วนต่าง = SKU ที่รับเข้า/โอนแต่ยังไม่ได้ขายออก</strong> (warning signal — อาจกลายเป็น Slow/Dead ถ้ายังไม่ขายอีก 90 วัน)</p>
+              <p>→ <strong>ส่วนต่าง = SKU ที่รับเข้าแต่ยังไม่ได้ขายออก</strong> (warning signal — อาจกลายเป็น Slow/Dead ถ้ายังไม่ขายอีก 90 วัน)</p>
             </div>
             {(() => {
               const active = kpi?.activeItems ?? 0;
               const total  = kpi?.totalItems  ?? 0;
               if (total === 0) {
                 return <Insight tone="info">
-                  Active SKU = SKU ที่มีธุรกรรม In/Out/Transfer ภายใน 90 วันที่ผ่านมา
+                  Active SKU = SKU ที่มีธุรกรรม In/Out ภายใน 90 วันที่ผ่านมา
                 </Insight>;
               }
               const inactive = Math.max(0, total - active);
@@ -810,11 +809,10 @@ export function DashboardPage() {
                     <tr><td className="py-1">นับเป็น</td><td className="text-center">SKU (รหัส)</td><td className="text-center">บรรทัด (สินค้า × คลัง)</td></tr>
                     <tr><td className="py-1">นับ IN</td><td className="text-center">✅</td><td className="text-center">❌</td></tr>
                     <tr><td className="py-1">นับ OUT</td><td className="text-center">✅</td><td className="text-center">✅</td></tr>
-                    <tr><td className="py-1">นับ Transfer</td><td className="text-center">✅</td><td className="text-center">❌</td></tr>
                   </tbody>
                 </table>
                 <p className="mt-2 mb-0.5">
-                  → <strong>Active</strong> ใจกว้าง: ขยับอะไรก็นับ · <strong>Normal</strong> เคร่งกว่า: ต้องมีการขายออกจริง
+                  → <strong>Active</strong> มี IN หรือ OUT ก็นับ · <strong>Normal</strong> เคร่งกว่า: ต้องมีการขายออกจริง
                 </p>
               </div>
             </InfoTooltip>
