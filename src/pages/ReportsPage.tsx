@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Target, RefreshCw, Download, Filter, Clock, Layers, Search, X,
-  TrendingUp, TrendingDown, Minus, FolderTree,
+  TrendingUp, TrendingDown, Minus, FolderTree, ChevronDown,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -3626,6 +3626,7 @@ type GroupRow = {
 function GroupAnalysisTab() {
   const [monthsBack, setMonthsBack] = useState<6 | 12 | 24>(12);
   const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'b' | 'c'>('out');
+  const [sortOpen, setSortOpen]     = useState(false);
   const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_b' | 'has_c'>('all');
 
   const { data: snap }                                       = useLatestLotSnapshot();
@@ -3861,15 +3862,42 @@ function GroupAnalysisTab() {
             ))}
           </div>
 
-          <select className="select" value={sortKey} onChange={e => setSortKey(e.target.value as typeof sortKey)}>
-            <option value="out">เรียง: Out (มาก→น้อย)</option>
-            <option value="in">เรียง: In (มาก→น้อย)</option>
-            <option value="stock">เรียง: Stock Value</option>
-            <option value="turnover">เรียง: Turnover (เร็ว→ช้า)</option>
-            <option value="a">เรียง: Class A</option>
-            <option value="b">เรียง: Class B</option>
-            <option value="c">เรียง: Class C</option>
-          </select>
+          <div className="relative">
+            <button
+              className="select flex items-center gap-2"
+              onClick={() => setSortOpen(o => !o)}
+              onBlur={() => setTimeout(() => setSortOpen(false), 150)}
+            >
+              {({ out: 'เรียง: Out (มาก→น้อย)', in: 'เรียง: In (มาก→น้อย)', stock: 'เรียง: Stock Value', turnover: 'เรียง: Turnover (เร็ว→ช้า)', a: 'เรียง: Class A', b: 'เรียง: Class B', c: 'เรียง: Class C' } as const)[sortKey]}
+              <ChevronDown size={14} />
+            </button>
+            {sortOpen && (
+              <div className="absolute top-full left-0 mt-1 min-w-[220px] rounded-lg border shadow-lg z-50" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+                {([
+                  { key: 'out', label: 'เรียง: Out (มาก→น้อย)' },
+                  { key: 'in', label: 'เรียง: In (มาก→น้อย)' },
+                  { key: 'stock', label: 'เรียง: Stock Value' },
+                  { key: 'turnover', label: 'เรียง: Turnover (เร็ว→ช้า)' },
+                  { key: 'a', label: 'เรียง: Class A' },
+                  { key: 'b', label: 'เรียง: Class B' },
+                  { key: 'c', label: 'เรียง: Class C' },
+                ] as const).map(o => (
+                  <button
+                    key={o.key}
+                    className="w-full text-left px-4 py-2 text-sm hover:opacity-80 transition-colors"
+                    style={{
+                      color: sortKey === o.key ? 'var(--color-primary)' : 'var(--text)',
+                      fontWeight: sortKey === o.key ? 600 : 400,
+                      backgroundColor: sortKey === o.key ? 'rgba(46,117,182,0.08)' : 'transparent',
+                    }}
+                    onMouseDown={e => { e.preventDefault(); setSortKey(o.key); setSortOpen(false); }}
+                  >
+                    {sortKey === o.key && '✓ '}{o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button onClick={handleExport} className="btn btn-secondary ml-auto" disabled={filtered.length === 0}>
             <Download size={16} /> Export Excel
