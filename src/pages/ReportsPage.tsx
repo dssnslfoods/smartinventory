@@ -3625,7 +3625,7 @@ type GroupRow = {
 
 function GroupAnalysisTab() {
   const [monthsBack, setMonthsBack] = useState<6 | 12 | 24>(12);
-  const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'c'>('out');
+  const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'b' | 'c'>('out');
   const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_b' | 'has_c'>('all');
 
   const { data: snap }                                       = useLatestLotSnapshot();
@@ -3736,6 +3736,7 @@ function GroupAnalysisTab() {
         case 'stock':    return b.stock_value - a.stock_value;
         case 'turnover': return b.turnover_ratio - a.turnover_ratio;
         case 'a':        return b.lots_a - a.lots_a;
+        case 'b':        return b.lots_b - a.lots_b;
         case 'c':        return b.lots_c - a.lots_c;
       }
     });
@@ -3865,6 +3866,7 @@ function GroupAnalysisTab() {
             <option value="stock">เรียง: Stock Value</option>
             <option value="turnover">เรียง: Turnover (เร็ว→ช้า)</option>
             <option value="a">เรียง: Class A</option>
+            <option value="b">เรียง: Class B</option>
             <option value="c">เรียง: Class C</option>
           </select>
 
