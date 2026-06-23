@@ -692,6 +692,11 @@ export function DashboardPage() {
               <CalcLine label="Slow stock value"  value={`฿${formatNumber(movementHealth.values.slow_moving, 0)}`} muted />
             </CalcBlock>
             <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>มาตรฐาน Dead Stock ควร &lt; 5%</p>
+            <div className="mt-2 p-2 rounded text-[10px]" style={{ backgroundColor: 'rgba(30,64,175,0.06)', color: 'var(--text-muted)' }}>
+              <strong style={{ color: 'var(--text)' }}>⚠️ หน้านี้ vs หน้า Cost &amp; Valuation:</strong><br/>
+              หน้านี้คิด % จาก <strong>จำนวนบรรทัด</strong> (Dead lines ÷ Total lines)<br/>
+              หน้า Cost คิด % จาก <strong>มูลค่า</strong> (Dead value ÷ Inventory value) — จะสูงกว่าถ้า Dead Stock เป็นของแพง
+            </div>
             {(() => {
               const deadPct      = movementHealth.deadPct;
               const deadValPct   = movementHealth.deadValuePct;
