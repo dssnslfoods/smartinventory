@@ -3626,7 +3626,7 @@ type GroupRow = {
 function GroupAnalysisTab() {
   const [monthsBack, setMonthsBack] = useState<6 | 12 | 24>(12);
   const [sortKey, setSortKey]       = useState<'out' | 'in' | 'stock' | 'turnover' | 'a' | 'c'>('out');
-  const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_c'>('all');
+  const [showOnly, setShowOnly]     = useState<'all' | 'has_a' | 'has_b' | 'has_c'>('all');
 
   const { data: snap }                                       = useLatestLotSnapshot();
   const { data: lotResult, isLoading: lotLoading }           = useLotDetail({
@@ -3727,6 +3727,7 @@ function GroupAnalysisTab() {
   const filtered = useMemo(() => {
     let rows = groupRows;
     if (showOnly === 'has_a')      rows = rows.filter(r => r.lots_a > 0);
+    else if (showOnly === 'has_b') rows = rows.filter(r => r.lots_b > 0);
     else if (showOnly === 'has_c') rows = rows.filter(r => r.lots_c > 0);
     return [...rows].sort((a, b) => {
       switch (sortKey) {
@@ -3841,6 +3842,7 @@ function GroupAnalysisTab() {
             {([
               { key: 'all',   label: 'ทั้งหมด' },
               { key: 'has_a', label: 'มี Class A' },
+              { key: 'has_b', label: 'มี Class B' },
               { key: 'has_c', label: 'มี Class C' },
             ] as const).map(o => (
               <button
