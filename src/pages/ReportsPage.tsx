@@ -3738,6 +3738,7 @@ function GroupAnalysisTab() {
         case 'a':        return b.lots_a - a.lots_a;
         case 'b':        return b.lots_b - a.lots_b;
         case 'c':        return b.lots_c - a.lots_c;
+        default:         return 0;
       }
     });
   }, [groupRows, sortKey, showOnly]);
