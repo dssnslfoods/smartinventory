@@ -870,6 +870,25 @@ export function useMonthlySummary(monthsBack: number = 36) {
   });
 }
 
+/** Per-item monthly totals aggregated from inventory_transactions. */
+export function useItemMonthlyTotal(itemCode: string | null, monthsBack: number = 36) {
+  return useQuery({
+    queryKey: ['itemMonthlyTotal', itemCode, monthsBack],
+    enabled: !!itemCode,
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - monthsBack);
+      cutoff.setDate(1);
+      const cutoffStr = cutoff.toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .rpc('get_item_monthly_total', { p_item_code: itemCode!, p_cutoff: cutoffStr });
+      if (error) throw error;
+      return (data ?? []) as MonthlyTotalRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 /** Whole-business monthly totals (no group breakdown). */
 export function useMonthlyTotal(monthsBack: number = 36) {
   return useQuery({
