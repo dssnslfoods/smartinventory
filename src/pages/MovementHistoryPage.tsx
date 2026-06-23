@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { HelpSection, HelpLegend } from '@/components/HelpButton';
 import {
@@ -9,7 +9,7 @@ import {
   ComposedChart, Area, Line, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { useTransactions, useMovementMonthly, useMonthlyTotal, useMonthlySummary } from '@/hooks/useSupabaseQuery';
+import { useTransactions, useMovementMonthly, useMonthlyTotal, useMonthlySummary, useItemMonthlyTotal } from '@/hooks/useSupabaseQuery';
 import { supabase } from '@/lib/supabase';
 import { formatNumber, formatCurrency, formatDate, formatCompact } from '@/utils/format';
 import { WAREHOUSES, ITEM_GROUPS, TRANS_TYPES } from '@/types/database';
@@ -385,8 +385,68 @@ function WaterfallTab() {
   const [fromMonth, setFromMonth]     = useState<string>(defaultFrom);   // "YYYY-MM"
   const [toMonth, setToMonth]         = useState<string>(defaultTo);
 
+  // ── Item search ────────────────────────────────────────────────────────
+  const [selectedItem, setSelectedItem] = useState<{ item_code: string; itemname: string } | null>(null);
+  const [itemSearch, setItemSearch]     = useState('');
+  const [itemDropOpen, setItemDropOpen] = useState(false);
+  const [itemResults, setItemResults]   = useState<{ item_code: string; itemname: string }[]>([]);
+  const [itemSearching, setItemSearching] = useState(false);
+  const itemDropRef = useRef<HTMLDivElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const doItemSearch = useCallback(async (q: string) => {
+    if (q.length < 2) { setItemResults([]); return; }
+    setItemSearching(true);
+    try {
+      const { data } = await supabase
+        .from('items')
+        .select('item_code, itemname')
+        .or(`item_code.ilike.%${q}%,itemname.ilike.%${q}%`)
+        .order('item_code')
+        .limit(15);
+      setItemResults(data ?? []);
+    } finally {
+      setItemSearching(false);
+    }
+  }, []);
+
+  const handleItemSearchChange = (val: string) => {
+    setItemSearch(val);
+    setItemDropOpen(true);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => doItemSearch(val), 300);
+  };
+
+  const pickItem = (item: { item_code: string; itemname: string }) => {
+    setSelectedItem(item);
+    setItemSearch('');
+    setItemDropOpen(false);
+    setItemResults([]);
+  };
+
+  const clearItem = () => {
+    setSelectedItem(null);
+    setItemSearch('');
+    setItemResults([]);
+  };
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (itemDropRef.current && !itemDropRef.current.contains(e.target as Node)) {
+        setItemDropOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   // Pull a wide window (36 months) so the user can scrub the range freely
-  const { data: monthly = [], isLoading } = useMonthlyTotal(36);
+  const { data: monthly = [], isLoading: isLoadingAll } = useMonthlyTotal(36);
+  const { data: itemMonthly = [], isLoading: isLoadingItem } = useItemMonthlyTotal(
+    selectedItem?.item_code ?? null, 36
+  );
+  const isLoading = selectedItem ? isLoadingItem : isLoadingAll;
+  const activeMonthly = selectedItem ? itemMonthly : monthly;
 
   // Per-month-per-group breakdown — fetched alongside the totals so the
   // drill-down modal opens instantly when a bar is clicked.
@@ -404,8 +464,8 @@ function WaterfallTab() {
       const last = new Date(y, m, 0);  // last day of "toMonth"
       return `${y}-${String(m).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
     })();
-    return monthly.filter(m => m.month >= fromKey && m.month <= toKey);
-  }, [monthly, fromMonth, toMonth]);
+    return activeMonthly.filter(m => m.month >= fromKey && m.month <= toKey);
+  }, [activeMonthly, fromMonth, toMonth]);
 
   // ── Step 2: aggregate by granularity ─────────────────────────────────────
   const periods: AggPeriod[] = useMemo(() => {
@@ -579,6 +639,55 @@ function WaterfallTab() {
         <div className="flex flex-wrap items-center gap-4">
           <Filter size={18} style={{ color: 'var(--text-muted)' }} />
 
+          {/* Item search */}
+          <div className="relative" ref={itemDropRef}>
+            {selectedItem ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium"
+                   style={{ borderColor: 'var(--color-primary)', backgroundColor: 'rgba(30,64,175,0.06)', color: 'var(--text)' }}>
+                <Search size={13} style={{ color: 'var(--color-primary)' }} />
+                <span style={{ color: 'var(--color-primary-light)' }}>{selectedItem.item_code}</span>
+                <span className="max-w-[160px] truncate" style={{ color: 'var(--text-muted)' }}>{selectedItem.itemname}</span>
+                <button onClick={clearItem} className="ml-1 p-0.5 rounded hover:bg-[var(--bg-alt)]" style={{ color: 'var(--text-muted)' }}>
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="ค้นหา SKU / ชื่อสินค้า..."
+                  value={itemSearch}
+                  onChange={e => handleItemSearchChange(e.target.value)}
+                  onFocus={() => { if (itemResults.length > 0) setItemDropOpen(true); }}
+                  className="input pl-8 text-xs"
+                  style={{ width: 220 }}
+                />
+              </div>
+            )}
+            {itemDropOpen && (itemResults.length > 0 || itemSearching) && (
+              <div className="absolute z-30 top-full left-0 mt-1 w-[360px] max-h-64 overflow-y-auto rounded-lg border shadow-lg"
+                   style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+                {itemSearching && (
+                  <div className="px-3 py-2 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                    <Loader2 size={14} className="inline animate-spin mr-1" /> กำลังค้นหา...
+                  </div>
+                )}
+                {itemResults.map(item => (
+                  <button
+                    key={item.item_code}
+                    onClick={() => pickItem(item)}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--bg-alt)] flex items-center gap-2 border-b last:border-b-0"
+                    style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                  >
+                    <span className="font-mono font-medium shrink-0" style={{ color: 'var(--color-primary-light)' }}>{item.item_code}</span>
+                    <span className="truncate" style={{ color: 'var(--text-muted)' }}>{item.itemname}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Date range (month inputs) */}
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>ตั้งแต่</label>
@@ -677,6 +786,11 @@ function WaterfallTab() {
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
             Waterfall — {granularity === 'month' ? 'รายเดือน' : 'รายไตรมาส'} ({mode === 'split' ? 'In/Out แยก' : 'Net'})
+            {selectedItem && (
+              <span className="ml-2 text-sm font-normal" style={{ color: 'var(--color-primary-light)' }}>
+                · {selectedItem.item_code} {selectedItem.itemname}
+              </span>
+            )}
           </h3>
           <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-alt)', color: 'var(--text-muted)' }}>
             {periods.length} {granularity === 'month' ? 'เดือน' : 'ไตรมาส'}
