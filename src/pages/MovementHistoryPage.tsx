@@ -392,7 +392,7 @@ function WaterfallTab() {
   const [itemResults, setItemResults]   = useState<{ item_code: string; itemname: string }[]>([]);
   const [itemSearching, setItemSearching] = useState(false);
   const itemDropRef = useRef<HTMLDivElement>(null);
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const doItemSearch = useCallback(async (q: string) => {
     if (q.length < 2) { setItemResults([]); return; }
