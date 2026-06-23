@@ -764,6 +764,11 @@ function CostAnalyticsTab() {
               <li>🔴 &gt; 15% = ต้องเร่งระบาย</li>
             </ul>
             <p className="mt-2"><strong>Action:</strong> ดูที่หน้า Reports → Slow Moving</p>
+            <div className="mt-2 p-2 rounded text-[10px]" style={{ backgroundColor: 'rgba(30,64,175,0.06)', color: 'var(--text-muted)' }}>
+              <strong style={{ color: 'var(--text)' }}>⚠️ หน้านี้ vs หน้า Dashboard:</strong><br/>
+              หน้านี้คิด % จาก <strong>มูลค่า</strong> (Dead value ÷ Inventory value) — เน้นผลกระทบทางการเงิน<br/>
+              หน้า Dashboard คิด % จาก <strong>จำนวนบรรทัด</strong> (Dead lines ÷ Total lines) — จะต่ำกว่าถ้า Dead Stock เป็นของแพง
+            </div>
           </>}
         />
         <RatioCard
