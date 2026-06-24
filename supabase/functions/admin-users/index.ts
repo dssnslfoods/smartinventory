@@ -179,23 +179,25 @@ async function handleCreate(
 
   const newUserId = created.user.id;
 
+  // handle_new_user() trigger auto-creates a profile with role='staff'.
+  // Delete it first, then INSERT with correct data — avoids the BEFORE
+  // UPDATE trigger that blocks role changes for non-authenticated callers.
+  await admin.from('user_profiles').delete().eq('id', newUserId);
+
   const { error: profileErr } = await admin
     .from('user_profiles')
-    .upsert(
-      {
-        id:                    newUserId,
-        role,
-        company_id:            companyId,
-        full_name:             fullName,
-        email,
-        is_active:             true,
-        must_change_password:  true,
-      },
-      { onConflict: 'id' },
-    );
+    .insert({
+      id:                    newUserId,
+      role,
+      company_id:            companyId,
+      full_name:             fullName,
+      email,
+      is_active:             true,
+      must_change_password:  true,
+    });
 
   if (profileErr) {
-    console.error('[admin-users] profile upsert failed:', profileErr.message, profileErr);
+    console.error('[admin-users] profile insert failed:', profileErr.message, profileErr);
     await admin.auth.admin.deleteUser(newUserId).catch(() => {});
     return json({ error: profileErr.message }, 500);
   }
