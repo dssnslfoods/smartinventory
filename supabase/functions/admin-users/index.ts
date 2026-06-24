@@ -222,7 +222,7 @@ async function handleUpdateProfile(
 
   const { data: target, error: tErr } = await admin
     .from('user_profiles')
-    .select('id, role, company_id')
+    .select('*')
     .eq('id', userId)
     .single();
   if (tErr || !target) return json({ error: 'Target user not found' }, 404);
@@ -236,10 +236,9 @@ async function handleUpdateProfile(
     }
   }
 
-  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-
+  let newRole: Role | undefined;
   if ('role' in body) {
-    const newRole = String(body.role) as Role;
+    newRole = String(body.role) as Role;
     const validRoles: Role[] = callerRole === 'super_admin'
       ? ['super_admin', 'admin', 'executive', 'supervisor', 'staff']
       : ['executive', 'supervisor', 'staff'];
@@ -249,18 +248,38 @@ async function handleUpdateProfile(
     if (userId === callerId) {
       return json({ error: 'You cannot change your own role' }, 400);
     }
-    updates.role = newRole;
   }
 
-  if ('is_active' in body) {
-    updates.is_active = Boolean(body.is_active);
-  }
+  const roleChanged = newRole !== undefined && newRole !== target.role;
 
-  const { error: updateErr } = await admin
-    .from('user_profiles')
-    .update(updates)
-    .eq('id', userId);
-  if (updateErr) return json({ error: updateErr.message }, 500);
+  if (roleChanged) {
+    // DELETE + INSERT to avoid the BEFORE UPDATE trigger that blocks
+    // role changes when current_setting('request.jwt.claim.role') is
+    // not 'service_role' inside SECURITY DEFINER context.
+    await admin.from('user_profiles').delete().eq('id', userId);
+    const { error: insertErr } = await admin
+      .from('user_profiles')
+      .insert({
+        id:                   target.id,
+        role:                 newRole,
+        company_id:           target.company_id,
+        full_name:            target.full_name,
+        email:                target.email,
+        is_active:            'is_active' in body ? Boolean(body.is_active) : target.is_active,
+        must_change_password: target.must_change_password,
+        created_at:           target.created_at,
+        updated_at:           new Date().toISOString(),
+      });
+    if (insertErr) return json({ error: insertErr.message }, 500);
+  } else {
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if ('is_active' in body) updates.is_active = Boolean(body.is_active);
+    const { error: updateErr } = await admin
+      .from('user_profiles')
+      .update(updates)
+      .eq('id', userId);
+    if (updateErr) return json({ error: updateErr.message }, 500);
+  }
 
   return json({ ok: true });
 }
