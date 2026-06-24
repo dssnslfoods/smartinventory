@@ -99,6 +99,9 @@ Deno.serve(async (req: Request) => {
     if (action === 'bulk-reset-password') {
       return await handleBulkResetPassword(admin, callerRole, caller.company_id, body);
     }
+    if (action === 'update-profile') {
+      return await handleUpdateProfile(admin, callerRole, callerId, caller.company_id, body);
+    }
     if (action === 'delete') {
       return await handleDelete(admin, callerRole, callerId, caller.company_id, body);
     }
@@ -203,6 +206,63 @@ async function handleCreate(
   }
 
   return json({ ok: true, user_id: newUserId });
+}
+
+// ── Action: update profile (role / is_active) ───────────────────────────────
+
+async function handleUpdateProfile(
+  admin: ReturnType<typeof createClient>,
+  callerRole: Role,
+  callerId: string,
+  callerCompanyId: string | null,
+  body: Record<string, unknown>,
+) {
+  const userId = String(body.user_id ?? '');
+  if (!userId) return json({ error: 'user_id is required' }, 400);
+
+  const { data: target, error: tErr } = await admin
+    .from('user_profiles')
+    .select('id, role, company_id')
+    .eq('id', userId)
+    .single();
+  if (tErr || !target) return json({ error: 'Target user not found' }, 404);
+
+  if (callerRole === 'admin') {
+    if (target.company_id !== callerCompanyId) {
+      return json({ error: 'Admin may only update users in their own company' }, 403);
+    }
+    if (target.role === 'super_admin') {
+      return json({ error: 'Admin may not update super_admin users' }, 403);
+    }
+  }
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+  if ('role' in body) {
+    const newRole = String(body.role) as Role;
+    const validRoles: Role[] = callerRole === 'super_admin'
+      ? ['super_admin', 'admin', 'executive', 'supervisor', 'staff']
+      : ['executive', 'supervisor', 'staff'];
+    if (!validRoles.includes(newRole)) {
+      return json({ error: `Role '${newRole}' is not assignable by ${callerRole}` }, 403);
+    }
+    if (userId === callerId) {
+      return json({ error: 'You cannot change your own role' }, 400);
+    }
+    updates.role = newRole;
+  }
+
+  if ('is_active' in body) {
+    updates.is_active = Boolean(body.is_active);
+  }
+
+  const { error: updateErr } = await admin
+    .from('user_profiles')
+    .update(updates)
+    .eq('id', userId);
+  if (updateErr) return json({ error: updateErr.message }, 500);
+
+  return json({ ok: true });
 }
 
 // ── Action: reset password (single user) ────────────────────────────────────
