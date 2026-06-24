@@ -105,6 +105,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unexpected error';
+    console.error('[admin-users] unhandled error:', msg, e);
     return json({ error: msg }, 500);
   }
 });
@@ -194,6 +195,7 @@ async function handleCreate(
     );
 
   if (profileErr) {
+    console.error('[admin-users] profile upsert failed:', profileErr.message, profileErr);
     await admin.auth.admin.deleteUser(newUserId).catch(() => {});
     return json({ error: profileErr.message }, 500);
   }

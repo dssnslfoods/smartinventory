@@ -80,7 +80,19 @@ export async function invokeAdminUsers<T = { ok: true; user_id?: string }>(
     clearTimeout(timer);
 
     if (error) {
-      const detail = (data as { error?: string } | null)?.error;
+      let detail: string | undefined;
+      if (data && typeof data === 'object' && 'error' in data) {
+        detail = String((data as { error: string }).error);
+      }
+      if (!detail && error && typeof error === 'object' && 'context' in error) {
+        try {
+          const res = (error as { context: Response }).context;
+          if (res && typeof res.json === 'function') {
+            const body = await res.json();
+            detail = body?.error;
+          }
+        } catch { /* response already consumed */ }
+      }
       throw new Error(detail || error.message || 'Edge function call failed');
     }
     if (data && typeof data === 'object' && 'error' in data && data.error) {
