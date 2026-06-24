@@ -56,10 +56,12 @@ function UserRow({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await supabase
-        .from('user_profiles')
-        .update({ role, is_active: active })
-        .eq('id', user.id);
+      await invokeAdminUsers({
+        action: 'update-profile',
+        user_id: user.id,
+        role,
+        is_active: active,
+      });
       onSaved();
       setEditing(false);
     } finally {
