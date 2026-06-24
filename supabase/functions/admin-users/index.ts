@@ -6,7 +6,7 @@
 //   POST  /admin-users { action: "create", email, password, full_name, role, company_id }      (admin/super_admin)
 //   POST  /admin-users { action: "reset-password", user_id, password }                         (admin/super_admin)
 //   POST  /admin-users { action: "bulk-reset-password", user_ids: string[], password }         (admin/super_admin)
-//   POST  /admin-users { action: "delete", user_id }                                           (super_admin only)
+//   POST  /admin-users { action: "delete", user_id }                                           (admin/super_admin)
 //   POST  /admin-users { action: "self-change-password", password }                            (any authenticated user)
 //
 // On create / reset / bulk-reset, the target's must_change_password flag is
@@ -100,7 +100,7 @@ Deno.serve(async (req: Request) => {
       return await handleBulkResetPassword(admin, callerRole, caller.company_id, body);
     }
     if (action === 'delete') {
-      return await handleDelete(admin, callerRole, callerId, body);
+      return await handleDelete(admin, callerRole, callerId, caller.company_id, body);
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
@@ -299,22 +299,39 @@ async function handleBulkResetPassword(
   return json({ ok: failed.length === 0, success, failed_count: failed.length, failed });
 }
 
-// ── Action: delete user (super_admin only) ──────────────────────────────────
+// ── Action: delete user (admin + super_admin) ───────────────────────────────
 
 async function handleDelete(
   admin: ReturnType<typeof createClient>,
   callerRole: Role,
   callerId: string,
+  callerCompanyId: string | null,
   body: Record<string, unknown>,
 ) {
-  if (callerRole !== 'super_admin') {
-    return json({ error: 'Only super_admin may delete users' }, 403);
+  if (callerRole !== 'super_admin' && callerRole !== 'admin') {
+    return json({ error: 'Only admin or super_admin may delete users' }, 403);
   }
 
   const userId = String(body.user_id ?? '');
   if (!userId) return json({ error: 'user_id is required' }, 400);
   if (userId === callerId) {
     return json({ error: 'You cannot delete your own account' }, 400);
+  }
+
+  const { data: target, error: tErr } = await admin
+    .from('user_profiles')
+    .select('id, role, company_id')
+    .eq('id', userId)
+    .single();
+  if (tErr || !target) return json({ error: 'Target user not found' }, 404);
+
+  if (callerRole === 'admin') {
+    if (target.company_id !== callerCompanyId) {
+      return json({ error: 'Admin may only delete users in their own company' }, 403);
+    }
+    if (target.role === 'admin' || target.role === 'super_admin') {
+      return json({ error: 'Admin may not delete admin or super_admin users' }, 403);
+    }
   }
 
   const { error: profileErr } = await admin

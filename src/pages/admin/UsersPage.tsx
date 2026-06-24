@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, AlertTriangle, UserCheck, UserX, ShieldAlert } from 'lucide-react';
+import { Search, Loader2, Users, Save, X, UserPlus, KeyRound, AlertTriangle, UserCheck, UserX, ShieldAlert, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { supabase, invokeAdminUsers } from '@/lib/supabase';
 import { cn, formatDateTime } from '@/utils/format';
 import { useAuthStore } from '@/stores/authStore';
 import type { UserProfile, UserRole } from '@/types/auth';
@@ -44,6 +44,9 @@ function UserRow({
   const [active, setActive] = useState(user.is_active);
   const [saving, setSaving] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Role governance: admin may only assign basic roles (executive/supervisor/
   // staff). Creating/changing admin or super_admin is super_admin-only and is
@@ -178,6 +181,16 @@ function UserRow({
             >
               <KeyRound size={14} />
             </button>
+            {user.role !== 'admin' && user.role !== 'super_admin' && (
+              <button
+                onClick={() => { setConfirmDelete(true); setDeleteError(''); }}
+                className="p-1.5 rounded-lg border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+                style={{ borderColor: 'var(--border)', color: '#ef4444' }}
+                title="ลบผู้ใช้"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         )}
       </td>
@@ -189,6 +202,55 @@ function UserRow({
           targetEmail={user.email ?? ''}
           onClose={() => { setShowReset(false); onSaved(); }}
         />
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="rounded-xl shadow-2xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--bg-card)' }}>
+            <div className="px-6 py-4 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+              <Trash2 size={18} className="text-red-500" />
+              <h2 className="font-semibold" style={{ color: 'var(--text)' }}>ยืนยันการลบผู้ใช้</h2>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm" style={{ color: 'var(--text)' }}>
+                ต้องการลบ <strong>{user.email}</strong> ({user.full_name}) ออกจากระบบหรือไม่?
+              </p>
+              <p className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: '#dc2626' }}>
+                การลบผู้ใช้ไม่สามารถกู้คืนได้ — ข้อมูล login จะถูกลบถาวร
+              </p>
+              {deleteError && <p className="text-sm text-red-500">{deleteError}</p>}
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-4 py-2 rounded-lg text-sm border"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={async () => {
+                    setDeleting(true);
+                    setDeleteError('');
+                    try {
+                      await invokeAdminUsers({ action: 'delete', user_id: user.id });
+                      setConfirmDelete(false);
+                      onSaved();
+                    } catch (e: any) {
+                      setDeleteError(e.message ?? 'ลบผู้ใช้ไม่สำเร็จ');
+                    } finally {
+                      setDeleting(false);
+                    }
+                  }}
+                  disabled={deleting}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50"
+                >
+                  {deleting && <Loader2 size={14} className="animate-spin" />}
+                  {deleting ? 'กำลังลบ…' : 'ลบผู้ใช้'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </tr>
   );
@@ -328,7 +390,7 @@ export function UsersPage() {
             <ul className="list-disc ml-5 text-xs space-y-1">
               <li>Admin สร้าง super_admin ไม่ได้</li>
               <li>Admin reset password ของ super_admin ไม่ได้ (ทั้งเดี่ยวและกลุ่ม)</li>
-              <li>การลบผู้ใช้ทำได้เฉพาะ Super Admin</li>
+              <li>Admin ลบได้เฉพาะ Executive / Supervisor / Staff ในบริษัทตัวเอง</li>
             </ul>
           </HelpSection>
         </>)}
