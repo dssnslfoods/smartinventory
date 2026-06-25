@@ -69,15 +69,12 @@ export function isSupabaseConfigured(): boolean {
 export async function invokeAdminUsers<T = { ok: true; user_id?: string }>(
   payload: Record<string, unknown>,
 ): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
+  const TIMEOUT_MS = 30_000;
 
-  try {
+  const invoke = async () => {
     const { data, error } = await supabase.functions.invoke('admin-users', {
       body: payload,
-      signal: controller.signal as AbortSignal,
     });
-    clearTimeout(timer);
 
     if (error) {
       let detail: string | undefined;
@@ -99,11 +96,11 @@ export async function invokeAdminUsers<T = { ok: true; user_id?: string }>(
       throw new Error(String((data as { error: string }).error));
     }
     return data as T;
-  } catch (e: unknown) {
-    clearTimeout(timer);
-    if (e instanceof DOMException && e.name === 'AbortError') {
-      throw new Error('การเชื่อมต่อหมดเวลา (30 วินาที) — กรุณาลองใหม่อีกครั้ง');
-    }
-    throw e;
-  }
+  };
+
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('การเชื่อมต่อหมดเวลา (30 วินาที) — กรุณาลองใหม่อีกครั้ง')), TIMEOUT_MS),
+  );
+
+  return Promise.race([invoke(), timeout]);
 }
